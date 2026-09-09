@@ -11,8 +11,11 @@ correções unitárias (uma resposta por vez), não lote em massa.
 ## Decisão
 `CorrectionJob` como tabela Postgres com estado explícito (PENDENTE,
 PROCESSANDO, SUGERIDA, FALHA), reivindicado de forma idempotente por uma
-tarefa assíncrona in-process (`asyncio.create_task` disparada pelo próprio
-processo do Core). Sem RabbitMQ/Redis/Celery.
+tarefa assíncrona disparada via `BackgroundTasks` do próprio FastAPI (não
+`asyncio.create_task` solto — este pode ser cancelado quando o loop de uma
+requisição individual encerra; `BackgroundTasks` é a primitiva correta do
+framework, executada de forma confiável após a resposta ser enviada, e
+testável via TestClient). Sem RabbitMQ/Redis/Celery.
 
 ## Justificativa
 Evita infraestrutura adicional sem necessidade (diretriz explícita do
