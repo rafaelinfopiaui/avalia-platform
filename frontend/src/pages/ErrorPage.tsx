@@ -1,0 +1,2 @@
+import { Link, useRouteError } from 'react-router-dom'
+export function ErrorPage() { const error = useRouteError(); return <main className="error-page"><div className="process-icon process-icon--falha">!</div><h1>Algo não saiu como esperado</h1><p>{error instanceof Error ? error.message : 'Não foi possível abrir esta página.'}</p><Link className="button button--primary" to="/avaliacoes">Voltar às avaliações</Link></main> }
