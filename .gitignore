@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+.next/
+dist/
+build/
+.turbo/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# DB local
+*.sqlite3
+pgdata/
+infra/compose/pgdata/
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+logs/
+
+# Modelos baixados localmente (grandes, não versionar)
+models/
+*.gguf
+
+# Coverage
+htmlcov/
+.coverage
+coverage.xml

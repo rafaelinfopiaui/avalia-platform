@@ -1,0 +1,199 @@
+openapi: 3.0.3
+info:
+  title: AvalIA Core API — contrato mínimo da demonstração
+  version: "0.1.0-demo"
+  description: >
+    Subconjunto do contrato completo do PRD (seção 13), suficiente para a
+    jornada demonstrada. Envelope de erro segue o padrão do PRD (13.1).
+servers:
+  - url: http://localhost:8000/v1
+paths:
+  /auth/login:
+    post:
+      summary: Criar sessão
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200":
+          description: Login bem-sucedido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: { type: string }
+                  refresh_token: { type: string }
+                  token_type: { type: string, example: bearer }
+        "401":
+          description: Credenciais inválidas (mensagem não revela se e-mail existe)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /me:
+    get:
+      summary: Perfil do usuário autenticado
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+        "401": { description: Token ausente/expirado }
+
+  /assessments:
+    get:
+      summary: Listar avaliações do professor autenticado
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Criar avaliação em rascunho
+      security: [{ bearerAuth: [] }]
+      responses:
+        "201": { description: Criada }
+
+  /assessments/{id}/publish:
+    post:
+      summary: Publicar avaliação (valida questão, valor, referência, rubrica)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Publicada }
+        "422":
+          description: Validação falhou (ex. soma da rubrica != valor da questão)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /questions/{id}/rubric:
+    post:
+      summary: Criar/publicar versão de rubrica
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RubricInput' }
+      responses:
+        "201": { description: Rubrica criada }
+        "422":
+          description: RUBRIC_TOTAL_MISMATCH — soma dos critérios != valor da questão
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /answers:
+    post:
+      summary: Registrar resposta digitada de aluno fictício
+      security: [{ bearerAuth: [] }]
+      responses:
+        "201": { description: Resposta registrada }
+
+  /answers/{id}/corrections:
+    post:
+      summary: Solicitar correção assistida (cria CorrectionJob)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "202": { description: Job aceito (assíncrono) }
+        "503":
+          description: AI Engine indisponível — modo manual habilitado, não fabrica resultado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /correction-jobs/{id}:
+    get:
+      summary: Acompanhar estado do processamento
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Estado atual (PENDENTE|PROCESSANDO|SUGERIDA|FALHA)
+
+  /corrections/{id}/reviews:
+    post:
+      summary: Registrar decisão humana (aprovar/alterar)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HumanReviewInput' }
+      responses:
+        "200": { description: Revisão registrada, auditoria criada }
+        "403":
+          description: Sem permissão sobre este recurso
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /health:
+    get:
+      summary: Health check (Core + AI Engine)
+      responses:
+        "200": { description: OK, sem dados sensíveis }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [code, message, correlation_id]
+      properties:
+        code: { type: string, example: RUBRIC_TOTAL_MISMATCH }
+        message: { type: string, example: "A soma dos critérios deve ser 5,0." }
+        details: { type: object }
+        correlation_id: { type: string }
+        field_errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              reason: { type: string }
+    RubricInput:
+      type: object
+      required: [criteria]
+      properties:
+        criteria:
+          type: array
+          items:
+            type: object
+            required: [name, max_score]
+            properties:
+              name: { type: string }
+              description: { type: string }
+              max_score: { type: number, minimum: 0, exclusiveMinimum: true }
+    HumanReviewInput:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [APPROVE, ALTER] }
+        criteria_scores:
+          type: array
+          items:
+            type: object
+            properties:
+              criterion_id: { type: string }
+              score: { type: number, minimum: 0 }
+        justification:
+          type: string
+          description: Obrigatória quando decision=ALTER

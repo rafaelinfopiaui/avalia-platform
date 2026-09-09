@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://avalia.local/schemas/ai-engine-output.schema.json",
+  "title": "AvalIA AI Engine — saída estruturada de correção",
+  "type": "object",
+  "required": ["schema_version", "engine_mode", "criterion_scores", "overall_confidence", "confidence_method_version", "review_recommendation", "flags"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "1.0" },
+    "engine_mode": {
+      "type": "string",
+      "enum": ["real", "simulated"],
+      "description": "RN-017/pedido: nunca acionar modo simulado silenciosamente. O Core e a interface devem exibir este campo."
+    },
+    "model": { "type": "string", "description": "Nome/tag do modelo local usado (ex.: qwen2.5:7b-instruct-q4_K_M). Vazio se engine_mode=simulated." },
+    "criterion_scores": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["criterion_id", "score", "max_score", "reason", "evidence", "confidence"],
+        "properties": {
+          "criterion_id": { "type": "string" },
+          "score": { "type": "number", "minimum": 0 },
+          "max_score": { "type": "number", "exclusiveMinimum": 0 },
+          "reason": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "string", "description": "Trecho da resposta do aluno que sustenta a pontuação; pode ser vazio se não houver evidência textual direta." },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "overall_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "confidence_method_version": { "type": "string", "description": "Ex.: heuristic-v1 (ver ADR-008). Nunca apresentar como probabilidade calibrada." },
+    "review_recommendation": {
+      "type": "string",
+      "enum": ["REVIEW_OPTIONAL", "REVIEW_RECOMMENDED", "REVIEW_REQUIRED"]
+    },
+    "flags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["EMPTY_ANSWER", "OUT_OF_DOMAIN", "PROMPT_INJECTION_SUSPECTED", "LOW_COVERAGE", "SCHEMA_REPAIR_APPLIED", "SIMULATED_MODE"]
+      }
+    },
+    "duration_ms": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": false
+}
