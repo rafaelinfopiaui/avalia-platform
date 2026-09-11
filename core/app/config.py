@@ -15,7 +15,13 @@ class Settings:
         self.jwt_refresh_minutes = int(os.getenv("JWT_REFRESH_MINUTES", "1440"))
         self.ai_engine_url = os.getenv("AI_ENGINE_URL", "http://localhost:8001")
         self.cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
-        self.seed_professor_email = os.getenv("SEED_PROFESSOR_EMAIL", "professor@avalia.local")
+        # NOTA (bug corrigido): "professor@avalia.local" NUNCA funciona como e-mail de
+        # login porque o schema LoginRequest usa pydantic.EmailStr, cuja biblioteca
+        # email_validator rejeita domínios "special-use" da IANA (local/test/invalid/
+        # onion/arpa/localhost) por não serem globalmente roteáveis (RFC 6762). Toda
+        # tentativa de login com domínio .local retorna HTTP 422 antes de consultar o
+        # banco. Usar sempre um domínio válido (ex.: .example, RFC 2606) para a conta demo.
+        self.seed_professor_email = os.getenv("SEED_PROFESSOR_EMAIL", "professor.demo@avalia-platform.example")
         self.seed_professor_password = os.getenv("SEED_PROFESSOR_PASSWORD", "DemoAvalIA123!")
 
 

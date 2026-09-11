@@ -239,3 +239,73 @@ def test_reprocessing_preserves_previous_versions(client, professor_token, test_
     assert resp1.status_code == 202
     assert resp2.status_code == 202
     assert resp1.json()["job_id"] != resp2.json()["job_id"]
+
+
+def test_correction_creation_response_has_id_for_polling(client, professor_token):
+    """Regressão do bug 'Análise na fila... Não foi possível concluir a operação':
+    o frontend trata a resposta de POST /answers/{id}/corrections como um
+    CorrectionJob (mesmo formato de GET /correction-jobs/{id}, que usa a chave
+    "id") e navega para /correcoes/{job.id}. Quando este endpoint retornava
+    apenas "job_id" (sem "id"), o frontend navegava para "/correcoes/undefined"
+    e o polling seguinte recebia 404 mesmo com o job sendo processado com
+    sucesso no backend. Este teste trava que "id" e "job_id" estejam sempre
+    presentes e coincidam, e que GET /correction-jobs/{id} aceite exatamente
+    esse valor.
+    """
+    headers = {"Authorization": f"Bearer {professor_token}"}
+    assessment, question_id = _create_published_assessment(client, professor_token)
+    client.post(
+        f"/v1/questions/{question_id}/rubric",
+        json={"criteria": [{"name": "C1", "max_score": 6.0}]},
+        headers=headers,
+    )
+    client.post(f"/v1/assessments/{assessment['id']}/publish", headers=headers)
+    resp = client.post(
+        "/v1/answers",
+        json={"question_id": question_id, "student_name_fake": "Aluno Regressao", "text": "Texto."},
+        headers=headers,
+    )
+    answer_id = resp.json()["id"]
+
+    resp = client.post(f"/v1/answers/{answer_id}/corrections", headers=headers)
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert "id" in body and body["id"], "resposta de criação do job precisa expor 'id' (usado pelo frontend para navegar/pollar)"
+    assert body["id"] == body["job_id"]
+
+    # A rota de polling usada pelo frontend precisa aceitar exatamente esse id.
+    follow_up = client.get(f"/v1/correction-jobs/{body['id']}", headers=headers)
+    assert follow_up.status_code == 200, follow_up.text
+    assert follow_up.json()["id"] == body["id"]
+
+
+def test_seed_professor_email_is_a_valid_email_syntax():
+    """Regressão: SEED_PROFESSOR_EMAIL não pode usar domínio IANA "special-use"
+    (local/test/invalid/onion/arpa/localhost). LoginRequest usa pydantic.EmailStr,
+    que rejeita esses domínios com HTTP 422 antes de checar a senha -- travando o
+    login de demonstração mesmo com credenciais corretas no banco. Ver
+    core/app/config.py e docs/roteiro-demo.md.
+    """
+    from email_validator import validate_email
+    from app.config import get_settings
+
+    settings = get_settings()
+    # Não deve levantar EmailSyntaxError.
+    validate_email(settings.seed_professor_email, check_deliverability=False)
+
+
+def test_login_with_special_use_domain_is_rejected_with_422_not_401():
+    """Documenta o comportamento da causa raiz do bug de login: um e-mail com
+    domínio "special-use" (.local) falha na validação de esquema (422), e não na
+    autenticação (401). Serve de guarda para não reintroduzir domínios assim como
+    padrão de configuração sem perceber a diferença de status code.
+    """
+    from fastapi.testclient import TestClient
+    import app.main as main_module
+
+    with TestClient(main_module.app) as c:
+        resp = c.post(
+            "/v1/auth/login",
+            json={"email": "professor@avalia.local", "password": "qualquer"},
+        )
+    assert resp.status_code == 422

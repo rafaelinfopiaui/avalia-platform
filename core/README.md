@@ -41,7 +41,11 @@ Diferenças:
 ## Login de demonstração (dados fictícios)
 
 Após `python -m app.seed`:
-- E-mail: valor de `SEED_PROFESSOR_EMAIL` no `.env` (padrão `professor@avalia.local`)
+- E-mail: valor de `SEED_PROFESSOR_EMAIL` no `.env` (padrão
+  `professor.demo@avalia-platform.example`). **Atenção:** não use domínio `.local`
+  (nem `test`/`invalid`/`onion`/`arpa`/`localhost`) — o login usa `pydantic.EmailStr`,
+  que rejeita esses domínios "special-use" da IANA com HTTP 422 antes mesmo de checar
+  a senha (bug já identificado e documentado; ver `core/app/config.py`).
 - Senha: valor de `SEED_PROFESSOR_PASSWORD` no `.env` (padrão de exemplo,
   **não usar em produção**)
 

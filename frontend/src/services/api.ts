@@ -1,4 +1,4 @@
-import type { ApiErrorBody, Assessment, Answer, CorrectionJob, Criterion, User } from '../types'
+import type { ApiErrorBody, Assessment, Answer, CorrectionJob, Criterion, JobStatus, User } from '../types'
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000/v1').replace(/\/$/, '')
 const ACCESS_TOKEN_KEY = 'avalia_access_token'
@@ -44,7 +44,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       correlation_id: typeof detail.correlation_id === 'string' ? detail.correlation_id : undefined,
       field_errors: Array.isArray(detail.field_errors) ? detail.field_errors as ApiErrorBody['field_errors'] : undefined,
     }
-    if (response.status === 401) { clearSession(); window.dispatchEvent(new Event('avalia:unauthorized')) }
+    if (response.status === 401) {
+      // Evita disparar o evento repetidamente quando várias chamadas concorrentes
+      // recebem 401 ao mesmo tempo (ex.: token expira com a tela fazendo polling +
+      // outras chamadas em paralelo) — sem isso, múltiplos disparos de navegação
+      // quase simultâneos contribuíam para o SecurityError de
+      // history.replaceState() (>100 chamadas/10s) descrito no bug corrigido em
+      // AuthContext.tsx. Só notifica se havia sessão para limpar.
+      if (hasSession()) { clearSession(); window.dispatchEvent(new Event('avalia:unauthorized')) }
+    }
     throw new ApiError(response.status, body)
   }
   return data as T
@@ -66,6 +74,15 @@ export const updateAssessment = (id: string, payload: unknown) => request<Assess
 export const saveRubric = (questionId: string, criteria: Criterion[]) => request(`/questions/${questionId}/rubric`, { method: 'POST', body: JSON.stringify({ criteria: criteria.map(({ name, description, max_score }) => ({ name, description, max_score })) }) })
 export const publishAssessment = (id: string) => request<Assessment>(`/assessments/${id}/publish`, { method: 'POST' })
 export const createAnswer = (payload: { question_id: string; student_name: string; text: string }) => request<Answer>('/answers', { method: 'POST', body: JSON.stringify({ question_id: payload.question_id, student_name_fake: payload.student_name, text: payload.text }) })
-export const requestCorrection = (answerId: string) => request<CorrectionJob>(`/answers/${answerId}/corrections`, { method: 'POST' })
+export async function requestCorrection(answerId: string): Promise<Pick<CorrectionJob, 'id' | 'status'>> {
+  const result = await request<{ id?: string; job_id?: string; status: JobStatus }>(`/answers/${answerId}/corrections`, { method: 'POST' })
+  // Defesa adicional: normaliza "id" a partir de "job_id" caso o backend retorne
+  // apenas um dos dois campos (bug corrigido no Core, mas mantemos a normalização
+  // aqui para não repetir a navegação para "/correcoes/undefined" caso volte a
+  // divergir).
+  const id = result.id || result.job_id
+  if (!id) throw new ApiError(0, { message: 'O servidor não retornou um identificador para acompanhar a análise.' })
+  return { id, status: result.status }
+}
 export const getCorrectionJob = (id: string) => request<CorrectionJob>(`/correction-jobs/${id}`)
 export const submitReview = (correctionId: string, payload: { decision: 'APPROVE' | 'ALTER'; criteria_scores?: { criterion_id: string; score: number }[]; justification?: string }) => request(`/corrections/${correctionId}/reviews`, { method: 'POST', body: JSON.stringify(payload) })

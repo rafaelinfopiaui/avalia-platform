@@ -1,0 +1,542 @@
+RELATORIO CONSOLIDADO — AVALIA (PLATAFORMA)
+Projeto: /Users/rafaeloliveira/Projeto Estágio/avalia-plataform
+Gerado em: 2026-09-10 (madrugada, ~00:30 -03), a partir de leitura do
+codigo, git, banco local e execucoes reais realizadas nesta sessao e na
+sessao imediatamente anterior (mesma maquina, mesmo dia).
+Autor da coleta: assistente Claude Code (Hermes), sem alteracoes de
+servico/configuracao durante a producao deste relatorio.
+
+
+1. RESUMO EXECUTIVO
+====================
+
+O AvalIA e uma demonstracao experimental (nao MVP, nao autorizada para
+dados reais de alunos) de correcao assistida por IA local, com tres
+componentes: Core API (FastAPI/Postgres), AI Engine (FastAPI/Ollama) e
+Frontend (React/Vite). O codigo dos tres componentes ja existia,
+implementado e mergeado na branch main antes desta sessao (ver secao 7).
+
+O QUE FOI FEITO NESTA E NA SESSAO ANTERIOR (verificado agora):
+- Sessao anterior: subiu os tres servicos localmente (Postgres, Ollama,
+  Core, AI Engine, Frontend), confirmou health checks reais via HTTP e
+  identificou que o login de demonstracao documentado
+  (professor@avalia.local) retornava HTTP 422, nao 401 — ou seja,
+  falhava na validacao de formato do e-mail, antes mesmo de checar
+  senha.
+- Sessao atual: diagnosticou a causa raiz exata (biblioteca
+  email_validator, usada pelo pydantic.EmailStr, rejeita o dominio
+  ".local" por constar na lista IANA de dominios "special-use"),
+  confirmou que ja existia uma segunda conta de demonstracao funcional
+  no banco (professor.demo@avalia-platform.example), corrigiu a
+  configuracao padrao e a documentacao para apontar para essa conta, e
+  validou o fluxo de login completo via chamadas HTTP reais (nao apenas
+  testes automatizados).
+
+O QUE AINDA IMPEDE UMA DEMONSTRACAO "SEM RESSALVAS":
+- A correcao do login esta feita e verificada por API, mas AINDA NAO FOI
+  VALIDADA VISUALMENTE NO NAVEGADOR em nenhuma das duas sessoes — o
+  harness de browser automatizado nao conseguiu subir em nenhuma das
+  tentativas (ver secao 4). Alguem precisa abrir
+  http://localhost:5173 manualmente e confirmar o login pela tela antes
+  da demonstracao.
+- As correcoes de codigo (config.py, .env.example, README.md, testes)
+  estao apenas no working directory local, SEM COMMIT ainda — o usuario
+  pediu para revisar o diff antes de autorizar o commit, e essa
+  confirmacao nao chegou a tempo (timeout) nas duas tentativas feitas
+  nesta sessao. Ou seja: a correcao funciona no ambiente rodando agora,
+  mas nao esta persistida no historico do git.
+- Pendencia regulatoria (CNE/IA em avaliacoes) segue aberta e nao
+  investigada — bloqueante para qualquer uso com dados reais, nao para a
+  demo experimental com dados ficticios.
+
+
+2. FUNCIONALIDADES
+====================
+
+Implementadas no codigo (confirmado por leitura de codigo agora):
+
+- Autenticacao JWT (access + refresh), RBAC por role (professor/admin).
+  Testada por API real nesta sessao (login, /v1/me, bloqueio sem token,
+  bloqueio com senha errada) e por testes automatizados (pytest).
+- CRUD de avaliacao/questao/rubrica, com validacao de que a soma dos
+  criterios da rubrica bate com o valor da questao antes de publicar.
+  Testada por testes automatizados (test_core_flow.py) e, segundo o
+  relatorio de entrega anterior, por script E2E via curl (nao
+  reexecutado nesta sessao).
+  Verificado agora por API real: GET /v1/assessments com o usuario demo
+  retorna avaliacoes reais do banco (2 avaliacoes, incluindo a do seed).
+- Fluxo de correcao assistida: Core dispara BackgroundTask que chama o
+  AI Engine via HTTP; job passa por estados
+  PENDENTE -> PROCESSANDO -> SUGERIDA/FALHA. Nao reexecutado nesta
+  sessao (a sessao anterior relata testes automatizados cobrindo isso;
+  ver docs/relatorio-entrega.md, nao verificado de novo agora).
+- AI Engine: cascata reduzida (nivel 0 validacao rapida, nivel 1
+  regras/deteccao de prompt injection, nivel 3 LLM local via Ollama),
+  validacao de saida contra JSON Schema com uma tentativa de reparo,
+  modo simulado explicito (nunca confundido com real, campo
+  "engine_mode" sempre presente na resposta). Confirmado por leitura de
+  codigo e pelo health check real (engine_mode=real, ollama_status=up).
+- Revisao humana (aprovar/alterar com justificativa obrigatoria),
+  auditoria de eventos (AuditEvent). Nao reexecutado nesta sessao;
+  citado no relatorio de entrega anterior como validado por script E2E.
+- Frontend: SPA React com login, lista/edicao de avaliacoes, tela de
+  resposta, tela de revisao lado a lado. Rodando (HTTP 200 no dev
+  server) mas SEM validacao visual em navegador em nenhuma das sessoes
+  ate agora.
+
+O que NAO deve ser tratado como entregue (backlog do PRD, nao
+implementado):
+- Estrutura academica completa (organizacao/curso/turma/aluno real).
+- Importacao CSV, processamento em lote, segunda revisao configuravel,
+  API publica versionada, dashboards, exportacao.
+- Nivel 2 da cascata do AI Engine (embeddings/similaridade semantica).
+- Calibracao de confianca com dados reais (limiares do PRD usados sem
+  piloto).
+- Testes de carga/concorrencia, observabilidade avancada, CI/CD real
+  (ver secao 7 — nao ha workflow de CI configurado apesar de mencao em
+  relatorio anterior).
+
+
+3. ERRO DE LOGIN — DIAGNOSTICO E CORRECAO
+============================================
+
+SINTOMA:
+Ao tentar logar na interface (http://localhost:5173) com
+"professor@avalia.local" / senha de demonstracao documentada no
+README, a aplicacao exibia "Nao foi possivel concluir a operacao.
+Tente novamente." (mensagem generica de erro, nao a de credenciais
+invalidas).
+
+CAUSA COMPROVADA (nao suposta a partir da mensagem generica):
+1. Reproduzi a requisicao HTTP real (POST /v1/auth/login) contra o Core
+   rodando. Resultado: HTTP 422 (erro de validacao de esquema),
+   NAO 401 (erro de autenticacao).
+2. O schema de entrada do login (core/app/schemas.py, classe
+   LoginRequest) usa "pydantic.EmailStr". A biblioteca subjacente
+   "email_validator" mantem uma lista de dominios "special-use"
+   definidos pela IANA/RFCs (local, test, invalid, onion, arpa,
+   localhost) que sao sempre rejeitados por nao serem globalmente
+   roteaveis (RFC 6762 no caso de ".local").
+3. Isolei o validador em Python fora do servidor e confirmei: o e-mail
+   "professor@avalia.local" falha a validacao de sintaxe; um e-mail
+   equivalente com dominio ".example" passa. Ou seja, a rejeicao ocorre
+   ANTES de qualquer consulta ao banco — a senha nunca chega a ser
+   checada.
+4. O 422 nao carrega "detail.message" no formato que o frontend
+   reconhece, entao o frontend cai no texto de fallback generico —
+   explicando exatamente o sintoma relatado pelo usuario.
+5. Confirmado tambem que essa conta (professor@avalia.local) EXISTIA no
+   banco, ativa, com hash de senha batendo com a senha de demonstracao
+   — ou seja, a conta em si nunca foi o problema; o problema e a
+   validacao de formato do e-mail impedir a requisicao de chegar la.
+
+CONTA DE DEMONSTRACAO — SITUACAO:
+- NENHUMA conta foi criada do zero. Ja existia no banco uma segunda
+  conta de demonstracao, criada em sessao anterior a esta:
+  e-mail "professor.demo@avalia-platform.example", role professor,
+  ativa, dona de 2 avaliacoes (uma delas a avaliacao do seed original
+  "Estruturas de Dados — Avaliacao 1"). Essa conta ja era citada em
+  docs/roteiro-demo.md, mas o README/config.py principal ainda
+  apontavam para o e-mail quebrado ".local" — havia uma divergencia de
+  documentacao/configuracao, nao ausencia de conta.
+- Confirmei por checagem local (usando o mecanismo de hash da propria
+  aplicacao, sem expor o hash) que a senha de demonstracao documentada
+  bate com essa conta.
+- A conta antiga "professor@avalia.local" permanece intacta no banco,
+  sem alteracoes e sem remocao. Ela apenas deixou de ser a credencial
+  "oficial" default, porque seu dominio de e-mail e estruturalmente
+  incompativel com a validacao de esquema usada pelo backend.
+- Nenhuma validacao de seguranca (senha, JWT, RBAC) foi alterada ou
+  enfraquecida.
+
+E-MAIL DEMO CONFIRMADO:
+  professor.demo@avalia-platform.example
+
+SENHA: valor da variavel SEED_PROFESSOR_PASSWORD em core/.env (arquivo
+local, fora do git). Nao reproduzida neste relatorio. Consultar o
+arquivo diretamente no ambiente local para uso operacional.
+
+ARQUIVOS ALTERADOS (correcao, ainda sem commit — ver secao 7):
+- core/app/config.py — valor padrao de SEED_PROFESSOR_EMAIL trocado
+  para o e-mail de dominio valido, com comentario explicando a causa.
+- core/.env.example — mesmo ajuste, com comentario de alerta sobre
+  dominios "special-use".
+- core/.env (arquivo local, fora do git) — mesmo ajuste aplicado
+  diretamente, para o ambiente rodando agora refletir a correcao.
+- core/README.md — instrucao de login demo atualizada com aviso
+  explicito sobre o bug de dominio.
+- core/app/tests/test_core_flow.py — 2 testes de regressao novos:
+  (a) valida que o e-mail de seed configurado passa na validacao de
+  sintaxe; (b) documenta que um e-mail com dominio "special-use" retorna
+  422 (nao 401) no login, para nao reintroduzir o problema sem perceber.
+
+RESULTADO DA SUITE DE TESTES DO CORE APOS A CORRECAO:
+  10 passed (8 testes originais + 2 novos), 0 falhas — executado
+  agora, nesta sessao, com pytest real contra SQLite em memoria.
+
+
+4. VALIDACOES
+==============
+
+Legenda de metodo: [API] chamada HTTP real contra servidor rodando;
+[AUTO] teste automatizado (pytest); [NAV] navegador real; [IA] inferencia
+real via Ollama; [HIST] resultado registrado em sessao/relatorio
+anterior, nao reexecutado agora.
+
+Verificacoes ATUAIS (executadas nesta sessao, agora):
+
+- Health check Core (GET /v1/health) -> HTTP 200,
+  {"status":"ok","database":true,"ai_engine":true}. Metodo: [API].
+- Health check AI Engine (GET /v1/health) -> HTTP 200,
+  {"status":"healthy","engine_mode":"real","ollama_status":"up"}.
+  Metodo: [API].
+- Frontend dev server (GET /) -> HTTP 200. Metodo: [API] (apenas
+  resposta HTTP da pagina, SEM renderizacao nem interacao visual).
+- Login com e-mail antigo ".local" -> HTTP 422 (confirma a causa raiz).
+  Metodo: [API].
+- Login com conta demo corrigida (professor.demo@avalia-platform.example)
+  -> HTTP 200, token emitido. Metodo: [API].
+- Token da conta demo usado em rota protegida GET /v1/me -> HTTP 200,
+  retorna id/e-mail/role corretos. Metodo: [API].
+- Token da conta demo usado em GET /v1/assessments -> HTTP 200, retorna
+  avaliacoes reais do banco (nao mockadas). Metodo: [API].
+- Login com senha incorreta -> HTTP 401, corpo
+  {"code":"INVALID_CREDENTIALS"}. Metodo: [API].
+- Requisicao sem token a rota protegida (/v1/me e /v1/assessments) ->
+  HTTP 401 em ambas. Metodo: [API].
+- Suite de testes do Core (pytest, apos a correcao) -> 10/10 passando.
+  Metodo: [AUTO].
+- Suite de testes do AI Engine (pytest) -> 21/21 passando. Metodo:
+  [AUTO]. (Reexecutada agora para confirmar que segue passando; nenhuma
+  mudanca foi feita no AI Engine nesta sessao.)
+- Portas 8000/8001/5173/5432/11434 — processos donos confirmados
+  pertencerem a este projeto (cwd verificado via lsof). Metodo:
+  verificacao de sistema operacional, nao HTTP.
+
+Verificacoes HISTORICAS (relatadas em docs/relatorio-entrega.md, sessao
+anterior a estas duas, NAO reexecutadas agora):
+- Inferencia real ponta a ponta com qwen2.5:7b-instruct-q4_K_M: resposta
+  correta -> nota 6,00/6,00 em ~7,9s; resposta conceitualmente errada
+  (com palavras-chave em comum) -> nota 0,00/6,00 em ~4,8s. [HIST][IA].
+- Fluxo E2E completo via script curl (publicacao de rubrica valida,
+  correcao real solicitada e processada, revisao humana registrada com
+  reviewer_id, persistencia apos reiniciar Core e AI Engine). [HIST][API].
+- Build de producao do frontend (npm run build) limpo. [HIST].
+
+NAO EXECUTADO / BLOQUEADO (em ambas as sessoes ate agora):
+- Validacao visual em navegador do login e do restante do fluxo. O
+  harness de automacao de navegador (browser_exec) falhou ao tentar
+  subir em ambas as tentativas desta sessao ("browser-harness: daemon
+  default didn't come up") e, na sessao anterior de implementacao,
+  falhou por outro motivo ("DevToolsActivePort not found", conflito
+  com perfil Chrome do usuario). NENHUMA validacao visual foi feita —
+  isso nao deve ser confundido com "login funcionando na interface",
+  que permanece nao confirmado por observacao direta da tela.
+- Fluxo de correcao assistida e revisao humana NAO foram reexecutados
+  nesta sessao (dependem apenas do relato historico acima).
+
+
+5. SERVICOS E EXECUCAO LOCAL
+==============================
+
+STATUS NO MOMENTO DESTA COLETA (verificado agora, sem reiniciar nada):
+
+| Servico     | Endereco                        | Porta | Status agora |
+|-------------|----------------------------------|-------|---------------|
+| PostgreSQL  | localhost                        | 5432  | escutando (brew services) |
+| Ollama      | http://localhost:11434           | 11434 | escutando (brew services) |
+| Core API    | http://localhost:8000            | 8000  | HTTP 200 em /v1/health |
+| AI Engine   | http://localhost:8001            | 8001  | HTTP 200 em /v1/health |
+| Frontend    | http://localhost:5173            | 5173  | HTTP 200 em / |
+
+Endereco para abrir a aplicacao: http://localhost:5173
+
+COMANDOS REAIS PARA INICIAR (a partir da raiz do repo, macOS):
+
+  brew services start postgresql@16
+  brew services start ollama
+
+  cd core && source .venv/bin/activate
+  uvicorn app.main:app --reload --port 8000
+
+  cd ai-engine && source .venv/bin/activate
+  uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+
+  cd frontend && npm run dev
+
+COMO OS PROCESSOS SAO MANTIDOS ATIVOS NESTA SESSAO:
+Os tres processos (Core, AI Engine, Frontend) foram iniciados como
+processos em background gerenciados pela ferramenta de terminal do
+assistente (nao nohup/systemd), permanecendo ativos independentemente
+do fim da resposta do assistente, enquanto a maquina/daemon local
+estiver de pe. Eles NAO sao reiniciados automaticamente se a maquina
+reiniciar — nesse caso, os comandos acima devem ser executados de novo
+manualmente (Postgres e Ollama, por serem brew services, esses sim
+reiniciam sozinhos no login, se configurados como "started").
+
+COMO VERIFICAR SAUDE MANUALMENTE:
+  curl http://localhost:8000/v1/health
+  curl http://localhost:8001/v1/health
+  curl -I http://localhost:5173/
+
+ONDE FICAM OS LOGS:
+Os logs dos processos em background ficam no buffer de saida do
+processo gerenciado pela ferramenta do assistente (consultavel via a
+mesma ferramenta, por id de sessao de processo). Nao ha arquivo de log
+persistente em disco configurado por padrao pelos comandos acima
+(uvicorn/vite escrevem em stdout). Se for necessario persistir logs em
+arquivo entre reinicios da maquina, redirecionar manualmente a saida
+dos comandos acima para um arquivo (ex.: usando ">> arquivo.log 2>&1"
+ao rodar cada comando fora do gerenciador do assistente).
+
+COMO ENCERRAR:
+  Descobrir os PIDs escutando nas portas do projeto e encerrar:
+    lsof -tiTCP:5173,8000,8001 -sTCP:LISTEN | xargs kill
+  (Cada backend roda com --reload, que usa um processo "reloader" pai
+  mais um processo filho worker; encerrar o pai finaliza ambos.)
+  Para tambem parar Postgres/Ollama (normalmente nao necessario, pois
+  sao servicos compartilhados com outros usos da maquina):
+    brew services stop postgresql@16
+    brew services stop ollama
+
+
+6. IA LOCAL
+============
+
+- Runtime: Ollama (versao instalada nesta maquina: 0.33.3), servindo em
+  http://localhost:11434.
+- Modelo: qwen2.5:7b-instruct-q4_K_M (quantizacao Q4_K_M, ~4.7 GB em
+  disco, ja baixado e presente em ~/.ollama/models). Confirmado agora
+  via "ollama list".
+- Requisitos conhecidos (do README do ai-engine): Python 3.11+, Ollama
+  acessivel localmente; validado anteriormente em Apple M5 Pro/24GB
+  (ver docs/decisoes-pendencias.md, D-05) — hardware da squad ainda nao
+  revalidado.
+- Testes reais de inferencia: NAO reexecutados nesta sessao. Os numeros
+  abaixo sao os unicos existentes e vem de sessao anterior (HISTORICO,
+  nao remedido agora):
+    - Resposta correta -> nota 6,00/6,00, ~7,9s.
+    - Resposta conceitualmente errada (com palavras-chave em comum com
+      a referencia) -> nota 0,00/6,00, ~4,8s.
+  Esses dois pontos sao evidencia QUALITATIVA de que o motor nao
+  confunde similaridade textual com correcao conceitual — NAO
+  constituem metrica de qualidade/precisao medida estatisticamente
+  (nenhuma amostra, nenhuma taxa de acerto foi calculada; ver secao 5
+  do relatorio de entrega anterior, que e explicito sobre isso).
+- Modo simulado (AI_ENGINE_MODE=simulated): existe no codigo para
+  contingencia/teste, coberto pelos 21 testes automatizados do AI
+  Engine, mas NAO foi o modo usado nas evidencias de inferencia real
+  citadas acima nem no health check atual (engine_mode=real confirmado
+  agora). Toda resposta do AI Engine inclui o campo "engine_mode" para
+  que simulado nunca seja confundido com real.
+- Health check atual do AI Engine confirma Ollama acessivel
+  ("ollama_status":"up"), mas isso NAO equivale a rodar uma inferencia
+  completa — e apenas conectividade.
+
+
+7. GIT E GITHUB
+=================
+
+- Branch atual: main (checkout local).
+- Remoto: origin -> https://github.com/rafaelinfopiaui/avalia-platform.git
+  (mesma URL para fetch e push).
+- Visibilidade do repositorio (confirmada agora via GitHub API):
+  PRIVADO.
+- Branch local "main" esta em paridade exata com "origin/main" (0
+  commits a mais de cada lado) — ou seja, tudo que ja foi commitado
+  anteriormente ja esta publicado no GitHub.
+- Commits mais recentes ja publicados em origin/main incluem: merge das
+  tres frentes (Core/AI Engine/Frontend), fix de compatibilidade
+  bcrypt/passlib, e documentacao de roteiro de demo/relatorio de
+  entrega (ultimo commit publicado: "docs: roteiro de demonstracao e
+  relatorio final de entrega").
+- Branches de feature antigas ainda existem localmente (nao apagadas):
+  feature/ai-engine-local, feature/core-api, feature/frontend-app — ja
+  mergeadas em main.
+
+MUDANCAS DESTA SESSAO — STATUS: NAO COMMITADAS, APENAS LOCAIS.
+  Arquivos modificados no working directory (git status confirmado
+  agora):
+    modified: core/.env.example
+    modified: core/README.md
+    modified: core/app/config.py
+    modified: core/app/tests/test_core_flow.py
+  Nenhum desses arquivos foi adicionado ao stage nem commitado. O
+  usuario pediu para revisar o diff exato antes de autorizar o commit;
+  essa confirmacao teve timeout duas vezes nesta sessao. Regra vigente
+  documentada: timeout em pedido de confirmacao de commit/push NUNCA
+  deve ser tratado como aprovacao implicita. Portanto a correcao segue
+  sem commit e, consequentemente, sem push — nada desta correcao esta
+  publicado no GitHub ainda.
+
+CI/CD:
+- O diretorio .github/workflows existe mas esta VAZIO — nao ha nenhum
+  arquivo de workflow no repositorio, em nenhuma branch (confirmado
+  agora por busca no historico completo do git). Isso diverge do texto
+  do relatorio de entrega anterior, que menciona "workflow basico de
+  lint+testes, sem deploy" no backlog — essa mencao parece descrever um
+  estado planejado/generico do backlog, nao um arquivo de fato existente
+  neste repositorio. Recomenda-se tratar "CI configurado" como NAO
+  confirmado.
+- Protecao de branch: nao pode ser consultada via API (o repositorio
+  privado nesta conta/plano do GitHub nao habilita a funcionalidade de
+  protecao de branch sem upgrade — erro HTTP 403 "Upgrade to GitHub Pro
+  or make this repository public"). Status de protecao: DESCONHECIDO,
+  nao apenas "sem protecao".
+
+
+8. ALTERACOES NO COMPUTADOR
+==============================
+
+Feitas dentro do projeto (nao afetam o ambiente global alem do listado
+abaixo):
+- Criacao de core/.env e ai-engine/.env a partir dos respectivos
+  .env.example (arquivos locais, fora do git, sem segredos novos alem
+  dos valores de exemplo ja documentados no proprio repositorio).
+- Edicoes de codigo/documentacao (secao 3 e 7) ainda nao commitadas.
+
+Afetando o ambiente global da maquina (feito em sessao anterior a
+estas duas, mas relevante para o estado atual):
+- PostgreSQL 16 e Ollama instalados via Homebrew e registrados como
+  "brew services" (start automatico configurado) — servicos
+  persistentes, nao exclusivos deste projeto, continuam rodando mesmo
+  sem esta sessao ativa.
+- Download do modelo qwen2.5:7b-instruct-q4_K_M via "ollama pull"
+  (~4.7 GB em ~/.ollama/models) — persistente no disco do usuario, nao
+  removido.
+- Ambientes virtuais Python (.venv) criados dentro de core/ e
+  ai-engine/ (nao afetam o Python global do sistema).
+- node_modules instalado dentro de frontend/ (nao afeta pacotes node
+  globais).
+
+NADA foi desinstalado, reinstalado globalmente ou modificado fora da
+pasta do projeto e dos brew services citados, nesta sessao.
+
+
+9. PENDENCIAS PRIORIZADAS
+============================
+
+BLOQUEIOS PARA A DEMONSTRACAO DE SEXTA-FEIRA:
+- Validar visualmente no navegador que o login funciona na interface
+  com a conta professor.demo@avalia-platform.example — isso NUNCA foi
+  confirmado por observacao direta da tela em nenhuma sessao ate agora.
+- Decidir e efetivar o commit local das correcoes do bug de login
+  (aguardando revisao do diff pelo usuario) — sem isso, a correcao
+  existe apenas no ambiente rodando agora e se perde se os arquivos
+  forem revertidos ou o ambiente for recriado.
+- Revisar ao vivo, na tela, o restante do roteiro de demo
+  (docs/roteiro-demo.md): inserir resposta, solicitar analise da IA,
+  tela de revisao lado a lado, aprovar/alterar — nenhum desses passos
+  foi verificado visualmente ainda.
+
+CORRECOES IMPORTANTES PARA DESENVOLVIMENTO E COLABORACAO DA SQUAD:
+- Resolver a divergencia de harness de navegador automatizado nesta
+  maquina (bloqueia QA visual automatizada de forma repetida).
+- Adicionar de fato um workflow de CI (.github/workflows), ja que o
+  diretorio existe mas esta vazio.
+- Alinhar toda a documentacao (README raiz, core/README.md,
+  docs/roteiro-demo.md) para citar consistentemente a mesma conta de
+  demonstracao, evitando a divergencia que causou este bug.
+- Considerar adicionar validacao de dominio de e-mail com mensagem
+  clara no proprio schema (ex.: reject_special_use custom) para que
+  erros futuros de configuracao apareçam como erro de validacao
+  legivel, nao como "operacao nao pode ser concluida" generico no
+  frontend.
+
+REQUISITOS PARA FUTURA PRODUCAO (fora do escopo desta correcao):
+- Estrutura academica completa, importacao CSV, processamento em lote,
+  segunda revisao configuravel, API publica, dashboards — todo o
+  backlog listado em docs/backlog.md.
+- Calibracao de confianca com dados reais (D-07), nivel 2 da cascata do
+  AI Engine (embeddings), suite dourada de regressao para o modelo.
+- Ambiente de homologacao real, observabilidade, testes de carga.
+
+DECISOES DE PRODUTO, INTEGRACAO E ANALISE REGULATORIA AINDA ABERTAS:
+- Pendencia regulatoria CNE sobre IA em avaliacoes discursivas — ABERTA
+  e nao investigada (docs/pendencia-regulatoria.md). Bloqueante para
+  qualquer uso com dados reais de estudantes, nao para a demo.
+- Decisoes D-08 (retencao de dados/auditoria), D-10 (segunda revisao),
+  D-11 (governanca de dataset cientifico) e D-12 (modelo de implantacao
+  do primeiro piloto) seguem em aberto, conforme
+  docs/decisoes-pendencias.md.
+- Acesso da squad de 9 integrantes a este repositorio de produto real
+  ainda depende de decisao do Tech Leader (README.md, secao
+  "Governanca deste repositorio").
+
+
+10. PROXIMOS PASSOS
+======================
+
+1. Revisar o diff das correcoes do bug de login (core/app/config.py,
+   core/.env.example, core/README.md, core/app/tests/test_core_flow.py)
+   e autorizar explicitamente o commit local.
+   Concluido quando: commit local existir com esses 4 arquivos, git log
+   mostrando a mensagem de commit, sem push realizado ainda.
+
+2. Abrir http://localhost:5173 manualmente (ou resolver o harness de
+   navegador automatizado) e validar visualmente: tela de login,
+   autenticacao com professor.demo@avalia-platform.example, navegacao
+   ate a lista de avaliacoes.
+   Concluido quando: houver confirmacao textual ou print de que a tela
+   carregou e o login funcionou, nao apenas resposta HTTP 200 do dev
+   server.
+
+3. Executar visualmente (ou via API, se navegador continuar bloqueado)
+   o restante do roteiro de demo: inserir resposta, solicitar analise,
+   revisar sugestao, aprovar/alterar.
+   Concluido quando: cada etapa do roteiro (docs/roteiro-demo.md) tiver
+   evidencia de execucao real nesta maquina, nesta sessao ou proxima.
+
+4. Decidir se e quando fazer push das correcoes para origin/main (fora
+   do escopo desta tarefa; requer autorizacao explicita separada).
+   Concluido quando: usuario autorizar push e o comando for executado
+   com sucesso, confirmado por "git log" no remoto.
+
+5. Investigar e resolver por que .github/workflows esta vazio apesar de
+   documentacao mencionar CI — decidir se cria workflow real ou corrige
+   a documentacao para nao alegar CI inexistente.
+   Concluido quando: ou existir um arquivo de workflow funcional
+   commitado, ou a documentacao for corrigida para nao mencionar CI.
+
+
+11. EVIDENCIAS E LIMITACOES
+==============================
+
+Arquivos/documentos consultados para este relatorio:
+- README.md (raiz), core/README.md, ai-engine/README.md,
+  frontend/README.md.
+- docs/relatorio-entrega.md, docs/pendencia-regulatoria.md,
+  docs/decisoes-pendencias.md, docs/backlog.md, docs/roteiro-demo.md.
+- Codigo-fonte: core/app/main.py, core/app/schemas.py,
+  core/app/config.py, core/app/security.py, core/app/seed.py,
+  core/app/tests/conftest.py, core/app/tests/test_core_flow.py,
+  frontend/src/services/api.ts, frontend/src/pages/LoginPage.tsx.
+- Git: "git log", "git status", "git diff", "git branch -vv",
+  "git remote -v", "git rev-list" (paridade com origin), consultados
+  agora nesta sessao.
+- GitHub API (via gh CLI): visibilidade do repositorio (PRIVATE),
+  tentativa de checar protecao de branch (403, plano nao permite em
+  repositorio privado).
+- Execucoes reais realizadas AGORA: curl contra Core/AI Engine/Frontend
+  (health checks, login, rota protegida, senha errada, sem token),
+  pytest no Core (10 testes) e no AI Engine (21 testes), verificacao de
+  processos/portas via lsof.
+- Consultado o historico da conversa desta sessao (nao um arquivo
+  separado) para reconstruir a sequencia de diagnostico do bug de
+  login e a linha do tempo de inicializacao dos servicos.
+
+Nao foi possivel confirmar (limitacoes explicitas):
+- Renderizacao e funcionamento visual do frontend em navegador real —
+  o harness de automacao de navegador nao subiu nesta sessao
+  ("browser-harness: daemon default didn't come up"), repetido em duas
+  tentativas.
+- Reexecucao do fluxo completo de correcao assistida e revisao humana
+  nesta sessao (dependente apenas do relato da sessao de implementacao
+  anterior, nao verificado de novo agora).
+- Reexecucao de inferencia real do modelo Ollama nesta sessao (os
+  tempos e notas citados sao historicos, nao remedidos agora).
+- Estado exato de branch protection no GitHub (bloqueado por limitacao
+  de plano/visibilidade, nao por ausencia de configuracao confirmada).
+- Confirmacao de commit/push das correcoes de login — dependem de
+  autorizacao explicita do usuario, ainda pendente no momento da coleta
+  deste relatorio.

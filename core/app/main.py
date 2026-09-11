@@ -248,7 +248,14 @@ async def request_correction(answer_id: str, request: Request, background_tasks:
 
     background_tasks.add_task(run_correction_job, job.id, SessionLocal)
 
-    return {"job_id": job.id, "status": job.status.value}
+    # NOTA (bug corrigido): o frontend trata esta resposta como um CorrectionJob
+    # (mesmo contrato de GET /correction-jobs/{id}, que usa a chave "id"), mas este
+    # endpoint retornava apenas "job_id". Isso fazia o frontend navegar para
+    # /correcoes/undefined e o polling subsequente falhar com 404, mesmo quando o
+    # job era criado e processado com sucesso no backend (ver
+    # core/app/tests/test_core_flow.py::test_correction_creation_response_has_id_for_polling).
+    # Mantemos "job_id" por retrocompatibilidade com scripts/documentação existentes.
+    return {"id": job.id, "job_id": job.id, "status": job.status.value}
 
 
 @app.get("/v1/correction-jobs/{job_id}", response_model=CorrectionJobOut)
