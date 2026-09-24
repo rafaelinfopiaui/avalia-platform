@@ -72,12 +72,12 @@ A trilha documentada em GOV-002 (`trilha_operacao_de_turma.md`) não continha ne
 | BL-AV-1-02 | Corrigir verificação de vínculo do professor nas rotas identificadas | debito_correcao | 1 | 1 | AV-S01 | alta | homologado em AV-S01 (2026-09-23) |
 | BL-AV-1-03 | Retomada de fluxo via API, não apenas sessionStorage | debito_correcao | 1 | 1 | AV-S01 | alta | homologado em AV-S01 (2026-09-23) |
 | BL-AV-1-04 | Suíte de regressão para autorização cruzada entre professores | proposta_nova | 1 | 1 | AV-S01 | alta | homologado em AV-S01 (2026-09-23) |
-| BL-AV-1-05 | Validação visual documentada do fluxo central | debito_correcao | 1 | 1 | AV-S02 | média | proposto |
-| BL-AV-1-06 | CI mínima versionada (lint + testes) | debito_correcao | 1 | 1 | AV-S02 | média | proposto |
+| BL-AV-1-05 | Validação visual documentada do fluxo central | debito_correcao | 1 | 1 | AV-S02 | média | homologado (2026-09-24, PR #1 integrado) |
+| BL-AV-1-06 | CI mínima versionada (lint + testes) | debito_correcao | 1 | 1 | AV-S02 | média | homologado (2026-09-24, PR #1 integrado; execução remota real 3/3 jobs verdes) |
 | BL-AV-1-07 | Revalidação datada da suíte existente e do build, com resultado registrado | investigacao | 1 | 1 | AV-S01 | alta | homologado em AV-S01 (2026-09-23), com IA simulada e sem alegação de inferência real |
 | BL-AV-1-08 | Confirmar RN-017 (IA indisponível) após as correções de autorização | debito_correcao | 1 | 1 | AV-S01 | alta | homologado em AV-S01 (2026-09-23) |
-| BL-AV-1-09 | Isolar testes do caminho de reparo de JSON do modo global do AI Engine (`DEBT-AV-009`) | debito_correcao | 1 | 1 | AV-S02 | média | implementado e validado (2026-09-23) |
-| BL-AV-1-10 | Idempotência da revisão humana (`DEBT-AV-011`, achado real da validação visual de AV-S02) | debito_correcao | 1 | 1 | AV-S02 | alta | implementado e validado localmente (SQLite + PostgreSQL isolado real); migração reescrita em 2026-09-24 para NÃO deduplicar automaticamente (exigência explícita de Rafael); saneamento de duplicatas legadas é proposta separada, não executada; migração operacional pendente |
+| BL-AV-1-09 | Isolar testes do caminho de reparo de JSON do modo global do AI Engine (`DEBT-AV-009`) | debito_correcao | 1 | 1 | AV-S02 | média | homologado (2026-09-24, PR #1 integrado) |
+| BL-AV-1-10 | Idempotência da revisão humana (`DEBT-AV-011`, achado real da validação visual de AV-S02) | debito_correcao | 1 | 1 | AV-S02 | alta | código homologado e integrado a `main` (2026-09-24, PR #1); migração operacional a `avalia_dev` continua PENDENTE — o código exige a `UniqueConstraint` real do banco, mas o ambiente operacional ainda não a recebeu; saneamento de duplicatas legadas é proposta separada, não autorizada |
 | BL-AV-2-01 | Modelo de dados Organização/Curso/Disciplina/Turma/Aluno | proposta_nova | 2 | 1 | AV-S03 | alta | proposto |
 | BL-AV-2-02 | Migração Alembic da estrutura acadêmica | proposta_nova | 2 | 1 | AV-S03 | alta | proposto |
 | BL-AV-2-03 | Permissões por vínculo professor↔turma nos endpoints | proposta_nova | 2 | 1 | AV-S03 | alta | proposto |

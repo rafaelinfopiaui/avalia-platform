@@ -1,6 +1,6 @@
 ---
 id: "AV-S02"
-status: implementada_local_aguardando_ci_remota
+status: homologada_com_debitos_residuais
 objetivo_aprovado_por: "Rafael (2026-09-23, aprovação do plano com 4 condições e 5 refinamentos de execução)"
 consolidador: "Hermes"
 baseline_entrada: "../snapshots/latest_validated_baseline.md (nenhum promovido — AV-S01 homologada não promoveu baseline)"
@@ -440,6 +440,25 @@ Nenhuma falha de CI ocorreu; nenhuma correção de configuração/compatibilidad
 **Working tree após o push:** limpo, exceto `docs/roteiro-apresentacao-supervisor.md` (deliberadamente fora de qualquer commit, permanece untracked). `avalia_dev` verificado intacto (8 linhas em `human_reviews`, idêntico ao estado anterior a toda a trilha).
 
 **Pendências:** merge, tag, deploy, aplicação da migração `7b1d6d853f20` a `avalia_dev`, saneamento de duplicatas e homologação de fechamento de AV-S02 permanecem fora desta autorização — nenhum executado.
+
+### 19.6 Homologação de Rafael (2026-09-24)
+
+Rafael homologou a AV-S02 no escopo entregue e autorizou a integração do PR #1, com as seguintes verificações confirmadas antes do merge:
+
+- HEAD do PR no momento da homologação: `47d57f5d92a3fb33f9aee348de8aa0fe2d51a74a` — confirmado idêntico entre `origin/feat/av-s01-s02-consolidacao`, `gh pr view --json headRefOid` e o HEAD local;
+- os 3 checks desse HEAD exato (run `35997761681`, evento `pull_request`) concluídos com `conclusion: success`: `Core API (FastAPI + Postgres)`, `AI Engine (FastAPI)`, `Frontend (Vite + React + TS)`;
+- `mergeStateStatus: CLEAN`, `mergeable: MERGEABLE` — sem conflitos com `main`;
+- `reviews: []`, `reviewDecision` vazio — nenhuma revisão bloqueante pendente registrada no GitHub;
+- `avalia_dev` reconfirmado intacto (8 linhas em `human_reviews`, sem `UniqueConstraint`) — a migração **não foi aplicada** ao ambiente operacional.
+
+**Escopo homologado:** os 5 commits da branch (`dabd13a`, `5bfbac0`, `9b84c23`, `36de551`, `47d57f5`), cobrindo AV-S01 (autorização por vínculo, retomada via API) e AV-S02 (idempotência de revisão humana, isolamento de testes do AI Engine, lint mínimo, CI, governança).
+
+**Débitos residuais explicitamente aceitos na homologação:**
+- `DEBT-AV-011` — migração operacional (aplicação de `7b1d6d853f20` a `avalia_dev`) permanece pendente; o código integrado **exige** essa migração para garantir unicidade real no banco, mas o ambiente operacional ainda não a recebeu e continua com as 3 duplicatas fictícias preservadas (job `4f56a10b-...`);
+- saneamento de duplicatas (`docs/governance/backlog/proposta_saneamento_human_reviews_duplicadas.md`) continua não autorizado, não executado;
+- `DEBT-AV-008` (infraestrutura) permanece fora de escopo, sem alteração.
+
+**Esta homologação NÃO inclui:** tag, deploy, aplicação da migração no `avalia_dev`, saneamento de duplicatas ou promoção de baseline. Nenhum desses itens foi executado.
 
 ## 20. Fatiamento de lint Python autorizado por Rafael (2026-09-24)
 
