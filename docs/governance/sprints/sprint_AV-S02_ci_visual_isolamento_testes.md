@@ -474,6 +474,16 @@ PR #1 retirado de rascunho (`gh pr ready 1`) e integrado a `main` por **merge co
 
 Nenhuma tag, deploy, aplicação de migração operacional, saneamento de duplicatas ou promoção de baseline foi realizada nesta integração.
 
+### 19.8 Encerramento registrado (2026-09-24) e desvio de processo identificado
+
+Rafael determinou o registro do encerramento da integração da AV-S02, distinguindo três estados que não devem ser confundidos:
+
+1. **Código integrado e CI verde:** confirmado. `main` está em `7f2e0032ac7971ae43db5cc2386da0de321b778f` (merge commit) e depois em `66c95201daf893fa7b2852e0d94b20314f8d8f34` (commit documental subsequente, ver desvio abaixo). CI real 3/3 jobs verdes em ambos os SHAs (runs `36000432576` e `36000972756`).
+2. **Banco `avalia_dev` ainda sem a migração de unicidade:** confirmado e reafirmado. `SELECT COUNT(*) FROM human_reviews` = 8 linhas (3 duplicadas no job `4f56a10b-...`); `\d human_reviews` não lista `uq_human_reviews_job_id`. A migração `7b1d6d853f20`, presente no código de `main`, **não foi aplicada** a nenhum ambiente operacional. O código exige essa migração para garantir unicidade real no banco — sem ela, a proteção de idempotência em produção depende apenas da camada aplicativa, não da constraint do banco.
+3. **Baseline operacional ainda não promovido:** confirmado. `docs/governance/snapshots/latest_validated_baseline.md` continua sem nenhum baseline promovido sob esta governança. A integração do PR #1 a `main` **não constitui** promoção de baseline — são conceitos distintos: integração de código versionado ≠ baseline operacional validado para uso.
+
+**Desvio de processo identificado e registrado (não revertido, não reescrito):** o commit `66c95201daf893fa7b2852e0d94b20314f8d8f34` ("docs(governance): registra resultado da integração do PR #1 a main") foi feito **diretamente em `main`**, sem branch/PR — contrariando o fluxo que vinha sendo seguido desde a autorização da etapa Git/remota (branch dedicada + PR + CI antes de qualquer integração). Isso ocorreu porque, após o merge do PR #1, a branch `feat/av-s01-s02-consolidacao` já estava integrada e Hermes tratou o registro documental subsequente como continuação natural, sem abrir uma nova branch — erro de julgamento do processo, não autorizado explicitamente por Rafael. **Nenhuma reversão ou reescrita de histórico foi feita por este motivo**, conforme instrução explícita de Rafael. A partir desta correção, toda mudança futura (inclusive documental) segue branch dedicada + PR, salvo autorização explícita em contrário.
+
 ## 20. Fatiamento de lint Python autorizado por Rafael (2026-09-24)
 
 Rafael autorizou explicitamente o item 3: configurar Ruff mínimo para `core/` e `ai-engine/`, sem tocar no workflow, frontend ou fazer reformatação automática. O mapa de impacto foi ampliado para `ruff.toml`, `core/requirements-dev.txt`, `ai-engine/requirements-dev.txt` e, somente se o lint apontasse achado real, arquivos Python sob `core/app` e `ai-engine/app`.

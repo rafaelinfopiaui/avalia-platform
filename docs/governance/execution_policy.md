@@ -50,6 +50,7 @@ O registro deve diferenciar: execução delegada, revisão independente, verific
 - distinguir os estados **planejado**, **implementado**, **validado** e **homologado**;
 - registrar decisões, débitos e bloqueantes nos registros canônicos com ID estável;
 - preservar mudanças preexistentes e não misturá-las em commit futuro;
+- **toda mudança versionada, inclusive documental, segue branch dedicada + Pull Request — nunca commit direto na branch principal — salvo autorização explícita em contrário registrada antes do commit** (lição de processo registrada em 2026-09-24, após um desvio real não revertido por decisão de Rafael: ver `sprint_AV-S02...md` §19.8);
 - não executar deploy, commit, push, tag ou ação remota sem autorização específica aplicável.
 
 ## 6. Evidências
