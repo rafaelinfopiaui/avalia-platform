@@ -4,6 +4,7 @@ Versão: prompt-v1.0
 Conformidade: RN-001, RN-003, RN-010, RNF-02.
 """
 from typing import List
+
 from app.schemas import RubricCriterionInput
 
 PROMPT_VERSION = "prompt-v1.0"
@@ -96,7 +97,8 @@ def build_repair_prompt(bad_output: str, error_details: str) -> str:
         "A saída anterior continha erros de formatação JSON ou campos ausentes/inválidos.\n"
         f"Detalhes do erro: {error_details}\n\n"
         f"Texto anterior recebido:\n{bad_output}\n\n"
-        "Corrija e responda EXCLUSIVAMENTE um objeto JSON válido, sem blocos markdown e sem nenhum texto fora das chaves, "
+        "Corrija e responda EXCLUSIVAMENTE um objeto JSON válido, sem blocos markdown e "
+        "sem nenhum texto fora das chaves, "
         "seguindo estritamente a estrutura:\n"
         "{\n"
         '  "criterion_scores": [\n'

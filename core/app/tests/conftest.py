@@ -1,17 +1,18 @@
 import os
+
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test_avalia.db")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 os.environ.setdefault("AI_ENGINE_URL", "http://localhost:9999")  # porta inexistente, força falha controlada
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from fastapi.testclient import TestClient
 
-from app.db import Base
 import app.main as main_module
 from app import db as db_module
-from app.models import User, Role
+from app.db import Base
+from app.models import Role, User
 from app.security import hash_password
 
 
@@ -62,5 +63,36 @@ def professor_token(client, test_engine):
     session.close()
 
     resp = client.post("/v1/auth/login", json={"email": "professor@example.com", "password": "Senha123!"})
+    assert resp.status_code == 200, resp.text
+    return resp.json()["access_token"]
+
+
+@pytest.fixture()
+def second_professor_token(client, test_engine):
+    TestingSessionLocal = sessionmaker(bind=test_engine, autoflush=False, autocommit=False, future=True)
+    session = TestingSessionLocal()
+    user = User(email="second.professor@example.com", password_hash=hash_password("Senha123!"), role=Role.PROFESSOR)
+    session.add(user)
+    session.commit()
+    session.close()
+
+    resp = client.post(
+        "/v1/auth/login",
+        json={"email": "second.professor@example.com", "password": "Senha123!"},
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["access_token"]
+
+
+@pytest.fixture()
+def admin_token(client, test_engine):
+    TestingSessionLocal = sessionmaker(bind=test_engine, autoflush=False, autocommit=False, future=True)
+    session = TestingSessionLocal()
+    user = User(email="admin@example.com", password_hash=hash_password("Senha123!"), role=Role.ADMIN)
+    session.add(user)
+    session.commit()
+    session.close()
+
+    resp = client.post("/v1/auth/login", json={"email": "admin@example.com", "password": "Senha123!"})
     assert resp.status_code == 200, resp.text
     return resp.json()["access_token"]

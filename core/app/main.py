@@ -1,30 +1,58 @@
 from __future__ import annotations
+
 import json
-import uuid
 from decimal import Decimal
 
-from fastapi import FastAPI, Depends, HTTPException, Request, BackgroundTasks, status
+import httpx
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-import httpx
 
 from app.config import get_settings
-from app.db import get_db, SessionLocal
+from app.db import SessionLocal, get_db
 from app.deps import get_current_user, require_role
 from app.logging_utils import log_event, new_correlation_id
 from app.models import (
-    User, Role, Assessment, AssessmentStatus, Question, Rubric, RubricCriterion,
-    Answer, CorrectionJob, JobStatus, AIExecution, CriterionScore, HumanReview,
-    ReviewDecision, AuditEvent,
+    AIExecution,
+    Answer,
+    Assessment,
+    AssessmentStatus,
+    AuditEvent,
+    CorrectionJob,
+    CriterionScore,
+    HumanReview,
+    JobStatus,
+    Question,
+    ReviewDecision,
+    Role,
+    Rubric,
+    RubricCriterion,
+    User,
 )
 from app.schemas import (
-    LoginRequest, TokenResponse, MeResponse, AssessmentCreate, AssessmentOut,
-    RubricInput, RubricOut, AnswerInput, AnswerOut, CorrectionJobOut,
-    AIExecutionOut, CriterionScoreOut, HumanReviewInput, HumanReviewOut,
+    AIExecutionOut,
+    AnswerInput,
+    AnswerOut,
+    AssessmentCreate,
+    AssessmentOut,
+    AssessmentSummaryOut,
+    CorrectionJobContextOut,
+    CorrectionJobOut,
+    CriterionScoreOut,
+    HumanReviewInput,
+    HumanReviewOut,
+    HumanReviewSummaryOut,
+    LoginRequest,
+    MeResponse,
+    QuestionOut,
+    RubricInput,
+    RubricOut,
+    TokenResponse,
 )
-from app.security import verify_password, create_access_token, create_refresh_token
-from app.services.correction import run_correction_job, round_score
+from app.security import create_access_token, create_refresh_token, verify_password
+from app.services.correction import round_score, run_correction_job
 
 settings = get_settings()
 
@@ -48,7 +76,10 @@ async def correlation_id_middleware(request: Request, call_next):
     return response
 
 
-def error_response(status_code: int, code: str, message: str, correlation_id: str, details: dict | None = None, field_errors: list | None = None):
+def error_response(
+    status_code: int, code: str, message: str, correlation_id: str,
+    details: dict | None = None, field_errors: list | None = None,
+):
     return JSONResponse(
         status_code=status_code,
         content={
@@ -92,7 +123,10 @@ def list_assessments(db: Session = Depends(get_db), user: User = Depends(require
 
 
 @app.post("/v1/assessments", response_model=AssessmentOut, status_code=201)
-def create_assessment(payload: AssessmentCreate, request: Request, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
+def create_assessment(
+    payload: AssessmentCreate, request: Request, db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
     correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
     assessment = Assessment(title=payload.title, owner_id=user.id, status=AssessmentStatus.RASCUNHO)
     db.add(assessment)
@@ -107,7 +141,10 @@ def create_assessment(payload: AssessmentCreate, request: Request, db: Session =
         db.add(q)
     db.commit()
     db.refresh(assessment)
-    db.add(AuditEvent(actor_id=user.id, action="CREATE", resource_type="Assessment", resource_id=assessment.id, after_json=json.dumps({"title": assessment.title})))
+    db.add(AuditEvent(
+        actor_id=user.id, action="CREATE", resource_type="Assessment",
+        resource_id=assessment.id, after_json=json.dumps({"title": assessment.title}),
+    ))
     db.commit()
     log_event("assessment_created", correlation_id, assessment_id=assessment.id, user_id=user.id)
     return assessment
@@ -123,12 +160,18 @@ def _get_owned_assessment(db: Session, assessment_id: str, user: User) -> Assess
 
 
 @app.get("/v1/assessments/{assessment_id}", response_model=AssessmentOut)
-def get_assessment(assessment_id: str, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
+def get_assessment(
+    assessment_id: str, db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
     return _get_owned_assessment(db, assessment_id, user)
 
 
 @app.post("/v1/assessments/{assessment_id}/publish")
-def publish_assessment(assessment_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
+def publish_assessment(
+    assessment_id: str, request: Request, db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
     correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
     assessment = _get_owned_assessment(db, assessment_id, user)
 
@@ -165,7 +208,10 @@ def publish_assessment(assessment_id: str, request: Request, db: Session = Depen
 
 # ---------------- Rubric ----------------
 @app.post("/v1/questions/{question_id}/rubric", response_model=RubricOut, status_code=201)
-def create_rubric(question_id: str, payload: RubricInput, request: Request, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
+def create_rubric(
+    question_id: str, payload: RubricInput, request: Request, db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
     correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
     question = db.get(Question, question_id)
     if question is None:
@@ -179,7 +225,9 @@ def create_rubric(question_id: str, payload: RubricInput, request: Request, db: 
     db.add(rubric)
     db.flush()
     for crit in payload.criteria:
-        db.add(RubricCriterion(rubric_id=rubric.id, name=crit.name, description=crit.description, max_score=crit.max_score))
+        db.add(RubricCriterion(
+            rubric_id=rubric.id, name=crit.name, description=crit.description, max_score=crit.max_score,
+        ))
     db.commit()
     db.refresh(rubric)
     log_event("rubric_created", correlation_id, rubric_id=rubric.id, question_id=question_id, version=rubric.version)
@@ -188,10 +236,14 @@ def create_rubric(question_id: str, payload: RubricInput, request: Request, db: 
 
 # ---------------- Answers ----------------
 @app.post("/v1/answers", response_model=AnswerOut, status_code=201)
-def create_answer(payload: AnswerInput, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
+def create_answer(
+    payload: AnswerInput, db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
     question = db.get(Question, payload.question_id)
     if question is None:
         raise HTTPException(status_code=404, detail="Questão não encontrada.")
+    _get_owned_assessment(db, question.assessment_id, user)
     answer = Answer(question_id=payload.question_id, student_name_fake=payload.student_name_fake, text=payload.text)
     db.add(answer)
     db.commit()
@@ -227,13 +279,35 @@ def _serialize_job(db: Session, job: CorrectionJob) -> CorrectionJobOut:
     )
 
 
+def _get_job_context(
+    db: Session, job_id: str, user: User
+) -> tuple[CorrectionJob, Answer, Question, Assessment]:
+    job = db.get(CorrectionJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job não encontrado.")
+    answer = db.get(Answer, job.answer_id)
+    if answer is None:
+        raise HTTPException(status_code=404, detail="Resposta não encontrada.")
+    question = db.get(Question, answer.question_id)
+    if question is None:
+        raise HTTPException(status_code=404, detail="Questão não encontrada.")
+    assessment = _get_owned_assessment(db, question.assessment_id, user)
+    return job, answer, question, assessment
+
+
 @app.post("/v1/answers/{answer_id}/corrections", status_code=202)
-async def request_correction(answer_id: str, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
+async def request_correction(
+    answer_id: str, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
     correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
     answer = db.get(Answer, answer_id)
     if answer is None:
         raise HTTPException(status_code=404, detail="Resposta não encontrada.")
     question = db.get(Question, answer.question_id)
+    if question is None:
+        raise HTTPException(status_code=404, detail="Questão não encontrada.")
+    _get_owned_assessment(db, question.assessment_id, user)
     rubric = next((r for r in question.rubrics if r.is_published), None)
     if rubric is None:
         return error_response(422, "RUBRIC_NOT_PUBLISHED", "A questão não possui rubrica publicada.", correlation_id)
@@ -259,19 +333,90 @@ async def request_correction(answer_id: str, request: Request, background_tasks:
 
 
 @app.get("/v1/correction-jobs/{job_id}", response_model=CorrectionJobOut)
-def get_correction_job(job_id: str, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
-    job = db.get(CorrectionJob, job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job não encontrado.")
+def get_correction_job(
+    job_id: str, db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
+    job, _, _, _ = _get_job_context(db, job_id, user)
     return _serialize_job(db, job)
 
 
+@app.get("/v1/correction-jobs/{job_id}/context", response_model=CorrectionJobContextOut)
+def get_correction_job_context(
+    job_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
+    job, answer, question, assessment = _get_job_context(db, job_id, user)
+    review = db.query(HumanReview).filter(HumanReview.job_id == job_id).first()
+    review_summary = _serialize_review_summary(db, review) if review is not None else None
+    return CorrectionJobContextOut(
+        job=_serialize_job(db, job),
+        answer=AnswerOut.model_validate(answer),
+        question=QuestionOut.model_validate(question),
+        assessment=AssessmentSummaryOut.model_validate(assessment),
+        human_review=review_summary,
+    )
+
+
+def _serialize_review_summary(db: Session, review: HumanReview) -> HumanReviewSummaryOut:
+    reviewer = db.get(User, review.reviewer_id)
+    return HumanReviewSummaryOut(
+        id=review.id,
+        reviewer_id=review.reviewer_id,
+        reviewer_email=reviewer.email if reviewer is not None else "",
+        decision=review.decision.value,
+        final_total=review.final_total,
+        final_scores=json.loads(review.final_scores_json),
+        justification=review.justification,
+        created_at=review.created_at,
+    )
+
+
+def _review_is_equivalent(
+    review: HumanReview,
+    reviewer_id: str,
+    decision: ReviewDecision,
+    final_scores: list[dict[str, str]],
+    justification: str | None,
+) -> bool:
+    existing_scores = {
+        item["criterion_id"]: Decimal(str(item["score"]))
+        for item in json.loads(review.final_scores_json)
+    }
+    attempted_scores = {
+        item["criterion_id"]: Decimal(str(item["score"]))
+        for item in final_scores
+    }
+    return (
+        review.reviewer_id == reviewer_id
+        and review.decision == decision
+        and existing_scores == attempted_scores
+        and (review.justification or "") == (justification or "")
+    )
+
+
+def _review_conflict_response(
+    db: Session, review: HumanReview, correlation_id: str
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=409,
+        content={
+            "code": "REVIEW_ALREADY_EXISTS",
+            "message": "Este job já possui uma decisão humana registrada.",
+            "existing_review": _serialize_review_summary(db, review).model_dump(mode="json"),
+            "correlation_id": correlation_id,
+        },
+    )
+
+
 @app.post("/v1/corrections/{job_id}/reviews", response_model=HumanReviewOut)
-def review_correction(job_id: str, payload: HumanReviewInput, request: Request, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
+def review_correction(
+    job_id: str, payload: HumanReviewInput, request: Request, db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
     correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
-    job = db.get(CorrectionJob, job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job não encontrado.")
+    job, _, _, _ = _get_job_context(db, job_id, user)
 
     if payload.decision not in (ReviewDecision.APPROVE.value, ReviewDecision.ALTER.value):
         return error_response(422, "INVALID_DECISION", "Decisão inválida.", correlation_id)
@@ -287,7 +432,9 @@ def review_correction(job_id: str, payload: HumanReviewInput, request: Request, 
 
     if payload.decision == ReviewDecision.ALTER.value:
         if not payload.justification or not payload.justification.strip():
-            return error_response(422, "JUSTIFICATION_REQUIRED", "Justificativa é obrigatória para alterar a nota.", correlation_id)
+            return error_response(
+                422, "JUSTIFICATION_REQUIRED", "Justificativa é obrigatória para alterar a nota.", correlation_id,
+            )
         final_scores = []
         total = Decimal("0")
         for cs in payload.criteria_scores:
@@ -309,22 +456,40 @@ def review_correction(job_id: str, payload: HumanReviewInput, request: Request, 
         ]
         final_total = round_score(sum((s.score for s in scores_by_criterion.values()), Decimal("0")))
 
+    decision = ReviewDecision(payload.decision)
+    existing_review = db.query(HumanReview).filter(HumanReview.job_id == job_id).first()
+    if existing_review is not None:
+        if _review_is_equivalent(
+            existing_review, user.id, decision, final_scores, payload.justification
+        ):
+            return existing_review
+        return _review_conflict_response(db, existing_review, correlation_id)
+
     review = HumanReview(
-        job_id=job_id, reviewer_id=user.id, decision=ReviewDecision(payload.decision),
+        job_id=job_id, reviewer_id=user.id, decision=decision,
         final_total=final_total, final_scores_json=json.dumps(final_scores),
         justification=payload.justification,
     )
     db.add(review)
-    db.commit()
-    db.refresh(review)
-
     db.add(AuditEvent(
         actor_id=user.id, action=f"REVIEW_{payload.decision}", resource_type="CorrectionJob",
         resource_id=job_id,
         before_json=json.dumps({cid: str(s.score) for cid, s in scores_by_criterion.items()}),
         after_json=json.dumps(final_scores),
     ))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing_review = db.query(HumanReview).filter(HumanReview.job_id == job_id).first()
+        if existing_review is None:
+            raise
+        if _review_is_equivalent(
+            existing_review, user.id, decision, final_scores, payload.justification
+        ):
+            return existing_review
+        return _review_conflict_response(db, existing_review, correlation_id)
+    db.refresh(review)
     log_event("human_review_registered", correlation_id, job_id=job_id, decision=payload.decision, reviewer_id=user.id)
     return review
 

@@ -1,0 +1,961 @@
+diff --git a/README.md b/README.md
+index 0c095e9..9a95d1e 100644
+--- a/README.md
++++ b/README.md
+@@ -76,8 +76,9 @@ em pt-BR, acessível por teclado, foco visível, mensagens de erro úteis.
+ 
+ ## Governança deste repositório
+ 
++A fonte canônica do rito técnico está em [`docs/governance/README.md`](docs/governance/README.md). Antes de cada execução, agentes devem ler a política, o último baseline validado, a última execução registrada e a sprint ativa, além de conferir o estado real do repositório. A próxima trilha funcional só pode começar com plano documentado e aprovação explícita de Rafael.
++
+ Squad de 9 integrantes (ver PRD, seção 20) treina atualmente no laboratório
+ `avalia-github-lab`. Este repositório do produto real é mantido separado e não
+-concede acesso automático à squad — acesso será concedido pelo Tech Leader
+-quando decidido (ver seção "Git local e pendências" em
+-`docs/relatorio-entrega.md`).
++concede acesso automático à squad — acesso será concedido por Rafael quando
++decidido (ver também o registro de decisões da governança).
+diff --git a/core/README.md b/core/README.md
+index abe450b..b382d8a 100644
+--- a/core/README.md
++++ b/core/README.md
+@@ -25,6 +25,11 @@ uvicorn app.main:app --reload --port 8000
+ 
+ Health check: `curl http://localhost:8000/v1/health`
+ 
++O contexto agregado de retomada de uma correção está disponível em
++`GET /v1/correction-jobs/{job_id}/context`. A rota exige Bearer token e aplica
++autorização pelo vínculo entre o job e o proprietário da avaliação; o papel
++`admin` mantém acesso global.
++
+ ## Setup (Windows com WSL2)
+ 
+ Dentro do WSL2 (Ubuntu), os passos são os mesmos do macOS/Linux acima.
+@@ -60,7 +65,8 @@ memória e uma URL de AI Engine inexistente para simular indisponibilidade
+ de forma determinística; se seu shell já exportou essas variáveis para
+ outro propósito, isso evita conflito.)
+ 
+-8 testes cobrindo: acesso sem permissão bloqueado, rubrica com soma
++Testes cobrindo: acesso sem permissão bloqueado, autorização por vínculo nas
++rotas de resposta/correção/revisão/contexto, rubrica com soma
+ incorreta rejeitada, publicação de avaliação válida, pontuação de critério
+ fora do limite rejeitada, AI Engine indisponível não fabrica resultado,
+ revisão humana persistida com autor, reprocessamento preserva versões
+diff --git a/core/app/main.py b/core/app/main.py
+index 2e55491..ec38aef 100644
+--- a/core/app/main.py
++++ b/core/app/main.py
+@@ -1,30 +1,58 @@
+ from __future__ import annotations
++
+ import json
+-import uuid
+ from decimal import Decimal
+ 
+-from fastapi import FastAPI, Depends, HTTPException, Request, BackgroundTasks, status
++import httpx
++from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+ from fastapi.middleware.cors import CORSMiddleware
+ from fastapi.responses import JSONResponse
++from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.orm import Session
+-import httpx
+ 
+ from app.config import get_settings
+-from app.db import get_db, SessionLocal
++from app.db import SessionLocal, get_db
+ from app.deps import get_current_user, require_role
+ from app.logging_utils import log_event, new_correlation_id
+ from app.models import (
+-    User, Role, Assessment, AssessmentStatus, Question, Rubric, RubricCriterion,
+-    Answer, CorrectionJob, JobStatus, AIExecution, CriterionScore, HumanReview,
+-    ReviewDecision, AuditEvent,
++    AIExecution,
++    Answer,
++    Assessment,
++    AssessmentStatus,
++    AuditEvent,
++    CorrectionJob,
++    CriterionScore,
++    HumanReview,
++    JobStatus,
++    Question,
++    ReviewDecision,
++    Role,
++    Rubric,
++    RubricCriterion,
++    User,
+ )
+ from app.schemas import (
+-    LoginRequest, TokenResponse, MeResponse, AssessmentCreate, AssessmentOut,
+-    RubricInput, RubricOut, AnswerInput, AnswerOut, CorrectionJobOut,
+-    AIExecutionOut, CriterionScoreOut, HumanReviewInput, HumanReviewOut,
++    AIExecutionOut,
++    AnswerInput,
++    AnswerOut,
++    AssessmentCreate,
++    AssessmentOut,
++    AssessmentSummaryOut,
++    CorrectionJobContextOut,
++    CorrectionJobOut,
++    CriterionScoreOut,
++    HumanReviewInput,
++    HumanReviewOut,
++    HumanReviewSummaryOut,
++    LoginRequest,
++    MeResponse,
++    QuestionOut,
++    RubricInput,
++    RubricOut,
++    TokenResponse,
+ )
+-from app.security import verify_password, create_access_token, create_refresh_token
+-from app.services.correction import run_correction_job, round_score
++from app.security import create_access_token, create_refresh_token, verify_password
++from app.services.correction import round_score, run_correction_job
+ 
+ settings = get_settings()
+ 
+@@ -48,7 +76,10 @@ async def correlation_id_middleware(request: Request, call_next):
+     return response
+ 
+ 
+-def error_response(status_code: int, code: str, message: str, correlation_id: str, details: dict | None = None, field_errors: list | None = None):
++def error_response(
++    status_code: int, code: str, message: str, correlation_id: str,
++    details: dict | None = None, field_errors: list | None = None,
++):
+     return JSONResponse(
+         status_code=status_code,
+         content={
+@@ -92,7 +123,10 @@ def list_assessments(db: Session = Depends(get_db), user: User = Depends(require
+ 
+ 
+ @app.post("/v1/assessments", response_model=AssessmentOut, status_code=201)
+-def create_assessment(payload: AssessmentCreate, request: Request, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
++def create_assessment(
++    payload: AssessmentCreate, request: Request, db: Session = Depends(get_db),
++    user: User = Depends(require_role("professor", "admin")),
++):
+     correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
+     assessment = Assessment(title=payload.title, owner_id=user.id, status=AssessmentStatus.RASCUNHO)
+     db.add(assessment)
+@@ -107,7 +141,10 @@ def create_assessment(payload: AssessmentCreate, request: Request, db: Session =
+         db.add(q)
+     db.commit()
+     db.refresh(assessment)
+-    db.add(AuditEvent(actor_id=user.id, action="CREATE", resource_type="Assessment", resource_id=assessment.id, after_json=json.dumps({"title": assessment.title})))
++    db.add(AuditEvent(
++        actor_id=user.id, action="CREATE", resource_type="Assessment",
++        resource_id=assessment.id, after_json=json.dumps({"title": assessment.title}),
++    ))
+     db.commit()
+     log_event("assessment_created", correlation_id, assessment_id=assessment.id, user_id=user.id)
+     return assessment
+@@ -123,12 +160,18 @@ def _get_owned_assessment(db: Session, assessment_id: str, user: User) -> Assess
+ 
+ 
+ @app.get("/v1/assessments/{assessment_id}", response_model=AssessmentOut)
+-def get_assessment(assessment_id: str, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
++def get_assessment(
++    assessment_id: str, db: Session = Depends(get_db),
++    user: User = Depends(require_role("professor", "admin")),
++):
+     return _get_owned_assessment(db, assessment_id, user)
+ 
+ 
+ @app.post("/v1/assessments/{assessment_id}/publish")
+-def publish_assessment(assessment_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
++def publish_assessment(
++    assessment_id: str, request: Request, db: Session = Depends(get_db),
++    user: User = Depends(require_role("professor", "admin")),
++):
+     correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
+     assessment = _get_owned_assessment(db, assessment_id, user)
+ 
+@@ -165,7 +208,10 @@ def publish_assessment(assessment_id: str, request: Request, db: Session = Depen
+ 
+ # ---------------- Rubric ----------------
+ @app.post("/v1/questions/{question_id}/rubric", response_model=RubricOut, status_code=201)
+-def create_rubric(question_id: str, payload: RubricInput, request: Request, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
++def create_rubric(
++    question_id: str, payload: RubricInput, request: Request, db: Session = Depends(get_db),
++    user: User = Depends(require_role("professor", "admin")),
++):
+     correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
+     question = db.get(Question, question_id)
+     if question is None:
+@@ -179,7 +225,9 @@ def create_rubric(question_id: str, payload: RubricInput, request: Request, db:
+     db.add(rubric)
+     db.flush()
+     for crit in payload.criteria:
+-        db.add(RubricCriterion(rubric_id=rubric.id, name=crit.name, description=crit.description, max_score=crit.max_score))
++        db.add(RubricCriterion(
++            rubric_id=rubric.id, name=crit.name, description=crit.description, max_score=crit.max_score,
++        ))
+     db.commit()
+     db.refresh(rubric)
+     log_event("rubric_created", correlation_id, rubric_id=rubric.id, question_id=question_id, version=rubric.version)
+@@ -188,10 +236,14 @@ def create_rubric(question_id: str, payload: RubricInput, request: Request, db:
+ 
+ # ---------------- Answers ----------------
+ @app.post("/v1/answers", response_model=AnswerOut, status_code=201)
+-def create_answer(payload: AnswerInput, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
++def create_answer(
++    payload: AnswerInput, db: Session = Depends(get_db),
++    user: User = Depends(require_role("professor", "admin")),
++):
+     question = db.get(Question, payload.question_id)
+     if question is None:
+         raise HTTPException(status_code=404, detail="Questão não encontrada.")
++    _get_owned_assessment(db, question.assessment_id, user)
+     answer = Answer(question_id=payload.question_id, student_name_fake=payload.student_name_fake, text=payload.text)
+     db.add(answer)
+     db.commit()
+@@ -227,13 +279,35 @@ def _serialize_job(db: Session, job: CorrectionJob) -> CorrectionJobOut:
+     )
+ 
+ 
++def _get_job_context(
++    db: Session, job_id: str, user: User
++) -> tuple[CorrectionJob, Answer, Question, Assessment]:
++    job = db.get(CorrectionJob, job_id)
++    if job is None:
++        raise HTTPException(status_code=404, detail="Job não encontrado.")
++    answer = db.get(Answer, job.answer_id)
++    if answer is None:
++        raise HTTPException(status_code=404, detail="Resposta não encontrada.")
++    question = db.get(Question, answer.question_id)
++    if question is None:
++        raise HTTPException(status_code=404, detail="Questão não encontrada.")
++    assessment = _get_owned_assessment(db, question.assessment_id, user)
++    return job, answer, question, assessment
++
++
+ @app.post("/v1/answers/{answer_id}/corrections", status_code=202)
+-async def request_correction(answer_id: str, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
++async def request_correction(
++    answer_id: str, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db),
++    user: User = Depends(require_role("professor", "admin")),
++):
+     correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
+     answer = db.get(Answer, answer_id)
+     if answer is None:
+         raise HTTPException(status_code=404, detail="Resposta não encontrada.")
+     question = db.get(Question, answer.question_id)
++    if question is None:
++        raise HTTPException(status_code=404, detail="Questão não encontrada.")
++    _get_owned_assessment(db, question.assessment_id, user)
+     rubric = next((r for r in question.rubrics if r.is_published), None)
+     if rubric is None:
+         return error_response(422, "RUBRIC_NOT_PUBLISHED", "A questão não possui rubrica publicada.", correlation_id)
+@@ -259,19 +333,90 @@ async def request_correction(answer_id: str, request: Request, background_tasks:
+ 
+ 
+ @app.get("/v1/correction-jobs/{job_id}", response_model=CorrectionJobOut)
+-def get_correction_job(job_id: str, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
+-    job = db.get(CorrectionJob, job_id)
+-    if job is None:
+-        raise HTTPException(status_code=404, detail="Job não encontrado.")
++def get_correction_job(
++    job_id: str, db: Session = Depends(get_db),
++    user: User = Depends(require_role("professor", "admin")),
++):
++    job, _, _, _ = _get_job_context(db, job_id, user)
+     return _serialize_job(db, job)
+ 
+ 
++@app.get("/v1/correction-jobs/{job_id}/context", response_model=CorrectionJobContextOut)
++def get_correction_job_context(
++    job_id: str,
++    db: Session = Depends(get_db),
++    user: User = Depends(require_role("professor", "admin")),
++):
++    job, answer, question, assessment = _get_job_context(db, job_id, user)
++    review = db.query(HumanReview).filter(HumanReview.job_id == job_id).first()
++    review_summary = _serialize_review_summary(db, review) if review is not None else None
++    return CorrectionJobContextOut(
++        job=_serialize_job(db, job),
++        answer=AnswerOut.model_validate(answer),
++        question=QuestionOut.model_validate(question),
++        assessment=AssessmentSummaryOut.model_validate(assessment),
++        human_review=review_summary,
++    )
++
++
++def _serialize_review_summary(db: Session, review: HumanReview) -> HumanReviewSummaryOut:
++    reviewer = db.get(User, review.reviewer_id)
++    return HumanReviewSummaryOut(
++        id=review.id,
++        reviewer_id=review.reviewer_id,
++        reviewer_email=reviewer.email if reviewer is not None else "",
++        decision=review.decision.value,
++        final_total=review.final_total,
++        final_scores=json.loads(review.final_scores_json),
++        justification=review.justification,
++        created_at=review.created_at,
++    )
++
++
++def _review_is_equivalent(
++    review: HumanReview,
++    reviewer_id: str,
++    decision: ReviewDecision,
++    final_scores: list[dict[str, str]],
++    justification: str | None,
++) -> bool:
++    existing_scores = {
++        item["criterion_id"]: Decimal(str(item["score"]))
++        for item in json.loads(review.final_scores_json)
++    }
++    attempted_scores = {
++        item["criterion_id"]: Decimal(str(item["score"]))
++        for item in final_scores
++    }
++    return (
++        review.reviewer_id == reviewer_id
++        and review.decision == decision
++        and existing_scores == attempted_scores
++        and (review.justification or "") == (justification or "")
++    )
++
++
++def _review_conflict_response(
++    db: Session, review: HumanReview, correlation_id: str
++) -> JSONResponse:
++    return JSONResponse(
++        status_code=409,
++        content={
++            "code": "REVIEW_ALREADY_EXISTS",
++            "message": "Este job já possui uma decisão humana registrada.",
++            "existing_review": _serialize_review_summary(db, review).model_dump(mode="json"),
++            "correlation_id": correlation_id,
++        },
++    )
++
++
+ @app.post("/v1/corrections/{job_id}/reviews", response_model=HumanReviewOut)
+-def review_correction(job_id: str, payload: HumanReviewInput, request: Request, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
++def review_correction(
++    job_id: str, payload: HumanReviewInput, request: Request, db: Session = Depends(get_db),
++    user: User = Depends(require_role("professor", "admin")),
++):
+     correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
+-    job = db.get(CorrectionJob, job_id)
+-    if job is None:
+-        raise HTTPException(status_code=404, detail="Job não encontrado.")
++    job, _, _, _ = _get_job_context(db, job_id, user)
+ 
+     if payload.decision not in (ReviewDecision.APPROVE.value, ReviewDecision.ALTER.value):
+         return error_response(422, "INVALID_DECISION", "Decisão inválida.", correlation_id)
+@@ -287,7 +432,9 @@ def review_correction(job_id: str, payload: HumanReviewInput, request: Request,
+ 
+     if payload.decision == ReviewDecision.ALTER.value:
+         if not payload.justification or not payload.justification.strip():
+-            return error_response(422, "JUSTIFICATION_REQUIRED", "Justificativa é obrigatória para alterar a nota.", correlation_id)
++            return error_response(
++                422, "JUSTIFICATION_REQUIRED", "Justificativa é obrigatória para alterar a nota.", correlation_id,
++            )
+         final_scores = []
+         total = Decimal("0")
+         for cs in payload.criteria_scores:
+@@ -309,22 +456,40 @@ def review_correction(job_id: str, payload: HumanReviewInput, request: Request,
+         ]
+         final_total = round_score(sum((s.score for s in scores_by_criterion.values()), Decimal("0")))
+ 
++    decision = ReviewDecision(payload.decision)
++    existing_review = db.query(HumanReview).filter(HumanReview.job_id == job_id).first()
++    if existing_review is not None:
++        if _review_is_equivalent(
++            existing_review, user.id, decision, final_scores, payload.justification
++        ):
++            return existing_review
++        return _review_conflict_response(db, existing_review, correlation_id)
++
+     review = HumanReview(
+-        job_id=job_id, reviewer_id=user.id, decision=ReviewDecision(payload.decision),
++        job_id=job_id, reviewer_id=user.id, decision=decision,
+         final_total=final_total, final_scores_json=json.dumps(final_scores),
+         justification=payload.justification,
+     )
+     db.add(review)
+-    db.commit()
+-    db.refresh(review)
+-
+     db.add(AuditEvent(
+         actor_id=user.id, action=f"REVIEW_{payload.decision}", resource_type="CorrectionJob",
+         resource_id=job_id,
+         before_json=json.dumps({cid: str(s.score) for cid, s in scores_by_criterion.items()}),
+         after_json=json.dumps(final_scores),
+     ))
+-    db.commit()
++    try:
++        db.commit()
++    except IntegrityError:
++        db.rollback()
++        existing_review = db.query(HumanReview).filter(HumanReview.job_id == job_id).first()
++        if existing_review is None:
++            raise
++        if _review_is_equivalent(
++            existing_review, user.id, decision, final_scores, payload.justification
++        ):
++            return existing_review
++        return _review_conflict_response(db, existing_review, correlation_id)
++    db.refresh(review)
+     log_event("human_review_registered", correlation_id, job_id=job_id, decision=payload.decision, reviewer_id=user.id)
+     return review
+ 
+diff --git a/core/app/models.py b/core/app/models.py
+index 1d370ef..13235ce 100644
+--- a/core/app/models.py
++++ b/core/app/models.py
+@@ -1,13 +1,23 @@
+ from __future__ import annotations
++
+ import enum
+ import uuid
+ from datetime import datetime
+ from decimal import Decimal
+ 
+ from sqlalchemy import (
+-    String, Text, ForeignKey, DateTime, Enum, Numeric, Boolean, Integer, JSON
++    Boolean,
++    DateTime,
++    Enum,
++    ForeignKey,
++    Integer,
++    Numeric,
++    String,
++    Text,
++    UniqueConstraint,
+ )
+ from sqlalchemy.orm import Mapped, mapped_column, relationship
++
+ from app.db import Base
+ 
+ 
+@@ -155,6 +165,9 @@ class CriterionScore(Base):
+ 
+ class HumanReview(Base):
+     __tablename__ = "human_reviews"
++    __table_args__ = (
++        UniqueConstraint("job_id", name="uq_human_reviews_job_id"),
++    )
+     id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+     job_id: Mapped[str] = mapped_column(String, ForeignKey("correction_jobs.id"), nullable=False)
+     reviewer_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
+diff --git a/core/app/schemas.py b/core/app/schemas.py
+index ae35820..5342810 100644
+--- a/core/app/schemas.py
++++ b/core/app/schemas.py
+@@ -1,7 +1,9 @@
+ from __future__ import annotations
++
+ from datetime import datetime
+ from decimal import Decimal
+ from typing import Optional
++
+ from pydantic import BaseModel, EmailStr, Field
+ 
+ 
+@@ -90,6 +92,14 @@ class AssessmentOut(BaseModel):
+         from_attributes = True
+ 
+ 
++class AssessmentSummaryOut(BaseModel):
++    id: str
++    title: str
++
++    class Config:
++        from_attributes = True
++
++
+ # ---- Answer ----
+ class AnswerInput(BaseModel):
+     question_id: str
+@@ -174,6 +184,25 @@ class HumanReviewOut(BaseModel):
+         from_attributes = True
+ 
+ 
++class HumanReviewSummaryOut(BaseModel):
++    id: str
++    reviewer_id: str
++    reviewer_email: str
++    decision: str
++    final_total: Decimal
++    final_scores: list[CriterionScoreInput]
++    justification: Optional[str]
++    created_at: datetime
++
++
++class CorrectionJobContextOut(BaseModel):
++    job: CorrectionJobOut
++    answer: AnswerOut
++    question: QuestionOut
++    assessment: AssessmentSummaryOut
++    human_review: Optional[HumanReviewSummaryOut] = None
++
++
+ # ---- Error envelope ----
+ class FieldError(BaseModel):
+     field: str
+diff --git a/core/app/tests/conftest.py b/core/app/tests/conftest.py
+index 741faaf..f54e34c 100644
+--- a/core/app/tests/conftest.py
++++ b/core/app/tests/conftest.py
+@@ -1,17 +1,18 @@
+ import os
++
+ os.environ.setdefault("DATABASE_URL", "sqlite:///./test_avalia.db")
+ os.environ.setdefault("JWT_SECRET", "test-secret")
+ os.environ.setdefault("AI_ENGINE_URL", "http://localhost:9999")  # porta inexistente, força falha controlada
+ 
+ import pytest
++from fastapi.testclient import TestClient
+ from sqlalchemy import create_engine
+ from sqlalchemy.orm import sessionmaker
+-from fastapi.testclient import TestClient
+ 
+-from app.db import Base
+ import app.main as main_module
+ from app import db as db_module
+-from app.models import User, Role
++from app.db import Base
++from app.models import Role, User
+ from app.security import hash_password
+ 
+ 
+@@ -64,3 +65,34 @@ def professor_token(client, test_engine):
+     resp = client.post("/v1/auth/login", json={"email": "professor@example.com", "password": "Senha123!"})
+     assert resp.status_code == 200, resp.text
+     return resp.json()["access_token"]
++
++
++@pytest.fixture()
++def second_professor_token(client, test_engine):
++    TestingSessionLocal = sessionmaker(bind=test_engine, autoflush=False, autocommit=False, future=True)
++    session = TestingSessionLocal()
++    user = User(email="second.professor@example.com", password_hash=hash_password("Senha123!"), role=Role.PROFESSOR)
++    session.add(user)
++    session.commit()
++    session.close()
++
++    resp = client.post(
++        "/v1/auth/login",
++        json={"email": "second.professor@example.com", "password": "Senha123!"},
++    )
++    assert resp.status_code == 200, resp.text
++    return resp.json()["access_token"]
++
++
++@pytest.fixture()
++def admin_token(client, test_engine):
++    TestingSessionLocal = sessionmaker(bind=test_engine, autoflush=False, autocommit=False, future=True)
++    session = TestingSessionLocal()
++    user = User(email="admin@example.com", password_hash=hash_password("Senha123!"), role=Role.ADMIN)
++    session.add(user)
++    session.commit()
++    session.close()
++
++    resp = client.post("/v1/auth/login", json={"email": "admin@example.com", "password": "Senha123!"})
++    assert resp.status_code == 200, resp.text
++    return resp.json()["access_token"]
+diff --git a/core/app/tests/test_core_flow.py b/core/app/tests/test_core_flow.py
+index 9d8004d..15ec06f 100644
+--- a/core/app/tests/test_core_flow.py
++++ b/core/app/tests/test_core_flow.py
+@@ -105,7 +105,11 @@ def test_ai_engine_unavailable_does_not_fabricate_result(client, professor_token
+ 
+     assert job["status"] == "FALHA", job
+     assert job["error_message"] is not None
+-    assert "manual" in job["error_message"].lower() or "indispon" in job["error_message"].lower() or "tente" in job["error_message"].lower()
++    assert (
++        "manual" in job["error_message"].lower()
++        or "indispon" in job["error_message"].lower()
++        or "tente" in job["error_message"].lower()
++    )
+ 
+ 
+ def test_human_review_persists_with_reviewer(client, professor_token, test_engine):
+@@ -128,7 +132,8 @@ def test_human_review_persists_with_reviewer(client, professor_token, test_engin
+     answer_id = resp.json()["id"]
+ 
+     from sqlalchemy.orm import sessionmaker
+-    from app.models import CorrectionJob, JobStatus, Rubric, AIExecution, CriterionScore
++
++    from app.models import AIExecution, CorrectionJob, CriterionScore, JobStatus, Rubric
+     TestingSessionLocal = sessionmaker(bind=test_engine, autoflush=False, autocommit=False, future=True)
+     session = TestingSessionLocal()
+     rubric = session.query(Rubric).filter(Rubric.question_id == question_id).first()
+@@ -188,6 +193,7 @@ def test_criterion_score_out_of_range_is_rejected(client, professor_token, test_
+     answer_id = resp.json()["id"]
+ 
+     from sqlalchemy.orm import sessionmaker
++
+     from app.models import CorrectionJob, JobStatus, Rubric
+     TestingSessionLocal = sessionmaker(bind=test_engine, autoflush=False, autocommit=False, future=True)
+     session = TestingSessionLocal()
+@@ -228,10 +234,6 @@ def test_reprocessing_preserves_previous_versions(client, professor_token, test_
+     )
+     answer_id = resp.json()["id"]
+ 
+-    from sqlalchemy.orm import sessionmaker
+-    from app.models import AIExecution
+-    TestingSessionLocal = sessionmaker(bind=test_engine, autoflush=False, autocommit=False, future=True)
+-
+     # Solicita duas correções (duas tentativas) -- ambas falharão (AI Engine indisponível
+     # no ambiente de teste), mas cada uma cria um CorrectionJob distinto e preserva o anterior.
+     resp1 = client.post(f"/v1/answers/{answer_id}/corrections", headers=headers)
+@@ -270,7 +272,9 @@ def test_correction_creation_response_has_id_for_polling(client, professor_token
+     resp = client.post(f"/v1/answers/{answer_id}/corrections", headers=headers)
+     assert resp.status_code == 202, resp.text
+     body = resp.json()
+-    assert "id" in body and body["id"], "resposta de criação do job precisa expor 'id' (usado pelo frontend para navegar/pollar)"
++    assert "id" in body and body["id"], (
++        "resposta de criação do job precisa expor 'id' (usado pelo frontend para navegar/pollar)"
++    )
+     assert body["id"] == body["job_id"]
+ 
+     # A rota de polling usada pelo frontend precisa aceitar exatamente esse id.
+@@ -287,6 +291,7 @@ def test_seed_professor_email_is_a_valid_email_syntax():
+     core/app/config.py e docs/roteiro-demo.md.
+     """
+     from email_validator import validate_email
++
+     from app.config import get_settings
+ 
+     settings = get_settings()
+@@ -301,6 +306,7 @@ def test_login_with_special_use_domain_is_rejected_with_422_not_401():
+     padrão de configuração sem perceber a diferença de status code.
+     """
+     from fastapi.testclient import TestClient
++
+     import app.main as main_module
+ 
+     with TestClient(main_module.app) as c:
+diff --git a/docs/contracts/openapi.yaml b/docs/contracts/openapi.yaml
+index 95716b9..1a9b15a 100644
+--- a/docs/contracts/openapi.yaml
++++ b/docs/contracts/openapi.yaml
+@@ -122,6 +122,22 @@ paths:
+         "200":
+           description: Estado atual (PENDENTE|PROCESSANDO|SUGERIDA|FALHA)
+ 
++  /correction-jobs/{id}/context:
++    get:
++      summary: Obter contexto agregado para retomar a revisão
++      security: [{ bearerAuth: [] }]
++      parameters:
++        - { name: id, in: path, required: true, schema: { type: string } }
++      responses:
++        "200":
++          description: Job, resposta, questão e resumo da avaliação vinculada
++          content:
++            application/json:
++              schema: { $ref: '#/components/schemas/CorrectionJobContextOut' }
++        "401": { description: Token ausente ou inválido }
++        "403": { description: Professor sem vínculo com a avaliação }
++        "404": { description: Job ou recurso da cadeia relacional não encontrado }
++
+   /corrections/{id}/reviews:
+     post:
+       summary: Registrar decisão humana (aprovar/alterar)
+@@ -134,12 +150,17 @@ paths:
+           application/json:
+             schema: { $ref: '#/components/schemas/HumanReviewInput' }
+       responses:
+-        "200": { description: Revisão registrada, auditoria criada }
++        "200": { description: Revisão registrada ou reenvio equivalente à decisão já existente (idempotente) }
+         "403":
+           description: Sem permissão sobre este recurso
+           content:
+             application/json:
+               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
++        "409":
++          description: Já existe uma decisão humana diferente registrada para este job; a decisão existente é preservada e retornada
++          content:
++            application/json:
++              schema: { $ref: '#/components/schemas/ReviewConflictOut' }
+ 
+   /health:
+     get:
+@@ -197,3 +218,54 @@ components:
+         justification:
+           type: string
+           description: Obrigatória quando decision=ALTER
++    CorrectionJobContextOut:
++      type: object
++      required: [job, answer, question, assessment]
++      properties:
++        job: { type: object, description: Representação CorrectionJobOut }
++        answer: { type: object, description: Representação AnswerOut }
++        question: { type: object, description: Representação QuestionOut, incluindo rubricas }
++        assessment:
++          $ref: '#/components/schemas/AssessmentSummaryOut'
++        human_review:
++          description: >-
++            Decisão humana já persistida para este job, se existir; null quando o job
++            ainda aguarda revisão. Presente para a UI recuperar e exibir a decisão
++            já registrada (autor, data, nota, justificativa) sem reoferecer o
++            formulário de primeira aprovação.
++          nullable: true
++          allOf:
++            - $ref: '#/components/schemas/HumanReviewSummaryOut'
++    HumanReviewSummaryOut:
++      type: object
++      required: [id, reviewer_id, reviewer_email, decision, final_total, final_scores, created_at]
++      properties:
++        id: { type: string }
++        reviewer_id: { type: string }
++        reviewer_email: { type: string, format: email }
++        decision: { type: string, enum: [APPROVE, ALTER] }
++        final_total: { type: number }
++        final_scores:
++          type: array
++          items:
++            type: object
++            properties:
++              criterion_id: { type: string }
++              score: { type: string }
++        justification: { type: string, nullable: true }
++        created_at: { type: string, format: date-time }
++    ReviewConflictOut:
++      type: object
++      required: [code, message, existing_review, correlation_id]
++      properties:
++        code: { type: string, example: REVIEW_ALREADY_EXISTS }
++        message: { type: string, example: "Este job já possui uma decisão humana registrada." }
++        existing_review:
++          $ref: '#/components/schemas/HumanReviewSummaryOut'
++        correlation_id: { type: string }
++    AssessmentSummaryOut:
++      type: object
++      required: [id, title]
++      properties:
++        id: { type: string }
++        title: { type: string }
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index c7ccd09..67a0d0e 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -11,6 +11,6 @@ import { ErrorPage } from './pages/ErrorPage'
+ import { LoginPage } from './pages/LoginPage'
+ import { ReviewPage } from './pages/ReviewPage'
+ 
+-function SessionGuard() { const { user, loading } = useAuth(); const location = useLocation(); const navigate = useNavigate(); useEffect(() => { const handler = () => navigate('/login', { replace: true, state: { from: location.pathname } }); window.addEventListener('avalia:unauthorized', handler); return () => window.removeEventListener('avalia:unauthorized', handler) }, [location.pathname, navigate]); if (loading) return <main className="center-page"><Spinner label="Verificando sessão…" /></main>; return user ? <Outlet /> : <Navigate to="/login" replace state={{ from: location.pathname }} /> }
++function SessionGuard() { const { user, loading } = useAuth(); const location = useLocation(); const navigate = useNavigate(); useEffect(() => { const handler = () => navigate('/login', { replace: true, state: { from: location.pathname + location.search } }); window.addEventListener('avalia:unauthorized', handler); return () => window.removeEventListener('avalia:unauthorized', handler) }, [location.pathname, location.search, navigate]); if (loading) return <main className="center-page"><Spinner label="Verificando sessão…" /></main>; return user ? <Outlet /> : <Navigate to="/login" replace state={{ from: location.pathname + location.search }} /> }
+ const router = createBrowserRouter([{ path: '/login', element: <LoginPage />, errorElement: <ErrorPage /> }, { element: <SessionGuard />, children: [{ element: <Layout />, children: [{ path: '/', element: <Navigate to="/avaliacoes" replace /> }, { path: '/avaliacoes', element: <AssessmentsPage /> }, { path: '/avaliacoes/nova', element: <AssessmentEditorPage /> }, { path: '/avaliacoes/:id', element: <AssessmentEditorPage /> }, { path: '/avaliacoes/:id/resposta', element: <AnswerPage /> }, { path: '/correcoes/:id', element: <CorrectionPage /> }, { path: '/correcoes/:id/revisao', element: <ReviewPage /> }] }] }, { path: '*', element: <Navigate to="/avaliacoes" replace /> }])
+ export default function App() { return <AuthProvider><RouterProvider router={router} /></AuthProvider> }
+diff --git a/frontend/src/pages/ReviewPage.tsx b/frontend/src/pages/ReviewPage.tsx
+index de4de55..df4bc84 100644
+--- a/frontend/src/pages/ReviewPage.tsx
++++ b/frontend/src/pages/ReviewPage.tsx
+@@ -1,28 +1,143 @@
+-import { useMemo, useState } from 'react'
+-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
++import { useEffect, useMemo, useState } from 'react'
++import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+ import { Alert } from '../components/Alert'
+ import { Confidence } from '../components/Confidence'
+-import { submitReview } from '../services/api'
++import { getCorrectionContext, submitReview, ApiError } from '../services/api'
+ import { readWorkflow } from '../services/workflow'
++import type { Assessment, Answer, CorrectionJob, Question, Criterion, CriterionSuggestion, HumanReviewSummary } from '../types'
++
++export type ReviewData = {
++  assessment?: Pick<Assessment, 'id' | 'title'> & { question?: Question, questions?: Question[] };
++  answer?: Answer;
++  job?: CorrectionJob;
++  human_review?: HumanReviewSummary | null;
++}
+ 
+ const num = (value?: number) => Number(value || 0)
++
++function formatScore(value: number | string | undefined): string {
++  if (value === undefined || value === null) return '0'
++  const n = Number(value)
++  return isNaN(n) ? String(value) : n.toLocaleString('pt-BR')
++}
++
++function formatDateTime(isoString?: string): string {
++  if (!isoString) return ''
++  const parsed = new Date(isoString)
++  return isNaN(parsed.getTime()) ? isoString : parsed.toLocaleString('pt-BR')
++}
++
+ export function ReviewPage() {
+-  const navigate = useNavigate(); const [params] = useSearchParams(); const manual = params.get('manual') === '1'; const { assessment, answer, job } = readWorkflow(); const correction = job?.latest_execution
++  const { id } = useParams<{ id: string }>()
++  const [params] = useSearchParams()
++  const manual = params.get('manual') === '1'
++
++  const [loading, setLoading] = useState(true)
++  const [hasCachedData, setHasCachedData] = useState(false)
++  const [errorObj, setErrorObj] = useState<{ message: string; status?: number } | null>(null)
++
++  const [data, setData] = useState<ReviewData>({})
++
++  useEffect(() => {
++    if (!id) {
++      setLoading(false)
++      return
++    }
++
++    let active = true
++
++    const current = readWorkflow()
++    const hasCache = current.job?.id === id && current.assessment && current.answer
++    setHasCachedData(!!hasCache)
++    setLoading(true)
++
++    getCorrectionContext(id)
++      .then((ctx) => {
++        if (!active) return
++        const newData: ReviewData = {
++          job: ctx.job,
++          answer: ctx.answer,
++          assessment: { ...ctx.assessment, question: ctx.question },
++          human_review: ctx.human_review ?? null,
++        }
++        setData(newData)
++        setErrorObj(null)
++      })
++      .catch((e) => {
++        if (!active) return
++        if (e instanceof ApiError && e.status === 403) {
++          setErrorObj({ message: 'Você não tem permissão para acessar esta correção.', status: 403 })
++        } else {
++          setErrorObj({ message: e instanceof Error ? e.message : 'Não foi possível carregar os dados.', status: e instanceof ApiError ? e.status : 0 })
++        }
++      })
++      .finally(() => {
++        if (!active) return
++        setLoading(false)
++      })
++
++    return () => {
++      active = false
++    }
++  }, [id])
++
++  if (loading) {
++    return <div className="page-heading"><div><p>{hasCachedData ? 'Carregando dados de uma resposta já vista antes...' : 'Carregando dados da revisão...'}</p></div></div>
++  }
++
++  if (errorObj) {
++    if (errorObj.status === 403) {
++      return <Alert type="error">{errorObj.message}</Alert>
++    }
++    return <Alert type="error">{errorObj.message} <Link to="/avaliacoes">Volte às avaliações</Link>.</Alert>
++  }
++
++  // Guarda contra dados obsoletos: se o :id da URL mudou (navegação client-side
++  // entre duas revisões) mas o useEffect ainda não repovoou `data` para o novo
++  // id, não renderizar o ReviewForm com os dados antigos autorizados — isso
++  // vazaria dados de uma revisão anterior (possivelmente de outro professor)
++  // até a nova resposta da API chegar.
++  if (data.job?.id !== id) {
++    return <div className="page-heading"><div><p>Carregando dados da revisão...</p></div></div>
++  }
++
++  if (!data.job || !data.answer || (!data.assessment?.question && !data.assessment?.questions)) {
++    return <Alert>Os dados da revisão não estão disponíveis nesta sessão. <Link to="/avaliacoes">Volte às avaliações</Link> e abra a resposta novamente.</Alert>
++  }
++
++  return <ReviewForm data={data} manual={manual} />
++}
++
++function ReviewForm({ data, manual }: { data: ReviewData, manual: boolean }) {
++  const navigate = useNavigate(); const { assessment, answer, job, human_review: humanReview } = data; const correction = job?.latest_execution
++  const isReadOnly = Boolean(humanReview)
+   const question = assessment?.question || assessment?.questions?.[0]; const rubric = question?.rubric?.criteria || []
+-  const nameFor = (criterionId: string, index: number) => rubric.find(c => c.id === criterionId)?.name || `Critério ${index + 1}`
+-  const suggestions = correction?.criterion_scores || rubric.map(c => ({ criterion_id: c.id || c.name, max_score: c.max_score, score: 0, evidence: undefined as string | undefined, reason: undefined as string | undefined, confidence: undefined as number | undefined }))
+-  const [mode, setMode] = useState<'view' | 'alter'>(manual ? 'alter' : 'view'); const [scores, setScores] = useState<Record<string, number>>(() => Object.fromEntries(suggestions.map(s => [s.criterion_id, num(s.score)])))
+-  const [justification, setJustification] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false); const total = useMemo(() => Object.values(scores).reduce((a, b) => a + num(b), 0), [scores]); const suggestedTotal = suggestions.reduce((a, b) => a + num(b.score), 0)
+-  const validScores = suggestions.every(s => scores[s.criterion_id] >= 0 && scores[s.criterion_id] <= s.max_score); const canAlter = validScores && Boolean(justification.trim())
+-  const send = async (decision: 'APPROVE' | 'ALTER') => { const jobId = job?.id; if (!jobId) { setError('O servidor não forneceu o identificador da correção. Não é possível registrar a decisão.'); return } setBusy(true); setError(''); try { await submitReview(jobId, decision === 'APPROVE' ? { decision } : { decision, criteria_scores: suggestions.map(s => ({ criterion_id: s.criterion_id, score: scores[s.criterion_id] })), justification: justification.trim() }); navigate('/avaliacoes', { state: { reviewSaved: true } }) } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível registrar sua decisão.') } finally { setBusy(false) } }
+-  if (!question || !answer) return <Alert>Os dados da revisão não estão disponíveis nesta sessão. <Link to="/avaliacoes">Volte às avaliações</Link> e abra a resposta novamente.</Alert>
+-  return <><div className="page-heading"><div><p className="eyebrow">Revisão humana obrigatória</p><h1>Revise antes de confirmar</h1><p>A sugestão apoia sua análise. A decisão final é sempre sua.</p></div></div>
+-    {correction?.engine_mode === 'simulated' && <Alert type="warning"><strong>Análise em modo simulado.</strong> Este resultado não foi gerado pelo modelo real e deve ser usado apenas para demonstração. Faça a revisão manual completa.</Alert>}
+-    {manual && <Alert type="warning"><strong>Modo de correção manual.</strong> A IA não produziu uma sugestão. Preencha a pontuação de cada critério.</Alert>}{error && <Alert>{error}</Alert>}
+-    <div className="review-layout"><section className="panel review-source"><span className="label">Enunciado</span><h2>{question.statement}</h2><div className="answer-box"><span className="label">Resposta do aluno — somente leitura</span><p>{answer.text}</p></div></section>
+-      <section className="review-criteria" aria-label="Critérios de correção">{suggestions.map((item, index) => <article className="criterion-review" key={item.criterion_id}><div className="criterion-title"><div><span className="label">Critério {index + 1}</span><h2>{nameFor(item.criterion_id, index)}</h2></div><strong>{mode === 'alter' ? <><input className="score-input" aria-label={`Pontuação para ${nameFor(item.criterion_id, index)}`} type="number" min="0" max={item.max_score} step="0.1" value={scores[item.criterion_id]} onChange={e => setScores(s => ({ ...s, [item.criterion_id]: Number(e.target.value) }))} /> / {item.max_score}</> : <>{item.score} / {item.max_score}</>}</strong></div>
+-        {!manual && <div className="ai-suggestion"><span className="ai-label">Sugestão da IA — revisar</span><p><strong>Evidência:</strong> {item.evidence || 'Nenhum trecho foi informado.'}</p><p><strong>Justificativa:</strong> {item.reason || 'Justificativa não informada.'}</p><Confidence value={item.confidence} /></div>}{mode === 'alter' && (scores[item.criterion_id] < 0 || scores[item.criterion_id] > item.max_score) && <small className="field-error">Use um valor entre 0 e {item.max_score}.</small>}</article>)}</section></div>
+-    <section className="decision-bar"><div className="ai-total"><span>Sugestão da IA — revisar</span><strong>{manual ? 'Não disponível' : `${suggestedTotal.toLocaleString('pt-BR')} pontos`}</strong>{!manual && <Confidence value={correction?.overall_confidence} />}{correction?.confidence_method_version && <small>Método: {correction.confidence_method_version}</small>}{correction?.flags?.length ? <p><strong>Pontos de atenção:</strong> {correction.flags.join(' • ')}</p> : null}</div>
+-      <div className="human-decision"><span>Decisão humana</span>{mode === 'alter' ? <><strong>Nota final a confirmar: {total.toLocaleString('pt-BR')} pontos</strong>{!manual && Math.abs(total - suggestedTotal) > 0.001 && <p className="divergence">Diferença em relação à sugestão da IA: {(total - suggestedTotal).toLocaleString('pt-BR', { signDisplay: 'always' })} ponto(s).</p>}<label>Justificativa da alteração<textarea rows={3} required value={justification} onChange={e => setJustification(e.target.value)} placeholder="Explique por que a decisão humana difere ou como a nota foi definida" /></label><div className="button-row"><button className="button button--ghost" onClick={() => setMode('view')} disabled={busy || manual}>Cancelar alteração</button><button className="button button--primary" disabled={!canAlter || busy} onClick={() => void send('ALTER')}>{busy ? 'Confirmando…' : 'Confirmar alteração'}</button></div></> : <div className="button-row"><button className="button button--secondary" onClick={() => setMode('alter')}>Alterar sugestão</button><button className="button button--primary" disabled={busy} onClick={() => void send('APPROVE')}>{busy ? 'Confirmando…' : 'Aprovar como decisão humana'}</button></div>}</div>
++  const nameFor = (criterionId: string, index: number) => rubric.find((c: Criterion) => c.id === criterionId)?.name || `Critério ${index + 1}`
++  const suggestions: CriterionSuggestion[] = correction?.criterion_scores || rubric.map((c: Criterion) => ({ criterion_id: c.id || c.name, max_score: c.max_score, score: 0, evidence: undefined as string | undefined, reason: undefined as string | undefined, confidence: undefined as number | undefined }))
++  const finalScoresMap = useMemo(() => {
++    const map = new Map<string, string | number>()
++    if (humanReview?.final_scores) {
++      for (const item of humanReview.final_scores) {
++        map.set(item.criterion_id, item.score)
++      }
++    }
++    return map
++  }, [humanReview])
++  const [mode, setMode] = useState<'view' | 'alter'>(!isReadOnly && manual ? 'alter' : 'view'); const [scores, setScores] = useState<Record<string, number>>(() => Object.fromEntries(suggestions.map((s: CriterionSuggestion) => [s.criterion_id, num(s.score)])))
++  const [justification, setJustification] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false); const total = useMemo(() => Object.values(scores).reduce((a, b) => a + num(b), 0), [scores]); const suggestedTotal = suggestions.reduce((a: number, b: CriterionSuggestion) => a + num(b.score), 0)
++  const validScores = suggestions.every((s: CriterionSuggestion) => scores[s.criterion_id] >= 0 && scores[s.criterion_id] <= s.max_score); const canAlter = validScores && Boolean(justification.trim())
++  const send = async (decision: 'APPROVE' | 'ALTER') => { const jobId = job?.id; if (!jobId) { setError('O servidor não forneceu o identificador da correção. Não é possível registrar a decisão.'); return } setBusy(true); setError(''); try { await submitReview(jobId, decision === 'APPROVE' ? { decision } : { decision, criteria_scores: suggestions.map((s: CriterionSuggestion) => ({ criterion_id: s.criterion_id, score: scores[s.criterion_id] })), justification: justification.trim() }); navigate('/avaliacoes', { state: { reviewSaved: true } }) } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível registrar sua decisão.') } finally { setBusy(false) } }
++  return <>{isReadOnly ? <div className="page-heading"><div><p className="eyebrow">Decisão humana registrada</p><h1>Revisão concluída</h1><p>Esta correção já foi revisada. Os dados abaixo são exibidos em modo somente leitura.</p></div><div><Link to="/avaliacoes" className="button button--secondary">Voltar às avaliações</Link></div></div> : <div className="page-heading"><div><p className="eyebrow">Revisão humana obrigatória</p><h1>Revise antes de confirmar</h1><p>A sugestão apoia sua análise. A decisão final é sempre sua.</p></div></div>}
++    {isReadOnly && humanReview && <Alert type="info"><strong>Decisão humana já registrada.</strong> Decisão: {humanReview.decision === 'APPROVE' ? 'Aprovação (APPROVE)' : 'Alteração (ALTER)'} • Nota final: {formatScore(humanReview.final_total)} pontos • Revisado por: {humanReview.reviewer_email || humanReview.reviewer_id} em {formatDateTime(humanReview.created_at)}.{humanReview.justification ? ` Justificativa: ${humanReview.justification}` : ''}</Alert>}
++    {!isReadOnly && correction?.engine_mode === 'simulated' && <Alert type="warning"><strong>Análise em modo simulado.</strong> Este resultado não foi gerado pelo modelo real e deve ser usado apenas para demonstração. Faça a revisão manual completa.</Alert>}
++    {!isReadOnly && manual && <Alert type="warning"><strong>Modo de correção manual.</strong> A IA não produziu uma sugestão. Preencha a pontuação de cada critério.</Alert>}{error && <Alert>{error}</Alert>}
++    <div className="review-layout"><section className="panel review-source"><span className="label">Enunciado</span><h2>{question?.statement}</h2><div className="answer-box"><span className="label">Resposta do aluno — somente leitura</span><p>{answer?.text}</p></div></section>
++      <section className="review-criteria" aria-label="Critérios de correção">{suggestions.map((item: CriterionSuggestion, index: number) => {
++        const finalScore = isReadOnly ? (finalScoresMap.get(item.criterion_id) ?? item.score) : item.score
++        return <article className="criterion-review" key={item.criterion_id}><div className="criterion-title"><div><span className="label">Critério {index + 1}</span><h2>{nameFor(item.criterion_id, index)}</h2></div><strong>{!isReadOnly && mode === 'alter' ? <><input className="score-input" aria-label={`Pontuação para ${nameFor(item.criterion_id, index)}`} type="number" min="0" max={item.max_score} step="0.1" value={scores[item.criterion_id]} onChange={e => setScores(s => ({ ...s, [item.criterion_id]: Number(e.target.value) }))} /> / {item.max_score}</> : isReadOnly ? <>{formatScore(finalScore)} / {item.max_score}</> : <>{item.score} / {item.max_score}</>}</strong></div>
++          {!manual && <div className="ai-suggestion"><span className="ai-label">{isReadOnly ? 'Sugestão da IA' : 'Sugestão da IA — revisar'}</span><p><strong>Evidência:</strong> {item.evidence || 'Nenhum trecho foi informado.'}</p><p><strong>Justificativa:</strong> {item.reason || 'Justificativa não informada.'}</p><Confidence value={item.confidence} /></div>}{!isReadOnly && mode === 'alter' && (scores[item.criterion_id] < 0 || scores[item.criterion_id] > item.max_score) && <small className="field-error">Use um valor entre 0 e {item.max_score}.</small>}</article>
++      })}</section></div>
++    <section className="decision-bar"><div className="ai-total"><span>{isReadOnly ? 'Sugestão da IA' : 'Sugestão da IA — revisar'}</span><strong>{manual ? 'Não disponível' : `${suggestedTotal.toLocaleString('pt-BR')} pontos`}</strong>{!manual && <Confidence value={correction?.overall_confidence} />}{correction?.confidence_method_version && <small>Método: {correction.confidence_method_version}</small>}{correction?.flags?.length ? <p><strong>Pontos de atenção:</strong> {correction.flags.join(' • ')}</p> : null}</div>
++      <div className="human-decision"><span>Decisão humana</span>{isReadOnly && humanReview ? <><strong>Decisão registrada: {humanReview.decision === 'APPROVE' ? 'Aprovação (APPROVE)' : 'Alteração (ALTER)'}</strong><div><strong>Nota final:</strong> {formatScore(humanReview.final_total)} pontos</div><div><strong>Revisado por:</strong> {humanReview.reviewer_email || humanReview.reviewer_id}</div><div><strong>Data da revisão:</strong> {formatDateTime(humanReview.created_at)}</div>{humanReview.justification ? <div><strong>Justificativa:</strong> {humanReview.justification}</div> : null}<div className="button-row"><Link to="/avaliacoes" className="button button--secondary">Voltar às avaliações</Link></div></> : mode === 'alter' ? <><strong>Nota final a confirmar: {total.toLocaleString('pt-BR')} pontos</strong>{!manual && Math.abs(total - suggestedTotal) > 0.001 && <p className="divergence">Diferença em relação à sugestão da IA: {(total - suggestedTotal).toLocaleString('pt-BR', { signDisplay: 'always' })} ponto(s).</p>}<label>Justificativa da alteração<textarea rows={3} required value={justification} onChange={e => setJustification(e.target.value)} placeholder="Explique por que a decisão humana difere ou como a nota foi definida" /></label><div className="button-row"><button className="button button--ghost" onClick={() => setMode('view')} disabled={busy || manual}>Cancelar alteração</button><button className="button button--primary" disabled={!canAlter || busy} onClick={() => void send('ALTER')}>{busy ? 'Confirmando…' : 'Confirmar alteração'}</button></div></> : <div className="button-row"><button className="button button--secondary" onClick={() => setMode('alter')}>Alterar sugestão</button><button className="button button--primary" disabled={busy} onClick={() => void send('APPROVE')}>{busy ? 'Confirmando…' : 'Aprovar como decisão humana'}</button></div>}</div>
+     </section></>
+ }
+diff --git a/frontend/src/services/api.ts b/frontend/src/services/api.ts
+index 16a8e4a..96318c4 100644
+--- a/frontend/src/services/api.ts
++++ b/frontend/src/services/api.ts
+@@ -1,4 +1,4 @@
+-import type { ApiErrorBody, Assessment, Answer, CorrectionJob, Criterion, JobStatus, User } from '../types'
++import type { ApiErrorBody, Assessment, Answer, CorrectionJob, Criterion, HumanReviewSummary, JobStatus, User } from '../types'
+ 
+ const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000/v1').replace(/\/$/, '')
+ const ACCESS_TOKEN_KEY = 'avalia_access_token'
+@@ -85,4 +85,15 @@ export async function requestCorrection(answerId: string): Promise<Pick<Correcti
+   return { id, status: result.status }
+ }
+ export const getCorrectionJob = (id: string) => request<CorrectionJob>(`/correction-jobs/${id}`)
++
++export interface CorrectionJobContext {
++  job: CorrectionJob;
++  answer: Answer;
++  question: import('../types').Question;
++  assessment: { id: string; title: string };
++  human_review?: HumanReviewSummary | null;
++}
++
++export const getCorrectionContext = (jobId: string) => request<CorrectionJobContext>(`/correction-jobs/${jobId}/context`)
++
+ export const submitReview = (correctionId: string, payload: { decision: 'APPROVE' | 'ALTER'; criteria_scores?: { criterion_id: string; score: number }[]; justification?: string }) => request(`/corrections/${correctionId}/reviews`, { method: 'POST', body: JSON.stringify(payload) })
+diff --git a/frontend/src/types.ts b/frontend/src/types.ts
+index 6cd58f0..e005675 100644
+--- a/frontend/src/types.ts
++++ b/frontend/src/types.ts
+@@ -10,4 +10,15 @@ export interface Answer { id: string; question_id: string; student_name?: string
+ export interface CriterionSuggestion { criterion_id: string; criterion_name?: string; score: number; max_score: number; reason?: string; evidence?: string; confidence?: number; was_clamped?: boolean }
+ export interface AIExecutionResult { id: string; engine_mode?: 'real' | 'simulated'; model?: string; confidence_method_version?: string; overall_confidence?: number; review_recommendation?: string; duration_ms?: number; flags?: string[]; criterion_scores: CriterionSuggestion[] }
+ export interface CorrectionJob { id: string; answer_id?: string; status: JobStatus; attempt?: number; error_message?: string; latest_execution?: AIExecutionResult }
++export interface HumanReviewCriterionScore { criterion_id: string; score: string | number }
++export interface HumanReviewSummary {
++  id: string;
++  reviewer_id: string;
++  reviewer_email: string;
++  decision: 'APPROVE' | 'ALTER';
++  final_total: number | string;
++  final_scores: HumanReviewCriterionScore[];
++  justification?: string | null;
++  created_at: string;
++}
+ export interface ApiErrorBody { code?: string; message?: string; correlation_id?: string; field_errors?: { field?: string; reason?: string }[] }

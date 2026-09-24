@@ -1,4 +1,5 @@
 from typing import List, Literal, Optional
+
 from pydantic import BaseModel, ConfigDict, Field
 
 # Modos de execução suportados (RN-017)

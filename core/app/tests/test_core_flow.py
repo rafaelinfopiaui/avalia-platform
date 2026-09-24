@@ -105,7 +105,11 @@ def test_ai_engine_unavailable_does_not_fabricate_result(client, professor_token
 
     assert job["status"] == "FALHA", job
     assert job["error_message"] is not None
-    assert "manual" in job["error_message"].lower() or "indispon" in job["error_message"].lower() or "tente" in job["error_message"].lower()
+    assert (
+        "manual" in job["error_message"].lower()
+        or "indispon" in job["error_message"].lower()
+        or "tente" in job["error_message"].lower()
+    )
 
 
 def test_human_review_persists_with_reviewer(client, professor_token, test_engine):
@@ -128,7 +132,8 @@ def test_human_review_persists_with_reviewer(client, professor_token, test_engin
     answer_id = resp.json()["id"]
 
     from sqlalchemy.orm import sessionmaker
-    from app.models import CorrectionJob, JobStatus, Rubric, AIExecution, CriterionScore
+
+    from app.models import AIExecution, CorrectionJob, CriterionScore, JobStatus, Rubric
     TestingSessionLocal = sessionmaker(bind=test_engine, autoflush=False, autocommit=False, future=True)
     session = TestingSessionLocal()
     rubric = session.query(Rubric).filter(Rubric.question_id == question_id).first()
@@ -188,6 +193,7 @@ def test_criterion_score_out_of_range_is_rejected(client, professor_token, test_
     answer_id = resp.json()["id"]
 
     from sqlalchemy.orm import sessionmaker
+
     from app.models import CorrectionJob, JobStatus, Rubric
     TestingSessionLocal = sessionmaker(bind=test_engine, autoflush=False, autocommit=False, future=True)
     session = TestingSessionLocal()
@@ -228,10 +234,6 @@ def test_reprocessing_preserves_previous_versions(client, professor_token, test_
     )
     answer_id = resp.json()["id"]
 
-    from sqlalchemy.orm import sessionmaker
-    from app.models import AIExecution
-    TestingSessionLocal = sessionmaker(bind=test_engine, autoflush=False, autocommit=False, future=True)
-
     # Solicita duas correções (duas tentativas) -- ambas falharão (AI Engine indisponível
     # no ambiente de teste), mas cada uma cria um CorrectionJob distinto e preserva o anterior.
     resp1 = client.post(f"/v1/answers/{answer_id}/corrections", headers=headers)
@@ -270,7 +272,9 @@ def test_correction_creation_response_has_id_for_polling(client, professor_token
     resp = client.post(f"/v1/answers/{answer_id}/corrections", headers=headers)
     assert resp.status_code == 202, resp.text
     body = resp.json()
-    assert "id" in body and body["id"], "resposta de criação do job precisa expor 'id' (usado pelo frontend para navegar/pollar)"
+    assert "id" in body and body["id"], (
+        "resposta de criação do job precisa expor 'id' (usado pelo frontend para navegar/pollar)"
+    )
     assert body["id"] == body["job_id"]
 
     # A rota de polling usada pelo frontend precisa aceitar exatamente esse id.
@@ -287,6 +291,7 @@ def test_seed_professor_email_is_a_valid_email_syntax():
     core/app/config.py e docs/roteiro-demo.md.
     """
     from email_validator import validate_email
+
     from app.config import get_settings
 
     settings = get_settings()
@@ -301,6 +306,7 @@ def test_login_with_special_use_domain_is_rejected_with_422_not_401():
     padrão de configuração sem perceber a diferença de status code.
     """
     from fastapi.testclient import TestClient
+
     import app.main as main_module
 
     with TestClient(main_module.app) as c:

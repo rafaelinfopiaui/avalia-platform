@@ -2,11 +2,12 @@
 Uso: python -m app.seed  (com o venv ativo e DATABASE_URL configurado)
 """
 from __future__ import annotations
+
 from decimal import Decimal
 
-from app.db import SessionLocal, engine, Base
 from app.config import get_settings
-from app.models import User, Role, Assessment, AssessmentStatus, Question, Rubric, RubricCriterion, Answer
+from app.db import Base, SessionLocal, engine
+from app.models import Answer, Assessment, AssessmentStatus, Question, Role, Rubric, RubricCriterion, User
 from app.security import hash_password
 
 settings = get_settings()
@@ -30,7 +31,9 @@ def run():
         db.add(professor)
         db.flush()
 
-        assessment = Assessment(title="Estruturas de Dados — Avaliação 1", owner_id=professor.id, status=AssessmentStatus.RASCUNHO)
+        assessment = Assessment(
+            title="Estruturas de Dados — Avaliação 1", owner_id=professor.id, status=AssessmentStatus.RASCUNHO,
+        )
         db.add(assessment)
         db.flush()
 
@@ -56,7 +59,11 @@ def run():
         criteria = [
             ("Identifica LIFO na pilha", "Reconhece que a pilha segue Last In, First Out.", Decimal("1.50")),
             ("Identifica FIFO na fila", "Reconhece que a fila segue First In, First Out.", Decimal("1.50")),
-            ("Diferenciação clara", "Contrasta explicitamente pilha e fila (não apenas define isoladamente).", Decimal("1.50")),
+            (
+                "Diferenciação clara",
+                "Contrasta explicitamente pilha e fila (não apenas define isoladamente).",
+                Decimal("1.50"),
+            ),
             ("Clareza e precisão", "Texto claro, correto tecnicamente, sem ambiguidade.", Decimal("1.50")),
         ]
         for name, desc, max_score in criteria:

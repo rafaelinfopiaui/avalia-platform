@@ -1,0 +1,12 @@
+line-length = 120
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "I"]
+
+[lint.isort]
+# 'app' é o pacote de primeira parte de cada projeto (core/app, ai-engine/app).
+# Fixar explicitamente evita que a ordenação de import mude conforme o
+# diretório de trabalho de onde `ruff check` é invocado (raiz do repo vs.
+# dentro de core/ ou ai-engine/, como a CI executa via `working-directory`).
+known-first-party = ["app"]

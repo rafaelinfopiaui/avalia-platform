@@ -10,4 +10,15 @@ export interface Answer { id: string; question_id: string; student_name?: string
 export interface CriterionSuggestion { criterion_id: string; criterion_name?: string; score: number; max_score: number; reason?: string; evidence?: string; confidence?: number; was_clamped?: boolean }
 export interface AIExecutionResult { id: string; engine_mode?: 'real' | 'simulated'; model?: string; confidence_method_version?: string; overall_confidence?: number; review_recommendation?: string; duration_ms?: number; flags?: string[]; criterion_scores: CriterionSuggestion[] }
 export interface CorrectionJob { id: string; answer_id?: string; status: JobStatus; attempt?: number; error_message?: string; latest_execution?: AIExecutionResult }
+export interface HumanReviewCriterionScore { criterion_id: string; score: string | number }
+export interface HumanReviewSummary {
+  id: string;
+  reviewer_id: string;
+  reviewer_email: string;
+  decision: 'APPROVE' | 'ALTER';
+  final_total: number | string;
+  final_scores: HumanReviewCriterionScore[];
+  justification?: string | null;
+  created_at: string;
+}
 export interface ApiErrorBody { code?: string; message?: string; correlation_id?: string; field_errors?: { field?: string; reason?: string }[] }

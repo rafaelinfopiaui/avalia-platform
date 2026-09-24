@@ -1,0 +1,50 @@
+diff --git a/ruff.toml b/ruff.toml
+new file mode 100644
+index 0000000..2be4976
+--- /dev/null
++++ b/ruff.toml
+@@ -0,0 +1,12 @@
++line-length = 120
++target-version = "py311"
++
++[lint]
++select = ["E", "F", "I"]
++
++[lint.isort]
++# 'app' é o pacote de primeira parte de cada projeto (core/app, ai-engine/app).
++# Fixar explicitamente evita que a ordenação de import mude conforme o
++# diretório de trabalho de onde `ruff check` é invocado (raiz do repo vs.
++# dentro de core/ ou ai-engine/, como a CI executa via `working-directory`).
++known-first-party = ["app"]
+diff --git a/ai-engine/requirements-dev.txt b/ai-engine/requirements-dev.txt
+new file mode 100644
+index 0000000..6999a21
+--- /dev/null
++++ b/ai-engine/requirements-dev.txt
+@@ -0,0 +1 @@
++ruff>=0.6,<1.0
+diff --git a/frontend/eslint.config.js b/frontend/eslint.config.js
+new file mode 100644
+index 0000000..ca60925
+--- /dev/null
++++ b/frontend/eslint.config.js
+@@ -0,0 +1,19 @@
++import tseslint from 'typescript-eslint'
++import reactHooks from 'eslint-plugin-react-hooks'
++import reactRefresh from 'eslint-plugin-react-refresh'
++
++export default tseslint.config(
++  { ignores: ['dist'] },
++  {
++    extends: [...tseslint.configs.recommended],
++    files: ['**/*.{ts,tsx}'],
++    plugins: {
++      'react-hooks': reactHooks,
++      'react-refresh': reactRefresh,
++    },
++    rules: {
++      'react-hooks/rules-of-hooks': 'error',
++      'react-hooks/exhaustive-deps': 'warn',
++    },
++  },
++)

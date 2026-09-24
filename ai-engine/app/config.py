@@ -2,6 +2,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,8 @@ def get_output_schema() -> Dict[str, Any]:
 
     if not schema_file or not schema_file.exists():
         raise FileNotFoundError(
-            f"Schema de saída do AI Engine não encontrado no caminho {settings.schema_path} nem nos caminhos de fallback."
+            f"Schema de saída do AI Engine não encontrado no caminho {settings.schema_path} "
+            "nem nos caminhos de fallback."
         )
 
     with open(schema_file, "r", encoding="utf-8") as f:

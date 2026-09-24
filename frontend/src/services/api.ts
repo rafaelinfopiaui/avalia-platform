@@ -1,4 +1,4 @@
-import type { ApiErrorBody, Assessment, Answer, CorrectionJob, Criterion, JobStatus, User } from '../types'
+import type { ApiErrorBody, Assessment, Answer, CorrectionJob, Criterion, HumanReviewSummary, JobStatus, User } from '../types'
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000/v1').replace(/\/$/, '')
 const ACCESS_TOKEN_KEY = 'avalia_access_token'
@@ -85,4 +85,15 @@ export async function requestCorrection(answerId: string): Promise<Pick<Correcti
   return { id, status: result.status }
 }
 export const getCorrectionJob = (id: string) => request<CorrectionJob>(`/correction-jobs/${id}`)
+
+export interface CorrectionJobContext {
+  job: CorrectionJob;
+  answer: Answer;
+  question: import('../types').Question;
+  assessment: { id: string; title: string };
+  human_review?: HumanReviewSummary | null;
+}
+
+export const getCorrectionContext = (jobId: string) => request<CorrectionJobContext>(`/correction-jobs/${jobId}/context`)
+
 export const submitReview = (correctionId: string, payload: { decision: 'APPROVE' | 'ALTER'; criteria_scores?: { criterion_id: string; score: number }[]; justification?: string }) => request(`/corrections/${correctionId}/reviews`, { method: 'POST', body: JSON.stringify(payload) })

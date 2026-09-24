@@ -2,11 +2,12 @@
 Aplicação principal FastAPI do AvalIA AI Engine.
 Expõe os endpoints POST /v1/analyze e GET /v1/health.
 """
+import logging
 import time
 import uuid
-import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Header, HTTPException, Request, Response, status
+
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -14,7 +15,6 @@ from app.cascade import DecisionCascade
 from app.config import settings
 from app.logging_config import (
     get_correlation_id,
-    hash_text,
     set_correlation_id,
     setup_logging,
 )
