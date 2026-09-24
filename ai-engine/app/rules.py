@@ -7,6 +7,7 @@ NUNCA decide a nota final por si só.
 import re
 import unicodedata
 from typing import Dict, List, Set
+
 from app.schemas import RubricCriterionInput
 
 # Stopwords básicas em português para não poluir palavras-chave de regras

@@ -1,6 +1,7 @@
 import json
 from unittest.mock import AsyncMock
 import pytest
+from app.config import settings
 from app.main import ollama_client
 
 
@@ -34,6 +35,7 @@ def test_invalid_llm_json_triggers_repair_and_succeeds(client, sample_payload, m
     mock_generate = AsyncMock(return_value=broken_output)
     mock_repair = AsyncMock(return_value=valid_repaired_output)
 
+    monkeypatch.setattr(settings, "ai_engine_mode", "real")
     monkeypatch.setattr(ollama_client, "generate", mock_generate)
     monkeypatch.setattr(ollama_client, "repair_json", mock_repair)
 
@@ -60,6 +62,7 @@ def test_invalid_llm_json_fails_after_repair_returns_502(client, sample_payload,
     mock_generate = AsyncMock(return_value=broken_output)
     mock_repair = AsyncMock(return_value=still_broken_output)
 
+    monkeypatch.setattr(settings, "ai_engine_mode", "real")
     monkeypatch.setattr(ollama_client, "generate", mock_generate)
     monkeypatch.setattr(ollama_client, "repair_json", mock_repair)
 

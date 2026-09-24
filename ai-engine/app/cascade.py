@@ -7,11 +7,12 @@ import logging
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
-from fastapi import HTTPException
-import jsonschema
 
-from app.config import get_output_schema, settings
+import jsonschema
+from fastapi import HTTPException
+
 from app.confidence import CONFIDENCE_METHOD_VERSION, calculate_confidence
+from app.config import get_output_schema, settings
 from app.injection import detect_prompt_injection
 from app.logging_config import hash_text
 from app.ollama_client import OllamaClient, OllamaConnectionError, OllamaTimeoutError

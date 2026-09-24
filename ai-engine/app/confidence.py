@@ -12,6 +12,7 @@ Faixas operacionais (ADR-008):
 - Baixa: < 0.60  -> REVIEW_REQUIRED
 """
 from typing import Dict, List, Tuple
+
 from app.schemas import CriterionScoreOutput, ReviewRecommendation
 
 CONFIDENCE_METHOD_VERSION = "heuristic-v1"

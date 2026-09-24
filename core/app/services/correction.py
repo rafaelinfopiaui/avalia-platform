@@ -1,6 +1,7 @@
 from __future__ import annotations
+
 import json
-from decimal import Decimal, ROUND_HALF_EVEN
+from decimal import ROUND_HALF_EVEN, Decimal
 
 import httpx
 from sqlalchemy.orm import Session
@@ -8,8 +9,14 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.logging_utils import log_event
 from app.models import (
-    Answer, CorrectionJob, JobStatus, Rubric, RubricCriterion,
-    AIExecution, CriterionScore, AuditEvent,
+    AIExecution,
+    Answer,
+    AuditEvent,
+    CorrectionJob,
+    CriterionScore,
+    JobStatus,
+    Rubric,
+    RubricCriterion,
 )
 
 settings = get_settings()
