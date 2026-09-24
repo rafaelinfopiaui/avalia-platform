@@ -460,6 +460,20 @@ Rafael homologou a AV-S02 no escopo entregue e autorizou a integração do PR #1
 
 **Esta homologação NÃO inclui:** tag, deploy, aplicação da migração no `avalia_dev`, saneamento de duplicatas ou promoção de baseline. Nenhum desses itens foi executado.
 
+### 19.7 Integração realizada (2026-09-24)
+
+PR #1 retirado de rascunho (`gh pr ready 1`) e integrado a `main` por **merge commit** (não squash), preservando os 6 commits da branch (`dabd13a`, `5bfbac0`, `9b84c23`, `36de551`, `47d57f5`, `9e4b1d0`).
+
+- **SHA do merge commit:** `7f2e0032ac7971ae43db5cc2386da0de321b778f`.
+- **PR:** [#1](https://github.com/rafaelinfopiaui/avalia-platform/pull/1), estado `MERGED`, `mergedAt: 2026-09-24T12:39:22Z`.
+- **CI disparada pelo push em `main`:** run [36000432576](https://github.com/rafaelinfopiaui/avalia-platform/actions/runs/36000432576), `headSha` = `7f2e0032ac7971ae43db5cc2386da0de321b778f` (idêntico ao merge commit), `conclusion: success`.
+- **Resultado dos 3 jobs em `main`:** `Core API (FastAPI + Postgres)` ✅, `AI Engine (FastAPI)` ✅, `Frontend (Vite + React + TS)` ✅ — todos verdes, sem correção necessária.
+- **`main` local sincronizado:** `git pull` fast-forward de `0be691e` para `7f2e003`, 114 arquivos, 28.526 inserções.
+
+**Estado do ambiente operacional, reafirmado após a integração:** `avalia_dev` permanece com 8 linhas em `human_reviews` (3 duplicadas fictícias no job `4f56a10b-...`) e **sem** `UniqueConstraint` — a migração `7b1d6d853f20`, agora presente no código de `main`, **não foi aplicada** a nenhum banco operacional. O código integrado exige essa migração para garantir unicidade real no banco; até sua aplicação (dependente de saneamento prévio e autorização específica), a proteção de idempotência em produção depende apenas da lógica aplicativa (`_review_is_equivalent`/`_review_conflict_response`), não da constraint do banco.
+
+Nenhuma tag, deploy, aplicação de migração operacional, saneamento de duplicatas ou promoção de baseline foi realizada nesta integração.
+
 ## 20. Fatiamento de lint Python autorizado por Rafael (2026-09-24)
 
 Rafael autorizou explicitamente o item 3: configurar Ruff mínimo para `core/` e `ai-engine/`, sem tocar no workflow, frontend ou fazer reformatação automática. O mapa de impacto foi ampliado para `ruff.toml`, `core/requirements-dev.txt`, `ai-engine/requirements-dev.txt` e, somente se o lint apontasse achado real, arquivos Python sob `core/app` e `ai-engine/app`.
