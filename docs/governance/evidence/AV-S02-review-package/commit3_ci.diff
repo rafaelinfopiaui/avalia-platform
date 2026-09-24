@@ -1,0 +1,171 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+new file mode 100644
+index 0000000..45a2712
+--- /dev/null
++++ b/.github/workflows/ci.yml
+@@ -0,0 +1,165 @@
++# ==============================================================================
++# CI Mínima — AvalIA (BL-AV-1-06 / DEBT-AV-005 / Sprint AV-S02)
++# ==============================================================================
++# Este workflow estabelece o pipeline mínimo e hermético de integração contínua
++# do monorepo AvalIA, cobrindo:
++#   - core: backend FastAPI + SQLAlchemy + PostgreSQL 16
++#   - ai-engine: microsserviço FastAPI de inferência/avaliação assistida
++#   - frontend: aplicação web Vite + React + TypeScript
++#
++# Contexto e Decisões de Engenharia:
++# 1. Triggers: Disparado em 'push' e 'pull_request' para a branch 'main'.
++# 2. Job 'core': Sobe um serviço postgres:16 com healthcheck e exporta DATABASE_URL
++#    para validação da paridade de infraestrutura. A suíte de testes de unidade e
++#    integração do core é desenhada com SQLite em arquivo temporário (tmp_path,
++#    core/app/tests/conftest.py), portanto a limpeza explícita de variáveis ('env -u AI_ENGINE_URL -u DATABASE_URL
++#    -u JWT_SECRET') é proposital e recomendada (vide core/README.md), garantindo
++#    isolamento e determinismo na execução. O serviço postgres:16 é mantido como
++#    infraestrutura de paridade/futura extensão, mas os testes atuais NÃO o exercitam.
++# 3. Job 'ai-engine': Executa a suíte de testes em dois steps separados:
++#    (a) modo padrão (sem AI_ENGINE_MODE setado, padrão 'real');
++#    (b) modo simulado global ('AI_ENGINE_MODE=simulated').
++#    Essa execução dupla é necessária para resguardar o isolamento corrigido em
++#    BL-AV-1-09 (resolução de DEBT-AV-009 na sprint AV-S02), assegurando que o
++#    comportamento dos testes com mock de reparo JSON/LLM e os cenários simulados
++#    permaneçam íntegros e independentes do ambiente de execução.
++# 4. Job 'frontend': Executa 'npm ci', 'npm run lint' (ESLint mínimo, ver
++#    frontend/eslint.config.js) e 'npm run build' com cache de dependências
++#    npm gerenciado via actions/setup-node.
++# 5. Lint Python mínimo (BL-AV-1-06, item 3 desta sprint): Ruff (E, F, I;
++#    ver ruff.toml na raiz) roda como step adicional nos jobs 'core' e
++#    'ai-engine', sem autofix/reformatação em CI — apenas checagem. A
++#    correção de achados reais já foi aplicada ao código nesta sprint;
++#    a CI apenas confirma que o estado permanece limpo.
++# 6. Segurança e Escopo: Workflow estritamente de validação contínua (CI). Não
++#    contém jobs de deploy, release, publicação de pacotes externos ou dependência
++#    de segredos de produção (secrets).
++# ==============================================================================
++
++name: CI
++
++"on":
++  push:
++    branches:
++      - main
++  pull_request:
++    branches:
++      - main
++
++jobs:
++  core:
++    name: Core API (FastAPI + Postgres)
++    runs-on: ubuntu-latest
++    services:
++      postgres:
++        image: postgres:16
++        env:
++          POSTGRES_DB: avalia_dev
++          POSTGRES_USER: avalia_user
++          POSTGRES_PASSWORD: avalia_password
++        ports:
++          - 5432:5432
++        options: >-
++          --health-cmd pg_isready
++          --health-interval 10s
++          --health-timeout 5s
++          --health-retries 5
++    defaults:
++      run:
++        working-directory: core
++    steps:
++      - name: Checkout repository
++        uses: actions/checkout@v4
++
++      - name: Set up Python 3.11
++        uses: actions/setup-python@v5
++        with:
++          python-version: '3.11'
++          cache: 'pip'
++          cache-dependency-path: core/requirements.txt
++
++      - name: Install dependencies in virtualenv
++        run: |
++          python3.11 -m venv .venv
++          source .venv/bin/activate
++          pip install --upgrade pip
++          pip install -r requirements.txt
++          pip install -r requirements-dev.txt
++
++      - name: Lint (Ruff)
++        run: |
++          source .venv/bin/activate
++          ruff check --config ../ruff.toml app
++
++      - name: Run core tests
++        env:
++          DATABASE_URL: postgresql+psycopg2://avalia_user:avalia_password@localhost:5432/avalia_dev
++        run: |
++          source .venv/bin/activate
++          env -u AI_ENGINE_URL -u DATABASE_URL -u JWT_SECRET pytest app/tests -q
++
++  ai-engine:
++    name: AI Engine (FastAPI)
++    runs-on: ubuntu-latest
++    defaults:
++      run:
++        working-directory: ai-engine
++    steps:
++      - name: Checkout repository
++        uses: actions/checkout@v4
++
++      - name: Set up Python 3.11
++        uses: actions/setup-python@v5
++        with:
++          python-version: '3.11'
++          cache: 'pip'
++          cache-dependency-path: ai-engine/requirements.txt
++
++      - name: Install dependencies in virtualenv
++        run: |
++          python3.11 -m venv .venv
++          source .venv/bin/activate
++          pip install --upgrade pip
++          pip install -r requirements.txt
++          pip install -r requirements-dev.txt
++
++      - name: Lint (Ruff)
++        run: |
++          source .venv/bin/activate
++          ruff check --config ../ruff.toml app
++
++      - name: Test ai-engine (default mode)
++        run: |
++          source .venv/bin/activate
++          pytest -q
++
++      - name: Test ai-engine (simulated mode)
++        run: |
++          source .venv/bin/activate
++          AI_ENGINE_MODE=simulated pytest -q
++
++  frontend:
++    name: Frontend (Vite + React + TS)
++    runs-on: ubuntu-latest
++    defaults:
++      run:
++        working-directory: frontend
++    steps:
++      - name: Checkout repository
++        uses: actions/checkout@v4
++
++      - name: Set up Node.js 20
++        uses: actions/setup-node@v4
++        with:
++          node-version: 20
++          cache: 'npm'
++          cache-dependency-path: frontend/package-lock.json
++
++      - name: Install dependencies
++        run: npm ci
++
++      - name: Lint (ESLint)
++        run: npm run lint
++
++      - name: Build frontend bundle
++        run: npm run build
