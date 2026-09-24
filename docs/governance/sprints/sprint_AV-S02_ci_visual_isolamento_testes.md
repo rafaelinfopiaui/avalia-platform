@@ -407,9 +407,39 @@ PostgreSQL isolado (sanitizados, sem credenciais reais): `docs/governance/eviden
 `DEBT-AV-005` permanece aberto até a execução remota real do workflow no GitHub Actions — a
 preparação deste pacote não constitui essa execução.
 
-**Nenhum passo Git (`add`/`commit`/`push`/criação de branch/PR) foi executado nesta fatia.
-Aguardando revisão do pacote e autorização explícita e específica de Rafael antes de qualquer
-um deles.**
+### 19.5 Execução Git/remota realizada (2026-09-24, autorização específica de Rafael)
+
+Branch criada: `feat/av-s01-s02-consolidacao` (a partir de `main`, HEAD `0be691e12e9d5d6f3ffc989237739f6559d8dacd`, sem descartar nenhuma alteração preexistente).
+
+**4 commits, na ordem exigida (por finalidade integrada, não por sprint isolada):**
+
+| # | Hash | Assunto | Arquivos | Itens/sprints |
+|---|---|---|---|---|
+| 1 | `dabd13a` | `feat(core,frontend): autorização por vínculo, retomada de contexto e idempotência da revisão humana` | 16 (12 modificados + 4 novos) | AV-S01 (autorização/retomada) + AV-S02/`BL-AV-1-10` |
+| 2 | `5bfbac0` | `test(ai-engine): isolamento de testes + lint mínimo (Ruff/ESLint)` | 23 (20 modificados + 3 novos) | AV-S02/`BL-AV-1-09` + item 3 (lint) |
+| 3 | `9b84c23` | `ci: workflow mínimo de CI (Core, AI Engine, frontend)` | 1 (novo) | AV-S02/`BL-AV-1-06`/`DEBT-AV-005` |
+| 4 | `36de551` | `docs(governance): rito de governança, sprints AV-S01/AV-S02, evidências e pacote de revisão` | 72 (todos novos) | governança GOV-001 a GOV-005 + AV-S01 + AV-S02 |
+
+`docs/roteiro-apresentacao-supervisor.md` confirmadamente ausente de todos os 4 commits (verificado por `git log --all -- <arquivo>` antes e depois do push, sem ocorrência).
+
+**Push:** `git push -u origin feat/av-s01-s02-consolidacao` — sucesso, branch remota criada.
+
+**Pull Request:** [#1](https://github.com/rafaelinfopiaui/avalia-platform/pull/1), rascunho (`draft`), `feat/av-s01-s02-consolidacao` → `main`. Descrição completa com funcionalidades, migração que interrompe diante de duplicatas, migração operacional/saneamento não autorizados, validações locais e limitações, revisão efetiva dos agentes.
+
+**Execução real do GitHub Actions:** disparada pelo evento `pull_request` (conforme Rafael avisou, o push isolado da branch não dispara; a abertura do PR sim). Run [35997285722](https://github.com/rafaelinfopiaui/avalia-platform/actions/runs/35997285722), commit validado `36de551e414cba847e9e369bee10701cd142bb87` (idêntico ao HEAD final da branch — confirmado, sem discrepância), conclusão `success`, ~1m40s.
+
+**Resultado dos 3 jobs, primeira tentativa remota, sem nenhuma correção necessária:**
+- `Core API (FastAPI + Postgres)`: ✅ Lint (Ruff) + `pytest app/tests -q` — 1m33s.
+- `AI Engine (FastAPI)`: ✅ Lint (Ruff) + testes em modo padrão e `AI_ENGINE_MODE=simulated` — 25s.
+- `Frontend (Vite + React + TS)`: ✅ ESLint + build — 17s.
+
+Nenhuma falha de CI ocorreu; nenhuma correção de configuração/compatibilidade foi necessária nesta branch.
+
+**`DEBT-AV-005` resolvido** — critério explícito de Rafael era execução remota bem-sucedida; atendido e registrado no registro de débitos com hash/run exatos.
+
+**Working tree após o push:** limpo, exceto `docs/roteiro-apresentacao-supervisor.md` (deliberadamente fora de qualquer commit, permanece untracked). `avalia_dev` verificado intacto (8 linhas em `human_reviews`, idêntico ao estado anterior a toda a trilha).
+
+**Pendências:** merge, tag, deploy, aplicação da migração `7b1d6d853f20` a `avalia_dev`, saneamento de duplicatas e homologação de fechamento de AV-S02 permanecem fora desta autorização — nenhum executado.
 
 ## 20. Fatiamento de lint Python autorizado por Rafael (2026-09-24)
 

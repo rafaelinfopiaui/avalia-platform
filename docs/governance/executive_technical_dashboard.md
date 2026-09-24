@@ -1,6 +1,6 @@
 # Dashboard Executivo de Evolução Técnica — AvalIA
 
-> Atualização: 2026-09-24 (pacote de revisão para publicação, AV-S01+AV-S02) · Fonte canônica versionada em Markdown · Estado: pacote de 4 commits por finalidade integrada preparado e disponível em `docs/governance/evidence/AV-S02-review-package/`; diffs completos, inventário, dependências e ausência de segredos confirmados; destino `feat/av-s01-s02-consolidacao` apenas registrado; nenhuma ação Git executada; CI remota e homologação continuam pendentes
+> Atualização: 2026-09-24 (PR #1 aberto, CI remota executada com sucesso) · Fonte canônica versionada em Markdown · Estado: branch `feat/av-s01-s02-consolidacao` com 4 commits por finalidade, PR #1 (rascunho) para `main`, CI remota real 3/3 jobs verdes no commit `36de551e`; `DEBT-AV-005` resolvido; `avalia_dev` não tocado; merge, tag, deploy, migração operacional, saneamento e homologação de fechamento continuam pendentes
 
 ## 1. Leitura executiva
 
@@ -14,7 +14,7 @@ O AvalIA possui uma demonstração experimental herdada, organizada em Core API,
 | Último baseline validado sob esta governança | nenhum promovido (explicitamente não promovido por esta homologação) | [ponteiro](snapshots/latest_validated_baseline.md) |
 | Baseline herdado candidato | inspeção documental/Git de 2026-09-21 | [BASELINE-001](snapshots/snapshot_BASELINE-001_estado-herdado.md) |
 | Sprint funcional encerrada | `AV-S01` — homologada por Rafael em 2026-09-23 com `DEBT-AV-009` aceito como débito residual aberto | [documento da sprint](sprints/sprint_AV-S01_autorizacao_retomada_revalidacao.md) |
-| Sprint funcional em execução | `AV-S02` — implementada e validada localmente (SQLite + PostgreSQL isolado); `DEBT-AV-011` resolvido tecnicamente com migração corrigida (sem deduplicação automática, por exigência explícita de Rafael); saneamento de duplicatas legadas é proposta separada, não executada; homologação e migração operacional pendentes; CI remota (`DEBT-AV-005`) pendente | [documento da sprint](sprints/sprint_AV-S02_ci_visual_isolamento_testes.md) |
+| Sprint funcional em execução | `AV-S02` — implementada e validada localmente (SQLite + PostgreSQL isolado); PR [#1](https://github.com/rafaelinfopiaui/avalia-platform/pull/1) aberto (rascunho), CI remota real executada com sucesso nos 3 jobs (`DEBT-AV-005` resolvido); homologação do fechamento e merge pendentes | [documento da sprint](sprints/sprint_AV-S02_ci_visual_isolamento_testes.md) |
 | Execução documental ativa | GOV-005 | [snapshot](snapshots/snapshot_EXEC-2026-09-23-02_GOV-005.md) |
 | Trilha proposta (não aprovada, exceto AV-S01) | "Operação de uma turma" (5 fases, com Etapa 4B — entrada por imagem priorizada sobre CSV) | [documento da trilha](backlog/trilha_operacao_de_turma.md) §11 |
 
@@ -124,7 +124,7 @@ Destaques atuais: pendência regulatória impede uso com dados reais; estado fun
 | Decidir demais itens pendentes da Etapa 4B | `DEC-AV-017` (critérios do benchmark), `019`, `020`; demais decisões gerais `DEC-AV-006` a `015` | pendente |
 | Executar a primeira sprint aprovada | `AV-S01` aprovada e autorizada (GOV-005, 2026-09-23) | **executada, saneada e homologada por Rafael (2026-09-23); `DEBT-AV-009` aceito como débito residual aberto** |
 | Aprovar a segunda sprint (`AV-S02`) | Rafael revisar o plano `AV-S02` (CI mínima, visual completo com IA simulada, isolamento de `DEBT-AV-009`) e decidir sobre os 4 pontos do §15 | **aprovada e executada localmente (2026-09-23); CI remota e homologação do fechamento pendentes** — [documento da sprint](sprints/sprint_AV-S02_ci_visual_isolamento_testes.md) §18/§19 |
-| Autorizar a etapa remota de `AV-S02` | Rafael revisar o pacote de revisão (`docs/governance/evidence/AV-S02-review-package/00_pacote_revisao.md`) e decidir sobre `git add`/`commit`/`push`, criação da branch `feat/av-s01-s02-consolidacao` e abertura do PR para `main` | **pacote preparado e apresentado (2026-09-24); aguardando revisão e autorização específica** |
+| Autorizar a etapa remota de `AV-S02` | Rafael revisar o pacote de revisão e decidir sobre `git add`/`commit`/`push`, criação da branch e abertura do PR | **executado (2026-09-24)** — branch `feat/av-s01-s02-consolidacao`, 4 commits, PR [#1](https://github.com/rafaelinfopiaui/avalia-platform/pull/1) (rascunho), CI remota real 3/3 jobs verdes (run [35997285722](https://github.com/rafaelinfopiaui/avalia-platform/actions/runs/35997285722), commit `36de551e414cba847e9e369bee10701cd142bb87`) |
 | Decidir saneamento das duplicatas legadas de revisão humana (`DEBT-AV-011`) | Rafael decidir sobre a proposta de saneamento (backup, classificação equivalente/conflitante, preservação por arquivo em vez de exclusão) apresentada em `backlog/proposta_saneamento_human_reviews_duplicadas.md` | pendente — proposta apresentada em 2026-09-24, não executada |
 
 ## 9. Política de atualização
