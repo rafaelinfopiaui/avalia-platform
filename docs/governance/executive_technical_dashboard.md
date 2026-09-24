@@ -1,6 +1,6 @@
 # Dashboard Executivo de Evolução Técnica — AvalIA
 
-> Atualização: 2026-09-24 (PR #1 integrado a `main` via merge commit) · Fonte canônica versionada em Markdown · Estado: AV-S02 homologada; PR #1 integrado a `main` (SHA `7f2e0032ac7971ae43db5cc2386da0de321b778f`, merge commit, 6 commits preservados); CI remota em `main` 3/3 jobs verdes; `avalia_dev` AINDA sem a migração (`DEBT-AV-011` residual) — 3 duplicatas preservadas, sem `UniqueConstraint`; próxima sprint elegível proposta (`AV-S03`), não iniciada
+> Atualização: 2026-09-24 (encerramento da integração de AV-S02 registrado; desvio de processo identificado) · Fonte canônica versionada em Markdown · Estado: código integrado a `main` (SHA `66c95201daf893fa7b2852e0d94b20314f8d8f34`) com CI real verde; `avalia_dev` AINDA sem a migração de unicidade (3 duplicatas preservadas, sem `UniqueConstraint`); nenhum baseline operacional promovido; commit `66c9520` foi feito diretamente em `main` sem branch/PR — desvio registrado, não revertido; toda mudança futura, inclusive documental, segue branch/PR salvo autorização explícita
 
 ## 1. Leitura executiva
 
@@ -10,7 +10,7 @@ O AvalIA possui uma demonstração experimental herdada, organizada em Core API,
 
 | Referência | Estado | Link |
 |---|---|---|
-| Última execução registrada | EXEC-2026-09-24-07, integração do PR #1 a `main` | [ponteiro](snapshots/latest_execution.md) |
+| Última execução registrada | EXEC-2026-09-24-08, encerramento AV-S02 + planos de saneamento e AV-S03 | [ponteiro](snapshots/latest_execution.md) |
 | Último baseline validado sob esta governança | nenhum promovido (explicitamente não promovido por esta homologação) | [ponteiro](snapshots/latest_validated_baseline.md) |
 | Baseline herdado candidato | inspeção documental/Git de 2026-09-21 | [BASELINE-001](snapshots/snapshot_BASELINE-001_estado-herdado.md) |
 | Sprint funcional encerrada | `AV-S01` — homologada por Rafael em 2026-09-23 com `DEBT-AV-009` aceito como débito residual aberto | [documento da sprint](sprints/sprint_AV-S01_autorizacao_retomada_revalidacao.md) |
@@ -126,8 +126,8 @@ Destaques atuais: pendência regulatória impede uso com dados reais; estado fun
 | Aprovar a segunda sprint (`AV-S02`) | Rafael revisar o plano `AV-S02` (CI mínima, visual completo com IA simulada, isolamento de `DEBT-AV-009`) e decidir sobre os 4 pontos do §15 | **aprovada e executada localmente (2026-09-23); CI remota e homologação do fechamento pendentes** — [documento da sprint](sprints/sprint_AV-S02_ci_visual_isolamento_testes.md) §18/§19 |
 | Autorizar a etapa remota de `AV-S02` | Rafael revisar o pacote de revisão e decidir sobre `git add`/`commit`/`push`, criação da branch e abertura do PR | **executado (2026-09-24)** — branch `feat/av-s01-s02-consolidacao`, 4 commits, PR [#1](https://github.com/rafaelinfopiaui/avalia-platform/pull/1) (rascunho), CI remota real 3/3 jobs verdes (run [35997285722](https://github.com/rafaelinfopiaui/avalia-platform/actions/runs/35997285722), commit `36de551e414cba847e9e369bee10701cd142bb87`) |
 | Homologar o fechamento de `AV-S02` e autorizar a integração | Rafael revisar o PR #1 e decidir sobre homologação/merge | **homologada e integrada a `main` (2026-09-24)** — merge commit `7f2e0032ac7971ae43db5cc2386da0de321b778f`, CI remota em `main` 3/3 jobs verdes (run [36000432576](https://github.com/rafaelinfopiaui/avalia-platform/actions/runs/36000432576)) |
-| Decidir a próxima sprint elegível (`AV-S03`) | Rafael revisar a proposta (Etapa 2 — estrutura acadêmica) e suas dependências reais antes de autorizar o início | **proposta apresentada (2026-09-24), não iniciada** — ver `backlog/trilha_operacao_de_turma.md` §11 (Fase 3) e itens `BL-AV-2-01` a `05` |
-| Decidir saneamento das duplicatas legadas de revisão humana (`DEBT-AV-011`) | Rafael decidir sobre a proposta de saneamento (backup, classificação equivalente/conflitante, preservação por arquivo em vez de exclusão) apresentada em `backlog/proposta_saneamento_human_reviews_duplicadas.md` | pendente — proposta apresentada em 2026-09-24, não executada |
+| Decidir a próxima sprint elegível (`AV-S03`) | Rafael revisar o plano detalhado da Etapa 2 — estrutura acadêmica, incluindo premissas DEC-AV-006/007 e distinção estrutura acadêmica vs multi-tenant | **plano preparado, não iniciado** — [`sprint_AV-S03_estrutura_academica.md`](sprints/sprint_AV-S03_estrutura_academica.md); decisões objetivas na §14 |
+| Decidir saneamento/migração operacional de `DEBT-AV-011` | Rafael revisar inventário/regra de vencedor/preservação/backup+restore/concorrência/pós-checks/recuperação | **plano preparado, não executado** — [`proposta_saneamento_human_reviews_duplicadas.md`](backlog/proposta_saneamento_human_reviews_duplicadas.md); requer aprovação deste plano e depois autorização específica de execução |
 
 ## 9. Política de atualização
 
