@@ -1,13 +1,23 @@
 from __future__ import annotations
+
 import enum
 import uuid
 from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
-    String, Text, ForeignKey, DateTime, Enum, Numeric, Boolean, Integer, JSON
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.db import Base
 
 
@@ -155,6 +165,9 @@ class CriterionScore(Base):
 
 class HumanReview(Base):
     __tablename__ = "human_reviews"
+    __table_args__ = (
+        UniqueConstraint("job_id", name="uq_human_reviews_job_id"),
+    )
     id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
     job_id: Mapped[str] = mapped_column(String, ForeignKey("correction_jobs.id"), nullable=False)
     reviewer_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)

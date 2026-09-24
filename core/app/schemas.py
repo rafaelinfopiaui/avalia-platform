@@ -1,7 +1,9 @@
 from __future__ import annotations
+
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
+
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -90,6 +92,14 @@ class AssessmentOut(BaseModel):
         from_attributes = True
 
 
+class AssessmentSummaryOut(BaseModel):
+    id: str
+    title: str
+
+    class Config:
+        from_attributes = True
+
+
 # ---- Answer ----
 class AnswerInput(BaseModel):
     question_id: str
@@ -172,6 +182,25 @@ class HumanReviewOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class HumanReviewSummaryOut(BaseModel):
+    id: str
+    reviewer_id: str
+    reviewer_email: str
+    decision: str
+    final_total: Decimal
+    final_scores: list[CriterionScoreInput]
+    justification: Optional[str]
+    created_at: datetime
+
+
+class CorrectionJobContextOut(BaseModel):
+    job: CorrectionJobOut
+    answer: AnswerOut
+    question: QuestionOut
+    assessment: AssessmentSummaryOut
+    human_review: Optional[HumanReviewSummaryOut] = None
 
 
 # ---- Error envelope ----

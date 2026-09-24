@@ -25,6 +25,11 @@ uvicorn app.main:app --reload --port 8000
 
 Health check: `curl http://localhost:8000/v1/health`
 
+O contexto agregado de retomada de uma correção está disponível em
+`GET /v1/correction-jobs/{job_id}/context`. A rota exige Bearer token e aplica
+autorização pelo vínculo entre o job e o proprietário da avaliação; o papel
+`admin` mantém acesso global.
+
 ## Setup (Windows com WSL2)
 
 Dentro do WSL2 (Ubuntu), os passos são os mesmos do macOS/Linux acima.
@@ -60,7 +65,8 @@ memória e uma URL de AI Engine inexistente para simular indisponibilidade
 de forma determinística; se seu shell já exportou essas variáveis para
 outro propósito, isso evita conflito.)
 
-8 testes cobrindo: acesso sem permissão bloqueado, rubrica com soma
+Testes cobrindo: acesso sem permissão bloqueado, autorização por vínculo nas
+rotas de resposta/correção/revisão/contexto, rubrica com soma
 incorreta rejeitada, publicação de avaliação válida, pontuação de critério
 fora do limite rejeitada, AI Engine indisponível não fabrica resultado,
 revisão humana persistida com autor, reprocessamento preserva versões

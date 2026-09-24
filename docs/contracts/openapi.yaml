@@ -122,6 +122,22 @@ paths:
         "200":
           description: Estado atual (PENDENTE|PROCESSANDO|SUGERIDA|FALHA)
 
+  /correction-jobs/{id}/context:
+    get:
+      summary: Obter contexto agregado para retomar a revisão
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Job, resposta, questão e resumo da avaliação vinculada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CorrectionJobContextOut' }
+        "401": { description: Token ausente ou inválido }
+        "403": { description: Professor sem vínculo com a avaliação }
+        "404": { description: Job ou recurso da cadeia relacional não encontrado }
+
   /corrections/{id}/reviews:
     post:
       summary: Registrar decisão humana (aprovar/alterar)
@@ -134,12 +150,17 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/HumanReviewInput' }
       responses:
-        "200": { description: Revisão registrada, auditoria criada }
+        "200": { description: Revisão registrada ou reenvio equivalente à decisão já existente (idempotente) }
         "403":
           description: Sem permissão sobre este recurso
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        "409":
+          description: Já existe uma decisão humana diferente registrada para este job; a decisão existente é preservada e retornada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewConflictOut' }
 
   /health:
     get:
@@ -197,3 +218,54 @@ components:
         justification:
           type: string
           description: Obrigatória quando decision=ALTER
+    CorrectionJobContextOut:
+      type: object
+      required: [job, answer, question, assessment]
+      properties:
+        job: { type: object, description: Representação CorrectionJobOut }
+        answer: { type: object, description: Representação AnswerOut }
+        question: { type: object, description: Representação QuestionOut, incluindo rubricas }
+        assessment:
+          $ref: '#/components/schemas/AssessmentSummaryOut'
+        human_review:
+          description: >-
+            Decisão humana já persistida para este job, se existir; null quando o job
+            ainda aguarda revisão. Presente para a UI recuperar e exibir a decisão
+            já registrada (autor, data, nota, justificativa) sem reoferecer o
+            formulário de primeira aprovação.
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/HumanReviewSummaryOut'
+    HumanReviewSummaryOut:
+      type: object
+      required: [id, reviewer_id, reviewer_email, decision, final_total, final_scores, created_at]
+      properties:
+        id: { type: string }
+        reviewer_id: { type: string }
+        reviewer_email: { type: string, format: email }
+        decision: { type: string, enum: [APPROVE, ALTER] }
+        final_total: { type: number }
+        final_scores:
+          type: array
+          items:
+            type: object
+            properties:
+              criterion_id: { type: string }
+              score: { type: string }
+        justification: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+    ReviewConflictOut:
+      type: object
+      required: [code, message, existing_review, correlation_id]
+      properties:
+        code: { type: string, example: REVIEW_ALREADY_EXISTS }
+        message: { type: string, example: "Este job já possui uma decisão humana registrada." }
+        existing_review:
+          $ref: '#/components/schemas/HumanReviewSummaryOut'
+        correlation_id: { type: string }
+    AssessmentSummaryOut:
+      type: object
+      required: [id, title]
+      properties:
+        id: { type: string }
+        title: { type: string }

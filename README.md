@@ -76,8 +76,9 @@ em pt-BR, acessível por teclado, foco visível, mensagens de erro úteis.
 
 ## Governança deste repositório
 
+A fonte canônica do rito técnico está em [`docs/governance/README.md`](docs/governance/README.md). Antes de cada execução, agentes devem ler a política, o último baseline validado, a última execução registrada e a sprint ativa, além de conferir o estado real do repositório. A próxima trilha funcional só pode começar com plano documentado e aprovação explícita de Rafael.
+
 Squad de 9 integrantes (ver PRD, seção 20) treina atualmente no laboratório
 `avalia-github-lab`. Este repositório do produto real é mantido separado e não
-concede acesso automático à squad — acesso será concedido pelo Tech Leader
-quando decidido (ver seção "Git local e pendências" em
-`docs/relatorio-entrega.md`).
+concede acesso automático à squad — acesso será concedido por Rafael quando
+decidido (ver também o registro de decisões da governança).
