@@ -77,7 +77,12 @@ class QuestionOut(BaseModel):
 
 class AssessmentCreate(BaseModel):
     title: str
+    class_group_id: Optional[str] = None
     question: Optional[QuestionInput] = None
+
+
+class AssessmentUpdate(BaseModel):
+    title: str
 
 
 class AssessmentOut(BaseModel):
@@ -85,6 +90,7 @@ class AssessmentOut(BaseModel):
     title: str
     status: str
     owner_id: str
+    class_group_id: Optional[str] = None
     created_at: datetime
     questions: list[QuestionOut] = []
 
