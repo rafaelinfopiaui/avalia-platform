@@ -1,6 +1,6 @@
 # Dashboard Executivo de Evolução Técnica — AvalIA
 
-> Atualização: 2026-09-28 (homologação de BL-AV-2-03 + execução local dos demais itens da AV-S03) · Fonte canônica versionada em Markdown · Estado: `BL-AV-2-03` **homologado por Rafael** (`DEC-AV-026`, local, não integrado); `BL-AV-2-01/02/04` implementados e revalidados tecnicamente nesta execução (migração revalidada em PostgreSQL isolado, UI mínima construída e validada em Chrome real via CDP com payload de rede capturado); `BL-AV-2-05`/AV-S03 permanecem abertos (AC-07/09/10 pendentes, AC-08 sem CI remota); `avalia_dev` não foi acessado; nenhuma ação Git/remota realizada
+> Atualização: 2026-09-29 (validação de AC-10, pacote de revisão, publicação e CI remota da AV-S03) · Fonte canônica versionada em Markdown · Estado: `BL-AV-2-03` **homologado por Rafael** (`DEC-AV-026`, publicado em PR); `BL-AV-2-04` corrigido e revalidado por revisão independente (Codex, 2 rodadas), homologação formal pendente; AV-S03 com 11 de 12 critérios de aceite (AC-01 a AC-12) executados e confirmados com evidência real, incluindo AC-10 (denominador reconfirmado por Rafael, 16/16 cenários em PostgreSQL isolado) e AC-08 (**CI remota real 3/3 jobs verdes**, PR #3 em rascunho); `avalia_dev` não foi acessado; nenhum merge realizado
 
 ## 1. Leitura executiva
 
@@ -10,7 +10,7 @@ O AvalIA possui uma demonstração experimental herdada, organizada em Core API,
 
 | Referência | Estado | Link |
 |---|---|---|
-| Última execução registrada | EXEC-2026-09-28-05, homologação de BL-AV-2-03 (DEC-AV-026) e execução local dos demais itens da AV-S03 | [ponteiro](snapshots/latest_execution.md) |
+| Última execução registrada | EXEC-2026-09-29-01, validação de AC-10, pacote de revisão, publicação e CI remota real da AV-S03 (PR #3) | [ponteiro](snapshots/latest_execution.md) |
 | Último baseline validado sob esta governança | nenhum promovido (explicitamente não promovido por esta homologação) | [ponteiro](snapshots/latest_validated_baseline.md) |
 | Baseline herdado candidato | inspeção documental/Git de 2026-09-21 | [BASELINE-001](snapshots/snapshot_BASELINE-001_estado-herdado.md) |
 | Sprint funcional encerrada | `AV-S01` — homologada por Rafael em 2026-09-23 com `DEBT-AV-009` aceito como débito residual aberto | [documento da sprint](sprints/sprint_AV-S01_autorizacao_retomada_revalidacao.md) |
