@@ -1,6 +1,6 @@
 ---
 id: "AV-S03"
-status: aprovada_execucao_local_autorizada
+status: homologada_integracao_autorizada_2026-09-29_DEC-AV-027
 objetivo_aprovado_por: "Rafael (2026-09-24; DEC-AV-023; escopo restrito à AV-S03)"
 consolidador: "Hermes"
 baseline_entrada: "../snapshots/latest_validated_baseline.md (nenhum promovido; código AV-S01/AV-S02 integrado a main em 2026-09-24, SHA 66c95201daf893fa7b2852e0d94b20314f8d8f34, mas isso NÃO é baseline operacional promovido)"
