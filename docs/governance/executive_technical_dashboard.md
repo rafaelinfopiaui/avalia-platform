@@ -1,6 +1,6 @@
 # Dashboard Executivo de Evolução Técnica — AvalIA
 
-> Atualização: 2026-09-29 (validação de AC-10, pacote de revisão, publicação e CI remota da AV-S03) · Fonte canônica versionada em Markdown · Estado: `BL-AV-2-03` **homologado por Rafael** (`DEC-AV-026`, publicado em PR); `BL-AV-2-04` corrigido e revalidado por revisão independente (Codex, 2 rodadas), homologação formal pendente; AV-S03 com 11 de 12 critérios de aceite (AC-01 a AC-12) executados e confirmados com evidência real, incluindo AC-10 (denominador reconfirmado por Rafael, 16/16 cenários em PostgreSQL isolado) e AC-08 (**CI remota real 3/3 jobs verdes**, PR #3 em rascunho); `avalia_dev` não foi acessado; nenhum merge realizado
+> Atualização: 2026-09-29 (homologação de BL-AV-2-04 e da AV-S03; integração do PR #3 a `main`) · Fonte canônica versionada em Markdown · Estado: `AV-S03` **homologada por Rafael** (`DEC-AV-027`) e **integrada a `main`** via merge commit `c39186596ca21dc1e8bf7bd2d52f09f4a9a00598` (7 commits preservados); CI remota em `main` 3/3 jobs verdes (run [36541693375](https://github.com/rafaelinfopiaui/avalia-platform/actions/runs/36541693375)); 11 de 12 critérios de aceite (AC-01 a AC-12) executados e confirmados com evidência real; `DEBT-AV-012` aceito como débito residual; contrato `docs/contracts/openapi.yaml` reconciliado pré-merge (proposta de design antiga preservada como histórico em `docs/contracts/historico/`); `avalia_dev` não foi acessado; nenhuma migração operacional aplicada; nenhum baseline operacional promovido; nenhuma nova sprint iniciada
 
 ## 1. Leitura executiva
 
@@ -10,11 +10,12 @@ O AvalIA possui uma demonstração experimental herdada, organizada em Core API,
 
 | Referência | Estado | Link |
 |---|---|---|
-| Última execução registrada | EXEC-2026-09-29-01, validação de AC-10, pacote de revisão, publicação e CI remota real da AV-S03 (PR #3) | [ponteiro](snapshots/latest_execution.md) |
+| Última execução registrada | EXEC-2026-09-29-02, homologação de BL-AV-2-04/AV-S03 (DEC-AV-027) e integração do PR #3 a `main` | [ponteiro](snapshots/latest_execution.md) |
 | Último baseline validado sob esta governança | nenhum promovido (explicitamente não promovido por esta homologação) | [ponteiro](snapshots/latest_validated_baseline.md) |
 | Baseline herdado candidato | inspeção documental/Git de 2026-09-21 | [BASELINE-001](snapshots/snapshot_BASELINE-001_estado-herdado.md) |
 | Sprint funcional encerrada | `AV-S01` — homologada por Rafael em 2026-09-23 com `DEBT-AV-009` aceito como débito residual aberto | [documento da sprint](sprints/sprint_AV-S01_autorizacao_retomada_revalidacao.md) |
 | Sprint funcional encerrada | `AV-S02` — **homologada por Rafael em 2026-09-24** (escopo dos 5 commits da branch `feat/av-s01-s02-consolidacao`); `DEBT-AV-011` (migração operacional em `avalia_dev`) e saneamento de duplicatas aceitos como débitos residuais | [documento da sprint](sprints/sprint_AV-S02_ci_visual_isolamento_testes.md) §19.6 |
+| Sprint funcional encerrada | `AV-S03` — **homologada por Rafael em 2026-09-29** (`DEC-AV-027`), integrada a `main` via merge commit `c391865` (PR #3); `DEBT-AV-012` aceito como débito residual | [documento da sprint](sprints/sprint_AV-S03_estrutura_academica.md) |
 | Execução documental ativa | GOV-005 | [snapshot](snapshots/snapshot_EXEC-2026-09-23-02_GOV-005.md) |
 | Trilha proposta (não aprovada, exceto AV-S01) | "Operação de uma turma" (5 fases, com Etapa 4B — entrada por imagem priorizada sobre CSV) | [documento da trilha](backlog/trilha_operacao_de_turma.md) §11 |
 
@@ -127,8 +128,7 @@ Destaques atuais: pendência regulatória impede uso com dados reais; estado fun
 | Aprovar a segunda sprint (`AV-S02`) | Rafael revisar o plano `AV-S02` (CI mínima, visual completo com IA simulada, isolamento de `DEBT-AV-009`) e decidir sobre os 4 pontos do §15 | **aprovada e executada localmente (2026-09-23); CI remota e homologação do fechamento pendentes** — [documento da sprint](sprints/sprint_AV-S02_ci_visual_isolamento_testes.md) §18/§19 |
 | Autorizar a etapa remota de `AV-S02` | Rafael revisar o pacote de revisão e decidir sobre `git add`/`commit`/`push`, criação da branch e abertura do PR | **executado (2026-09-24)** — branch `feat/av-s01-s02-consolidacao`, 4 commits, PR [#1](https://github.com/rafaelinfopiaui/avalia-platform/pull/1) (rascunho), CI remota real 3/3 jobs verdes (run [35997285722](https://github.com/rafaelinfopiaui/avalia-platform/actions/runs/35997285722), commit `36de551e414cba847e9e369bee10701cd142bb87`) |
 | Homologar o fechamento de `AV-S02` e autorizar a integração | Rafael revisar o PR #1 e decidir sobre homologação/merge | **homologada e integrada a `main` (2026-09-24)** — merge commit `7f2e0032ac7971ae43db5cc2386da0de321b778f`, CI remota em `main` 3/3 jobs verdes (run [36000432576](https://github.com/rafaelinfopiaui/avalia-platform/actions/runs/36000432576)) |
-| Regularizar o estado de `AV-S03` | Rafael revisar a proposta (Etapa 2 — estrutura acadêmica), o trabalho local existente e suas dependências reais | **BL-AV-2-03 tecnicamente concluído localmente; sprint completa não declarada concluída nem homologada** — o documento de sprint AV-S03 continua ausente deste worktree |
-| Homologar BL-AV-2-03 e decidir futura integração | Rafael revisar o encerramento técnico aprovado sem ressalvas e decidir explicitamente sobre homologação e eventual integração | **pendente** — implementação local em `local/av-s03-recuperacao`, sem stage/commit/push; aprovação técnica não substitui homologação de produto |
+| Regularizar o estado de `AV-S03` e homologar sua entrega | Rafael revisar a entrega funcional completa da sprint e decidir sobre homologação e integração | **homologada e integrada (2026-09-29)** — `DEC-AV-027`, merge commit `c391865` a `main`, CI remota 3/3 jobs verdes (run [36541693375](https://github.com/rafaelinfopiaui/avalia-platform/actions/runs/36541693375)); `DEBT-AV-012` aceito como débito residual |
 | Decidir saneamento das duplicatas legadas de revisão humana (`DEBT-AV-011`) | Rafael decidir sobre a proposta de saneamento (backup, classificação equivalente/conflitante, preservação por arquivo em vez de exclusão) apresentada em `backlog/proposta_saneamento_human_reviews_duplicadas.md` | pendente — proposta apresentada em 2026-09-24, não executada |
 
 ## 9. Política de atualização
