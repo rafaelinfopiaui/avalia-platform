@@ -1,4 +1,22 @@
-import type { ApiErrorBody, Assessment, Answer, CorrectionJob, Criterion, HumanReviewSummary, JobStatus, User } from '../types'
+import type {
+  ApiErrorBody,
+  Assessment,
+  Answer,
+  ClassGroup,
+  CorrectionJob,
+  Course,
+  CourseDiscipline,
+  Criterion,
+  Discipline,
+  Enrollment,
+  EnrollmentStatus,
+  HumanReviewSummary,
+  JobStatus,
+  Organization,
+  ProfessorClassLink,
+  Student,
+  User,
+} from '../types'
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000/v1').replace(/\/$/, '')
 const ACCESS_TOKEN_KEY = 'avalia_access_token'
@@ -37,12 +55,33 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (text) { try { data = JSON.parse(text) } catch { data = undefined } }
   if (!response.ok) {
     const raw = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>
-    const detail = raw.detail && typeof raw.detail === 'object' ? raw.detail as Record<string, unknown> : raw
+    const detailObj = raw.detail && typeof raw.detail === 'object' && !Array.isArray(raw.detail)
+      ? (raw.detail as Record<string, unknown>)
+      : null
+
+    let extractedMessage: string | undefined = undefined
+    if (typeof raw.message === 'string' && raw.message.trim()) {
+      extractedMessage = raw.message
+    } else if (detailObj && typeof detailObj.message === 'string' && detailObj.message.trim()) {
+      extractedMessage = detailObj.message
+    } else if (typeof raw.detail === 'string' && raw.detail.trim()) {
+      extractedMessage = raw.detail
+    } else if (Array.isArray(raw.detail) && raw.detail.length > 0) {
+      const first = raw.detail[0]
+      if (first && typeof first === 'object' && typeof (first as Record<string, unknown>).msg === 'string') {
+        extractedMessage = (first as Record<string, unknown>).msg as string
+      }
+    }
+
     const body: ApiErrorBody = {
-      code: typeof detail.code === 'string' ? detail.code : undefined,
-      message: typeof detail.message === 'string' ? detail.message : defaultMessage(response.status),
-      correlation_id: typeof detail.correlation_id === 'string' ? detail.correlation_id : undefined,
-      field_errors: Array.isArray(detail.field_errors) ? detail.field_errors as ApiErrorBody['field_errors'] : undefined,
+      code: typeof detailObj?.code === 'string' ? detailObj.code : (typeof raw.code === 'string' ? raw.code : undefined),
+      message: extractedMessage || defaultMessage(response.status),
+      correlation_id: typeof detailObj?.correlation_id === 'string'
+        ? detailObj.correlation_id
+        : (typeof raw.correlation_id === 'string' ? raw.correlation_id : undefined),
+      field_errors: Array.isArray(detailObj?.field_errors)
+        ? (detailObj.field_errors as ApiErrorBody['field_errors'])
+        : (Array.isArray(raw.field_errors) ? (raw.field_errors as ApiErrorBody['field_errors']) : undefined),
     }
     if (response.status === 401) {
       // Evita disparar o evento repetidamente quando várias chamadas concorrentes
@@ -69,7 +108,11 @@ export async function listAssessments(): Promise<Assessment[]> {
   return Array.isArray(data) ? data : data.items || data.assessments || []
 }
 export const getAssessment = (id: string) => request<Assessment>(`/assessments/${id}`)
-export const createAssessment = (payload: { title: string; question: Omit<import('../types').Question, 'id' | 'rubric'> }) => request<Assessment>('/assessments', { method: 'POST', body: JSON.stringify(payload) })
+export const createAssessment = (payload: {
+  title: string
+  class_group_id?: string | null
+  question: Omit<import('../types').Question, 'id' | 'rubric'>
+}) => request<Assessment>('/assessments', { method: 'POST', body: JSON.stringify(payload) })
 export const updateAssessment = (id: string, payload: unknown) => request<Assessment>(`/assessments/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
 export const saveRubric = (questionId: string, criteria: Criterion[]) => request(`/questions/${questionId}/rubric`, { method: 'POST', body: JSON.stringify({ criteria: criteria.map(({ name, description, max_score }) => ({ name, description, max_score })) }) })
 export const publishAssessment = (id: string) => request<Assessment>(`/assessments/${id}/publish`, { method: 'POST' })
@@ -97,3 +140,58 @@ export interface CorrectionJobContext {
 export const getCorrectionContext = (jobId: string) => request<CorrectionJobContext>(`/correction-jobs/${jobId}/context`)
 
 export const submitReview = (correctionId: string, payload: { decision: 'APPROVE' | 'ALTER'; criteria_scores?: { criterion_id: string; score: number }[]; justification?: string }) => request(`/corrections/${correctionId}/reviews`, { method: 'POST', body: JSON.stringify(payload) })
+
+// ---------------- Gestão Acadêmica (BL-AV-2-04) ----------------
+export const attachAssessmentClassGroup = (assessmentId: string, classGroupId: string) =>
+  request<Assessment>(`/assessments/${assessmentId}/class-group`, {
+    method: 'POST',
+    body: JSON.stringify({ class_group_id: classGroupId }),
+  })
+
+export const listOrganizations = () => request<Organization[]>('/organizations')
+export const createOrganization = (payload: { name: string }) =>
+  request<Organization>('/organizations', { method: 'POST', body: JSON.stringify(payload) })
+
+export const listCourses = () => request<Course[]>('/courses')
+export const createCourse = (payload: { organization_id: string; name: string; code: string }) =>
+  request<Course>('/courses', { method: 'POST', body: JSON.stringify(payload) })
+
+export const listDisciplines = () => request<Discipline[]>('/disciplines')
+export const createDiscipline = (payload: { organization_id: string; name: string; code: string }) =>
+  request<Discipline>('/disciplines', { method: 'POST', body: JSON.stringify(payload) })
+
+export const listCourseDisciplines = () => request<CourseDiscipline[]>('/course-disciplines')
+export const createCourseDiscipline = (payload: { course_id: string; discipline_id: string }) =>
+  request<CourseDiscipline>('/course-disciplines', { method: 'POST', body: JSON.stringify(payload) })
+
+export const listClassGroups = () => request<ClassGroup[]>('/class-groups')
+export const createClassGroup = (payload: { course_discipline_id: string; period: string; code: string }) =>
+  request<ClassGroup>('/class-groups', { method: 'POST', body: JSON.stringify(payload) })
+
+export const listStudents = () => request<Student[]>('/students')
+export const createStudent = (payload: { organization_id: string; name: string; external_id: string }) =>
+  request<Student>('/students', { method: 'POST', body: JSON.stringify(payload) })
+
+export const listEnrollments = () => request<Enrollment[]>('/enrollments')
+export const createEnrollment = (payload: {
+  class_group_id: string
+  student_id: string
+  status?: EnrollmentStatus
+}) => request<Enrollment>('/enrollments', { method: 'POST', body: JSON.stringify(payload) })
+
+export const listProfessorClassLinks = () => request<ProfessorClassLink[]>('/professor-class-links')
+
+export function isAcademicModuleEnabled(): boolean {
+  const envVal = import.meta.env.VITE_ACADEMIC_MODULE_ENABLED
+  if (typeof envVal === 'string') {
+    return ['1', 'true', 'yes', 'on'].includes(envVal.toLowerCase())
+  }
+  // O backend (core/app/config.py) usa ACADEMIC_MODULE_ENABLED com default "false".
+  // O frontend precisa espelhar o MESMO default para não divergir do backend:
+  // sem configuração explícita em ambos os lados, o módulo acadêmico está
+  // DESLIGADO. Configure VITE_ACADEMIC_MODULE_ENABLED=true no ambiente do
+  // frontend sempre que ACADEMIC_MODULE_ENABLED=true estiver configurado no
+  // backend (ver frontend/.env.example).
+  return false
+}
+

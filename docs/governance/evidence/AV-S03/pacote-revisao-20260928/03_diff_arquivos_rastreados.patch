@@ -1,0 +1,1382 @@
+diff --git a/core/app/config.py b/core/app/config.py
+index 658bc5a..6c35ac4 100644
+--- a/core/app/config.py
++++ b/core/app/config.py
+@@ -15,6 +15,9 @@ class Settings:
+         self.jwt_access_minutes = int(os.getenv("JWT_ACCESS_MINUTES", "30"))
+         self.jwt_refresh_minutes = int(os.getenv("JWT_REFRESH_MINUTES", "1440"))
+         self.ai_engine_url = os.getenv("AI_ENGINE_URL", "http://localhost:8001")
++        self.academic_module_enabled = os.getenv(
++            "ACADEMIC_MODULE_ENABLED", "false"
++        ).lower() in {"1", "true", "yes", "on"}
+         self.cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
+         # NOTA (bug corrigido): "professor@avalia.local" NUNCA funciona como e-mail de
+         # login porque o schema LoginRequest usa pydantic.EmailStr, cuja biblioteca
+diff --git a/core/app/main.py b/core/app/main.py
+index ec38aef..b1108e6 100644
+--- a/core/app/main.py
++++ b/core/app/main.py
+@@ -31,6 +31,13 @@ from app.models import (
+     RubricCriterion,
+     User,
+ )
++from app.routers.academic import (
++    require_active_class_link,
++    require_assessment_mutation,
++)
++from app.routers.academic import (
++    router as academic_router,
++)
+ from app.schemas import (
+     AIExecutionOut,
+     AnswerInput,
+@@ -38,6 +45,7 @@ from app.schemas import (
+     AssessmentCreate,
+     AssessmentOut,
+     AssessmentSummaryOut,
++    AssessmentUpdate,
+     CorrectionJobContextOut,
+     CorrectionJobOut,
+     CriterionScoreOut,
+@@ -57,6 +65,7 @@ from app.services.correction import round_score, run_correction_job
+ settings = get_settings()
+ 
+ app = FastAPI(title="AvalIA Core API", version="0.1.0-demo")
++app.include_router(academic_router)
+ 
+ app.add_middleware(
+     CORSMiddleware,
+@@ -77,8 +86,12 @@ async def correlation_id_middleware(request: Request, call_next):
+ 
+ 
+ def error_response(
+-    status_code: int, code: str, message: str, correlation_id: str,
+-    details: dict | None = None, field_errors: list | None = None,
++    status_code: int,
++    code: str,
++    message: str,
++    correlation_id: str,
++    details: dict | None = None,
++    field_errors: list | None = None,
+ ):
+     return JSONResponse(
+         status_code=status_code,
+@@ -124,11 +137,22 @@ def list_assessments(db: Session = Depends(get_db), user: User = Depends(require
+ 
+ @app.post("/v1/assessments", response_model=AssessmentOut, status_code=201)
+ def create_assessment(
+-    payload: AssessmentCreate, request: Request, db: Session = Depends(get_db),
++    payload: AssessmentCreate,
++    request: Request,
++    db: Session = Depends(get_db),
+     user: User = Depends(require_role("professor", "admin")),
+ ):
+     correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
+-    assessment = Assessment(title=payload.title, owner_id=user.id, status=AssessmentStatus.RASCUNHO)
++    if settings.academic_module_enabled and payload.class_group_id is None:
++        raise HTTPException(status_code=422, detail="Turma é obrigatória para novas avaliações.")
++    if payload.class_group_id is not None:
++        require_active_class_link(db, user, payload.class_group_id)
++    assessment = Assessment(
++        title=payload.title,
++        owner_id=user.id,
++        class_group_id=payload.class_group_id,
++        status=AssessmentStatus.RASCUNHO,
++    )
+     db.add(assessment)
+     db.flush()
+     if payload.question:
+@@ -141,10 +165,15 @@ def create_assessment(
+         db.add(q)
+     db.commit()
+     db.refresh(assessment)
+-    db.add(AuditEvent(
+-        actor_id=user.id, action="CREATE", resource_type="Assessment",
+-        resource_id=assessment.id, after_json=json.dumps({"title": assessment.title}),
+-    ))
++    db.add(
++        AuditEvent(
++            actor_id=user.id,
++            action="CREATE",
++            resource_type="Assessment",
++            resource_id=assessment.id,
++            after_json=json.dumps({"title": assessment.title}),
++        )
++    )
+     db.commit()
+     log_event("assessment_created", correlation_id, assessment_id=assessment.id, user_id=user.id)
+     return assessment
+@@ -161,19 +190,38 @@ def _get_owned_assessment(db: Session, assessment_id: str, user: User) -> Assess
+ 
+ @app.get("/v1/assessments/{assessment_id}", response_model=AssessmentOut)
+ def get_assessment(
+-    assessment_id: str, db: Session = Depends(get_db),
++    assessment_id: str,
++    db: Session = Depends(get_db),
+     user: User = Depends(require_role("professor", "admin")),
+ ):
+     return _get_owned_assessment(db, assessment_id, user)
+ 
+ 
++@app.patch("/v1/assessments/{assessment_id}", response_model=AssessmentOut)
++def update_assessment(
++    assessment_id: str,
++    payload: AssessmentUpdate,
++    db: Session = Depends(get_db),
++    user: User = Depends(require_role("professor", "admin")),
++):
++    assessment = _get_owned_assessment(db, assessment_id, user)
++    require_assessment_mutation(db, user, assessment)
++    assessment.title = payload.title
++    db.commit()
++    db.refresh(assessment)
++    return assessment
++
++
+ @app.post("/v1/assessments/{assessment_id}/publish")
+ def publish_assessment(
+-    assessment_id: str, request: Request, db: Session = Depends(get_db),
++    assessment_id: str,
++    request: Request,
++    db: Session = Depends(get_db),
+     user: User = Depends(require_role("professor", "admin")),
+ ):
+     correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
+     assessment = _get_owned_assessment(db, assessment_id, user)
++    require_assessment_mutation(db, user, assessment)
+ 
+     if not assessment.questions:
+         return error_response(422, "MISSING_QUESTION", "A avaliação precisa de ao menos uma questão.", correlation_id)
+@@ -184,14 +232,16 @@ def publish_assessment(
+         rubric = published_rubric or (question.rubrics[-1] if question.rubrics else None)
+         if rubric is None or not rubric.criteria:
+             return error_response(
+-                422, "MISSING_RUBRIC",
++                422,
++                "MISSING_RUBRIC",
+                 f"A questão '{question.statement[:40]}...' precisa de uma rubrica com critérios.",
+                 correlation_id,
+             )
+         total = sum((c.max_score for c in rubric.criteria), Decimal("0"))
+         if round_score(total) != round_score(question.max_score):
+             return error_response(
+-                422, "RUBRIC_TOTAL_MISMATCH",
++                422,
++                "RUBRIC_TOTAL_MISMATCH",
+                 f"A soma dos critérios deve ser {question.max_score}.",
+                 correlation_id,
+                 details={"expected": str(question.max_score), "actual": str(total)},
+@@ -209,7 +259,10 @@ def publish_assessment(
+ # ---------------- Rubric ----------------
+ @app.post("/v1/questions/{question_id}/rubric", response_model=RubricOut, status_code=201)
+ def create_rubric(
+-    question_id: str, payload: RubricInput, request: Request, db: Session = Depends(get_db),
++    question_id: str,
++    payload: RubricInput,
++    request: Request,
++    db: Session = Depends(get_db),
+     user: User = Depends(require_role("professor", "admin")),
+ ):
+     correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
+@@ -219,15 +272,21 @@ def create_rubric(
+     assessment = db.get(Assessment, question.assessment_id)
+     if user.role == Role.PROFESSOR and assessment.owner_id != user.id:
+         raise HTTPException(status_code=403, detail="Sem permissão sobre esta questão.")
++    require_assessment_mutation(db, user, assessment)
+ 
+     existing_versions = db.query(Rubric).filter(Rubric.question_id == question_id).count()
+     rubric = Rubric(question_id=question_id, version=existing_versions + 1, is_published=False)
+     db.add(rubric)
+     db.flush()
+     for crit in payload.criteria:
+-        db.add(RubricCriterion(
+-            rubric_id=rubric.id, name=crit.name, description=crit.description, max_score=crit.max_score,
+-        ))
++        db.add(
++            RubricCriterion(
++                rubric_id=rubric.id,
++                name=crit.name,
++                description=crit.description,
++                max_score=crit.max_score,
++            )
++        )
+     db.commit()
+     db.refresh(rubric)
+     log_event("rubric_created", correlation_id, rubric_id=rubric.id, question_id=question_id, version=rubric.version)
+@@ -237,13 +296,15 @@ def create_rubric(
+ # ---------------- Answers ----------------
+ @app.post("/v1/answers", response_model=AnswerOut, status_code=201)
+ def create_answer(
+-    payload: AnswerInput, db: Session = Depends(get_db),
++    payload: AnswerInput,
++    db: Session = Depends(get_db),
+     user: User = Depends(require_role("professor", "admin")),
+ ):
+     question = db.get(Question, payload.question_id)
+     if question is None:
+         raise HTTPException(status_code=404, detail="Questão não encontrada.")
+-    _get_owned_assessment(db, question.assessment_id, user)
++    assessment = _get_owned_assessment(db, question.assessment_id, user)
++    require_assessment_mutation(db, user, assessment)
+     answer = Answer(question_id=payload.question_id, student_name_fake=payload.student_name_fake, text=payload.text)
+     db.add(answer)
+     db.commit()
+@@ -254,10 +315,7 @@ def create_answer(
+ # ---------------- Corrections ----------------
+ def _serialize_job(db: Session, job: CorrectionJob) -> CorrectionJobOut:
+     latest_exec = (
+-        db.query(AIExecution)
+-        .filter(AIExecution.job_id == job.id)
+-        .order_by(AIExecution.created_at.desc())
+-        .first()
++        db.query(AIExecution).filter(AIExecution.job_id == job.id).order_by(AIExecution.created_at.desc()).first()
+     )
+     latest_out = None
+     if latest_exec:
+@@ -274,14 +332,16 @@ def _serialize_job(db: Session, job: CorrectionJob) -> CorrectionJobOut:
+             criterion_scores=[CriterionScoreOut.model_validate(s) for s in scores],
+         )
+     return CorrectionJobOut(
+-        id=job.id, answer_id=job.answer_id, status=job.status.value,
+-        attempt=job.attempt, error_message=job.error_message, latest_execution=latest_out,
++        id=job.id,
++        answer_id=job.answer_id,
++        status=job.status.value,
++        attempt=job.attempt,
++        error_message=job.error_message,
++        latest_execution=latest_out,
+     )
+ 
+ 
+-def _get_job_context(
+-    db: Session, job_id: str, user: User
+-) -> tuple[CorrectionJob, Answer, Question, Assessment]:
++def _get_job_context(db: Session, job_id: str, user: User) -> tuple[CorrectionJob, Answer, Question, Assessment]:
+     job = db.get(CorrectionJob, job_id)
+     if job is None:
+         raise HTTPException(status_code=404, detail="Job não encontrado.")
+@@ -297,7 +357,10 @@ def _get_job_context(
+ 
+ @app.post("/v1/answers/{answer_id}/corrections", status_code=202)
+ async def request_correction(
+-    answer_id: str, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db),
++    answer_id: str,
++    request: Request,
++    background_tasks: BackgroundTasks,
++    db: Session = Depends(get_db),
+     user: User = Depends(require_role("professor", "admin")),
+ ):
+     correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
+@@ -307,7 +370,8 @@ async def request_correction(
+     question = db.get(Question, answer.question_id)
+     if question is None:
+         raise HTTPException(status_code=404, detail="Questão não encontrada.")
+-    _get_owned_assessment(db, question.assessment_id, user)
++    assessment = _get_owned_assessment(db, question.assessment_id, user)
++    require_assessment_mutation(db, user, assessment)
+     rubric = next((r for r in question.rubrics if r.is_published), None)
+     if rubric is None:
+         return error_response(422, "RUBRIC_NOT_PUBLISHED", "A questão não possui rubrica publicada.", correlation_id)
+@@ -334,7 +398,8 @@ async def request_correction(
+ 
+ @app.get("/v1/correction-jobs/{job_id}", response_model=CorrectionJobOut)
+ def get_correction_job(
+-    job_id: str, db: Session = Depends(get_db),
++    job_id: str,
++    db: Session = Depends(get_db),
+     user: User = Depends(require_role("professor", "admin")),
+ ):
+     job, _, _, _ = _get_job_context(db, job_id, user)
+@@ -381,13 +446,9 @@ def _review_is_equivalent(
+     justification: str | None,
+ ) -> bool:
+     existing_scores = {
+-        item["criterion_id"]: Decimal(str(item["score"]))
+-        for item in json.loads(review.final_scores_json)
+-    }
+-    attempted_scores = {
+-        item["criterion_id"]: Decimal(str(item["score"]))
+-        for item in final_scores
++        item["criterion_id"]: Decimal(str(item["score"])) for item in json.loads(review.final_scores_json)
+     }
++    attempted_scores = {item["criterion_id"]: Decimal(str(item["score"])) for item in final_scores}
+     return (
+         review.reviewer_id == reviewer_id
+         and review.decision == decision
+@@ -396,9 +457,7 @@ def _review_is_equivalent(
+     )
+ 
+ 
+-def _review_conflict_response(
+-    db: Session, review: HumanReview, correlation_id: str
+-) -> JSONResponse:
++def _review_conflict_response(db: Session, review: HumanReview, correlation_id: str) -> JSONResponse:
+     return JSONResponse(
+         status_code=409,
+         content={
+@@ -412,18 +471,21 @@ def _review_conflict_response(
+ 
+ @app.post("/v1/corrections/{job_id}/reviews", response_model=HumanReviewOut)
+ def review_correction(
+-    job_id: str, payload: HumanReviewInput, request: Request, db: Session = Depends(get_db),
++    job_id: str,
++    payload: HumanReviewInput,
++    request: Request,
++    db: Session = Depends(get_db),
+     user: User = Depends(require_role("professor", "admin")),
+ ):
+     correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
+-    job, _, _, _ = _get_job_context(db, job_id, user)
++    job, _, _, assessment = _get_job_context(db, job_id, user)
++    require_assessment_mutation(db, user, assessment)
+ 
+     if payload.decision not in (ReviewDecision.APPROVE.value, ReviewDecision.ALTER.value):
+         return error_response(422, "INVALID_DECISION", "Decisão inválida.", correlation_id)
+ 
+     latest_exec = (
+-        db.query(AIExecution).filter(AIExecution.job_id == job_id)
+-        .order_by(AIExecution.created_at.desc()).first()
++        db.query(AIExecution).filter(AIExecution.job_id == job_id).order_by(AIExecution.created_at.desc()).first()
+     )
+     scores_by_criterion = {}
+     if latest_exec:
+@@ -433,7 +495,10 @@ def review_correction(
+     if payload.decision == ReviewDecision.ALTER.value:
+         if not payload.justification or not payload.justification.strip():
+             return error_response(
+-                422, "JUSTIFICATION_REQUIRED", "Justificativa é obrigatória para alterar a nota.", correlation_id,
++                422,
++                "JUSTIFICATION_REQUIRED",
++                "Justificativa é obrigatória para alterar a nota.",
++                correlation_id,
+             )
+         final_scores = []
+         total = Decimal("0")
+@@ -443,7 +508,8 @@ def review_correction(
+             score = cs.score
+             if score < 0 or score > max_score:
+                 return error_response(
+-                    422, "SCORE_OUT_OF_RANGE",
++                    422,
++                    "SCORE_OUT_OF_RANGE",
+                     f"Pontuação do critério {cs.criterion_id} deve estar entre 0 e {max_score}.",
+                     correlation_id,
+                 )
+@@ -451,32 +517,35 @@ def review_correction(
+             total += score
+         final_total = round_score(total)
+     else:
+-        final_scores = [
+-            {"criterion_id": cid, "score": str(s.score)} for cid, s in scores_by_criterion.items()
+-        ]
++        final_scores = [{"criterion_id": cid, "score": str(s.score)} for cid, s in scores_by_criterion.items()]
+         final_total = round_score(sum((s.score for s in scores_by_criterion.values()), Decimal("0")))
+ 
+     decision = ReviewDecision(payload.decision)
+     existing_review = db.query(HumanReview).filter(HumanReview.job_id == job_id).first()
+     if existing_review is not None:
+-        if _review_is_equivalent(
+-            existing_review, user.id, decision, final_scores, payload.justification
+-        ):
++        if _review_is_equivalent(existing_review, user.id, decision, final_scores, payload.justification):
+             return existing_review
+         return _review_conflict_response(db, existing_review, correlation_id)
+ 
+     review = HumanReview(
+-        job_id=job_id, reviewer_id=user.id, decision=decision,
+-        final_total=final_total, final_scores_json=json.dumps(final_scores),
++        job_id=job_id,
++        reviewer_id=user.id,
++        decision=decision,
++        final_total=final_total,
++        final_scores_json=json.dumps(final_scores),
+         justification=payload.justification,
+     )
+     db.add(review)
+-    db.add(AuditEvent(
+-        actor_id=user.id, action=f"REVIEW_{payload.decision}", resource_type="CorrectionJob",
+-        resource_id=job_id,
+-        before_json=json.dumps({cid: str(s.score) for cid, s in scores_by_criterion.items()}),
+-        after_json=json.dumps(final_scores),
+-    ))
++    db.add(
++        AuditEvent(
++            actor_id=user.id,
++            action=f"REVIEW_{payload.decision}",
++            resource_type="CorrectionJob",
++            resource_id=job_id,
++            before_json=json.dumps({cid: str(s.score) for cid, s in scores_by_criterion.items()}),
++            after_json=json.dumps(final_scores),
++        )
++    )
+     try:
+         db.commit()
+     except IntegrityError:
+@@ -484,9 +553,7 @@ def review_correction(
+         existing_review = db.query(HumanReview).filter(HumanReview.job_id == job_id).first()
+         if existing_review is None:
+             raise
+-        if _review_is_equivalent(
+-            existing_review, user.id, decision, final_scores, payload.justification
+-        ):
++        if _review_is_equivalent(existing_review, user.id, decision, final_scores, payload.justification):
+             return existing_review
+         return _review_conflict_response(db, existing_review, correlation_id)
+     db.refresh(review)
+diff --git a/core/app/models.py b/core/app/models.py
+index 13235ce..c3241a4 100644
+--- a/core/app/models.py
++++ b/core/app/models.py
+@@ -47,6 +47,18 @@ class ReviewDecision(str, enum.Enum):
+     ALTER = "ALTER"
+ 
+ 
++class EnrollmentStatus(str, enum.Enum):
++    ACTIVE = "ACTIVE"
++    SUSPENDED = "SUSPENDED"
++    WITHDRAWN = "WITHDRAWN"
++    COMPLETED = "COMPLETED"
++
++
++class ProfessorRole(str, enum.Enum):
++    RESPONSIBLE = "responsible"
++    COLLABORATOR = "collaborator"
++
++
+ class User(Base):
+     __tablename__ = "users"
+     id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+@@ -62,6 +74,11 @@ class Assessment(Base):
+     id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+     title: Mapped[str] = mapped_column(String, nullable=False)
+     owner_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
++    # Nullable preserves legacy assessments. Creation-time enforcement belongs to
++    # BL-AV-2-03 and is activated through Settings.academic_module_enabled.
++    class_group_id: Mapped[str | None] = mapped_column(
++        String, ForeignKey("class_groups.id"), nullable=True
++    )
+     status: Mapped[AssessmentStatus] = mapped_column(
+         Enum(AssessmentStatus), default=AssessmentStatus.RASCUNHO, nullable=False
+     )
+@@ -73,6 +90,118 @@ class Assessment(Base):
+     questions: Mapped[list["Question"]] = relationship(back_populates="assessment")
+ 
+ 
++class Organization(Base):
++    __tablename__ = "organizations"
++    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
++    name: Mapped[str] = mapped_column(String, nullable=False)
++
++
++class Course(Base):
++    __tablename__ = "courses"
++    __table_args__ = (
++        UniqueConstraint("organization_id", "code", name="uq_courses_organization_code"),
++    )
++    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
++    organization_id: Mapped[str] = mapped_column(
++        String, ForeignKey("organizations.id"), nullable=False
++    )
++    name: Mapped[str] = mapped_column(String, nullable=False)
++    code: Mapped[str] = mapped_column(String, nullable=False)
++
++
++class Discipline(Base):
++    __tablename__ = "disciplines"
++    __table_args__ = (
++        UniqueConstraint("organization_id", "code", name="uq_disciplines_organization_code"),
++    )
++    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
++    organization_id: Mapped[str] = mapped_column(
++        String, ForeignKey("organizations.id"), nullable=False
++    )
++    name: Mapped[str] = mapped_column(String, nullable=False)
++    code: Mapped[str] = mapped_column(String, nullable=False)
++
++
++class CourseDiscipline(Base):
++    __tablename__ = "course_disciplines"
++    __table_args__ = (
++        UniqueConstraint("course_id", "discipline_id", name="uq_course_disciplines_pair"),
++    )
++    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
++    course_id: Mapped[str] = mapped_column(String, ForeignKey("courses.id"), nullable=False)
++    discipline_id: Mapped[str] = mapped_column(
++        String, ForeignKey("disciplines.id"), nullable=False
++    )
++
++
++class ClassGroup(Base):
++    __tablename__ = "class_groups"
++    __table_args__ = (
++        UniqueConstraint(
++            "course_discipline_id",
++            "period",
++            "code",
++            name="uq_class_groups_curriculum_period_code",
++        ),
++    )
++    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
++    course_discipline_id: Mapped[str] = mapped_column(
++        String, ForeignKey("course_disciplines.id"), nullable=False
++    )
++    period: Mapped[str] = mapped_column(String, nullable=False)
++    code: Mapped[str] = mapped_column(String, nullable=False)
++
++
++class Student(Base):
++    __tablename__ = "students"
++    __table_args__ = (
++        UniqueConstraint("organization_id", "external_id", name="uq_students_organization_external"),
++    )
++    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
++    organization_id: Mapped[str] = mapped_column(
++        String, ForeignKey("organizations.id"), nullable=False
++    )
++    name: Mapped[str] = mapped_column(String, nullable=False)
++    external_id: Mapped[str] = mapped_column(String, nullable=False)
++
++
++class Enrollment(Base):
++    __tablename__ = "enrollments"
++    # Deliberately no unique constraint on (class_group_id, student_id):
++    # historical reenrollment is valid. BL-AV-2-03 prevents simultaneous ACTIVE rows.
++    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
++    class_group_id: Mapped[str] = mapped_column(
++        String, ForeignKey("class_groups.id"), nullable=False
++    )
++    student_id: Mapped[str] = mapped_column(String, ForeignKey("students.id"), nullable=False)
++    status: Mapped[EnrollmentStatus] = mapped_column(
++        Enum(EnrollmentStatus), default=EnrollmentStatus.ACTIVE, nullable=False
++    )
++    enrolled_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
++    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
++
++
++class ProfessorClassLink(Base):
++    __tablename__ = "professor_class_links"
++    __table_args__ = (
++        UniqueConstraint(
++            "professor_id", "class_group_id", "role", name="uq_professor_class_links_role"
++        ),
++    )
++    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
++    professor_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
++    class_group_id: Mapped[str] = mapped_column(
++        String, ForeignKey("class_groups.id"), nullable=False
++    )
++    role: Mapped[ProfessorRole] = mapped_column(
++        Enum(ProfessorRole, values_callable=lambda enum_type: [item.value for item in enum_type]),
++        nullable=False,
++    )
++    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
++    starts_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
++    ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
++
++
+ class Question(Base):
+     __tablename__ = "questions"
+     id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+diff --git a/core/app/schemas.py b/core/app/schemas.py
+index 5342810..c1caf22 100644
+--- a/core/app/schemas.py
++++ b/core/app/schemas.py
+@@ -77,14 +77,20 @@ class QuestionOut(BaseModel):
+ 
+ class AssessmentCreate(BaseModel):
+     title: str
++    class_group_id: Optional[str] = None
+     question: Optional[QuestionInput] = None
+ 
+ 
++class AssessmentUpdate(BaseModel):
++    title: str
++
++
+ class AssessmentOut(BaseModel):
+     id: str
+     title: str
+     status: str
+     owner_id: str
++    class_group_id: Optional[str] = None
+     created_at: datetime
+     questions: list[QuestionOut] = []
+ 
+diff --git a/docs/contracts/openapi.yaml b/docs/contracts/openapi.yaml
+index 1a9b15a..77e0a2a 100644
+--- a/docs/contracts/openapi.yaml
++++ b/docs/contracts/openapi.yaml
+@@ -5,6 +5,18 @@ info:
+   description: >
+     Subconjunto do contrato completo do PRD (seção 13), suficiente para a
+     jornada demonstrada. Envelope de erro segue o padrão do PRD (13.1).
++
++
++    Nota de arquitetura (AC-09, AV-S03, 2026-09-28): `Organization` é uma
++    entidade de domínio da estrutura acadêmica (agrupa Curso/Disciplina/Turma),
++    não uma fronteira de isolamento multi-tenant. Não há requisito aprovado de
++    multi-tenancy nesta trilha. O escopo de leitura de um professor é derivado
++    dos seus vínculos ativos de turma (`ProfessorClassLink` → `ClassGroup` →
++    `CourseDiscipline` → `Course`/`Discipline` → `Organization`), nunca do
++    inverso (não existe filtro "por organização do usuário" independente do
++    vínculo real de turma). Administradores mantêm acesso global sem qualquer
++    escopo de organização. Ver revisão completa em
++    `docs/governance/evidence/AV-S03/AC-07-AC-09_revisao_arquitetura.md`.
+ servers:
+   - url: http://localhost:8000/v1
+ paths:
+@@ -55,8 +67,15 @@ paths:
+     post:
+       summary: Criar avaliação em rascunho
+       security: [{ bearerAuth: [] }]
++      requestBody:
++        required: true
++        content:
++          application/json:
++            schema: { $ref: '#/components/schemas/AssessmentCreate' }
+       responses:
+         "201": { description: Criada }
++        "403": { description: Professor sem vínculo ativo com a turma }
++        "422": { description: Turma obrigatória quando o módulo acadêmico está habilitado }
+ 
+   /assessments/{id}/publish:
+     post:
+@@ -168,7 +187,154 @@ paths:
+       responses:
+         "200": { description: OK, sem dados sensíveis }
+ 
++  # ---- AV-S03: estrutura acadêmica (DEC-AV-023) ----
++  /organizations:
++    get: { summary: Listar organizações no escopo autorizado, security: [{ bearerAuth: [] }], responses: { "200": { description: OK } } }
++    post:
++      summary: Criar organização (admin)
++      security: [{ bearerAuth: [] }]
++      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OrganizationInput' } } } }
++      responses: { "201": { description: Criada }, "403": { description: Somente admin } }
++  /organizations/{id}:
++    get: { summary: Ler organização no escopo autorizado, security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "200": { description: OK }, "403": { description: Fora do escopo } } }
++    patch:
++      summary: Editar organização (admin)
++      security: [{ bearerAuth: [] }]
++      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
++      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OrganizationInput' } } } }
++      responses: { "200": { description: Atualizada }, "403": { description: Somente admin } }
++    delete: { summary: Excluir organização (admin), security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "204": { description: Excluída }, "403": { description: Somente admin } } }
++
++  /courses:
++    get: { summary: Listar cursos no escopo autorizado, security: [{ bearerAuth: [] }], responses: { "200": { description: OK } } }
++    post:
++      summary: Criar curso (admin)
++      security: [{ bearerAuth: [] }]
++      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CourseInput' } } } }
++      responses: { "201": { description: Criado }, "403": { description: Somente admin } }
++  /courses/{id}:
++    get: { summary: Ler curso no escopo autorizado, security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "200": { description: OK }, "403": { description: Fora do escopo } } }
++    patch:
++      summary: Editar curso (admin)
++      security: [{ bearerAuth: [] }]
++      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
++      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CourseInput' } } } }
++      responses: { "200": { description: Atualizado }, "403": { description: Somente admin } }
++    delete: { summary: Excluir curso (admin), security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "204": { description: Excluído }, "403": { description: Somente admin } } }
++
++  /disciplines:
++    get: { summary: Listar disciplinas no escopo autorizado, security: [{ bearerAuth: [] }], responses: { "200": { description: OK } } }
++    post:
++      summary: Criar disciplina (admin)
++      security: [{ bearerAuth: [] }]
++      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DisciplineInput' } } } }
++      responses: { "201": { description: Criada }, "403": { description: Somente admin } }
++  /disciplines/{id}:
++    get: { summary: Ler disciplina no escopo autorizado, security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "200": { description: OK }, "403": { description: Fora do escopo } } }
++    patch:
++      summary: Editar disciplina (admin)
++      security: [{ bearerAuth: [] }]
++      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
++      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DisciplineInput' } } } }
++      responses: { "200": { description: Atualizada }, "403": { description: Somente admin } }
++    delete: { summary: Excluir disciplina (admin), security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "204": { description: Excluída }, "403": { description: Somente admin } } }
++
++  /course-disciplines:
++    get: { summary: Listar associações curriculares no escopo autorizado, security: [{ bearerAuth: [] }], responses: { "200": { description: OK } } }
++    post:
++      summary: Criar associação curso-disciplina (admin)
++      security: [{ bearerAuth: [] }]
++      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CourseDisciplineInput' } } } }
++      responses: { "201": { description: Criada }, "409": { description: Associação duplicada } }
++  /course-disciplines/{id}:
++    get: { summary: Ler associação curricular no escopo autorizado, security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "200": { description: OK }, "403": { description: Fora do escopo } } }
++    patch:
++      summary: Editar associação curso-disciplina (admin)
++      security: [{ bearerAuth: [] }]
++      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
++      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CourseDisciplineInput' } } } }
++      responses: { "200": { description: Atualizada }, "403": { description: Somente admin }, "409": { description: Associação duplicada } }
++    delete: { summary: Excluir associação (admin), security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "204": { description: Excluída }, "403": { description: Somente admin } } }
++
++  /class-groups:
++    get: { summary: Listar turmas com vínculo ativo/vigente, security: [{ bearerAuth: [] }], responses: { "200": { description: OK } } }
++    post:
++      summary: Criar turma (admin)
++      security: [{ bearerAuth: [] }]
++      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ClassGroupInput' } } } }
++      responses: { "201": { description: Criada }, "403": { description: Somente admin }, "409": { description: Identidade duplicada } }
++  /class-groups/{id}:
++    get: { summary: Ler turma com vínculo ativo/vigente, security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "200": { description: OK }, "403": { description: Sem vínculo ativo } } }
++    patch:
++      summary: Editar turma (admin)
++      security: [{ bearerAuth: [] }]
++      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
++      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ClassGroupInput' } } } }
++      responses: { "200": { description: Atualizada }, "403": { description: Somente admin }, "409": { description: Identidade duplicada } }
++    delete: { summary: Excluir turma (admin), security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "204": { description: Excluída }, "403": { description: Somente admin } } }
++
++  /professor-class-links:
++    get: { summary: Listar vínculos (admin global; professor somente os próprios), security: [{ bearerAuth: [] }], responses: { "200": { description: OK } } }
++    post:
++      summary: Criar vínculo professor-turma (admin)
++      security: [{ bearerAuth: [] }]
++      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProfessorClassLinkInput' } } } }
++      responses: { "201": { description: Criado }, "403": { description: Somente admin }, "409": { description: Vínculo duplicado } }
++  /professor-class-links/{id}:
++    get: { summary: Ler vínculo no escopo autorizado, security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "200": { description: OK }, "403": { description: Fora do escopo } } }
++    patch:
++      summary: Editar vínculo professor-turma (admin)
++      security: [{ bearerAuth: [] }]
++      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
++      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProfessorClassLinkUpdate' } } } }
++      responses: { "200": { description: Atualizado }, "403": { description: Somente admin } }
++    delete: { summary: Excluir vínculo (admin), security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "204": { description: Excluído }, "403": { description: Somente admin } } }
++
++  /students:
++    get: { summary: Listar alunos matriculados nas turmas ativas do professor, security: [{ bearerAuth: [] }], responses: { "200": { description: OK } } }
++    post:
++      summary: Criar identidade global de aluno (admin)
++      security: [{ bearerAuth: [] }]
++      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/StudentInput' } } } }
++      responses: { "201": { description: Criado }, "403": { description: Somente admin } }
++  /students/{id}:
++    get: { summary: Ler aluno no escopo autorizado, security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "200": { description: OK }, "403": { description: Fora do escopo } } }
++    patch:
++      summary: Editar identidade global de aluno (admin)
++      security: [{ bearerAuth: [] }]
++      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
++      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/StudentInput' } } } }
++      responses: { "200": { description: Atualizado }, "403": { description: Somente admin } }
++    delete: { summary: Excluir aluno (admin), security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "204": { description: Excluído }, "403": { description: Somente admin } } }
++
++  /enrollments:
++    get: { summary: Listar matrículas no escopo autorizado, security: [{ bearerAuth: [] }], responses: { "200": { description: OK } } }
++    post:
++      summary: Matricular aluno (admin ou professor responsável com vínculo ativo)
++      security: [{ bearerAuth: [] }]
++      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/EnrollmentInput' } } } }
++      responses: { "201": { description: Criada }, "403": { description: Sem poder de matrícula }, "409": { description: Matrícula ativa duplicada } }
++  /enrollments/{id}:
++    get: { summary: Ler matrícula no escopo autorizado, security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "200": { description: OK }, "403": { description: Fora do escopo } } }
++    patch:
++      summary: Editar/encerrar matrícula (admin ou professor responsável com vínculo ativo)
++      security: [{ bearerAuth: [] }]
++      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
++      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/EnrollmentUpdate' } } } }
++      responses: { "200": { description: Atualizada }, "403": { description: Sem poder de matrícula } }
++    delete: { summary: Excluir matrícula (admin), security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "204": { description: Excluída }, "403": { description: Somente admin } } }
++
++  /assessments/{id}/class-group:
++    post:
++      summary: Vincular avaliação a turma; professor exige propriedade e vínculo ativo, admin é global
++      security: [{ bearerAuth: [] }]
++      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
++      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AssessmentClassGroupInput' } } } }
++      responses: { "200": { description: Vinculada }, "403": { description: Sem propriedade ou vínculo ativo } }
++
+ components:
++  parameters:
++    ResourceId: { name: id, in: path, required: true, schema: { type: string } }
+   securitySchemes:
+     bearerAuth:
+       type: http
+@@ -269,3 +435,70 @@ components:
+       properties:
+         id: { type: string }
+         title: { type: string }
++    OrganizationInput:
++      type: object
++      required: [name]
++      properties: { name: { type: string, minLength: 1 } }
++    CourseInput:
++      type: object
++      required: [organization_id, name, code]
++      properties: { organization_id: { type: string }, name: { type: string }, code: { type: string } }
++    DisciplineInput:
++      type: object
++      required: [organization_id, name, code]
++      properties: { organization_id: { type: string }, name: { type: string }, code: { type: string } }
++    CourseDisciplineInput:
++      type: object
++      required: [course_id, discipline_id]
++      properties: { course_id: { type: string }, discipline_id: { type: string } }
++    ClassGroupInput:
++      type: object
++      required: [course_discipline_id, period, code]
++      properties: { course_discipline_id: { type: string }, period: { type: string }, code: { type: string } }
++    ProfessorClassLinkInput:
++      type: object
++      required: [professor_id, class_group_id, role]
++      properties:
++        professor_id: { type: string }
++        class_group_id: { type: string }
++        role: { type: string, enum: [responsible, collaborator] }
++        active: { type: boolean, default: true }
++        starts_at: { type: string, format: date-time, nullable: true }
++        ends_at: { type: string, format: date-time, nullable: true }
++    ProfessorClassLinkUpdate:
++      type: object
++      properties:
++        role: { type: string, enum: [responsible, collaborator] }
++        active: { type: boolean }
++        starts_at: { type: string, format: date-time, nullable: true }
++        ends_at: { type: string, format: date-time, nullable: true }
++    StudentInput:
++      type: object
++      required: [organization_id, name, external_id]
++      properties: { organization_id: { type: string }, name: { type: string }, external_id: { type: string } }
++    EnrollmentInput:
++      type: object
++      required: [class_group_id, student_id]
++      properties:
++        class_group_id: { type: string }
++        student_id: { type: string }
++        status: { type: string, enum: [ACTIVE, SUSPENDED, WITHDRAWN, COMPLETED], default: ACTIVE }
++        enrolled_at: { type: string, format: date-time, nullable: true }
++        ended_at: { type: string, format: date-time, nullable: true }
++    EnrollmentUpdate:
++      type: object
++      properties:
++        status: { type: string, enum: [ACTIVE, SUSPENDED, WITHDRAWN, COMPLETED] }
++        enrolled_at: { type: string, format: date-time }
++        ended_at: { type: string, format: date-time, nullable: true }
++    AssessmentClassGroupInput:
++      type: object
++      required: [class_group_id]
++      properties: { class_group_id: { type: string } }
++    AssessmentCreate:
++      type: object
++      required: [title]
++      properties:
++        title: { type: string }
++        class_group_id: { type: string, nullable: true }
++        question: { $ref: '#/components/schemas/QuestionInput' }
+diff --git a/docs/governance/executive_technical_dashboard.md b/docs/governance/executive_technical_dashboard.md
+index 0a4ced7..e0bef65 100644
+--- a/docs/governance/executive_technical_dashboard.md
++++ b/docs/governance/executive_technical_dashboard.md
+@@ -1,6 +1,6 @@
+ # Dashboard Executivo de Evolução Técnica — AvalIA
+ 
+-> Atualização: 2026-09-24 (PR #1 integrado a `main` via merge commit) · Fonte canônica versionada em Markdown · Estado: AV-S02 homologada; PR #1 integrado a `main` (SHA `7f2e0032ac7971ae43db5cc2386da0de321b778f`, merge commit, 6 commits preservados); CI remota em `main` 3/3 jobs verdes; `avalia_dev` AINDA sem a migração (`DEBT-AV-011` residual) — 3 duplicatas preservadas, sem `UniqueConstraint`; próxima sprint elegível proposta (`AV-S03`), não iniciada
++> Atualização: 2026-09-28 (homologação de BL-AV-2-03 + execução local dos demais itens da AV-S03) · Fonte canônica versionada em Markdown · Estado: `BL-AV-2-03` **homologado por Rafael** (`DEC-AV-026`, local, não integrado); `BL-AV-2-01/02/04` implementados e revalidados tecnicamente nesta execução (migração revalidada em PostgreSQL isolado, UI mínima construída e validada em Chrome real via CDP com payload de rede capturado); `BL-AV-2-05`/AV-S03 permanecem abertos (AC-07/09/10 pendentes, AC-08 sem CI remota); `avalia_dev` não foi acessado; nenhuma ação Git/remota realizada
+ 
+ ## 1. Leitura executiva
+ 
+@@ -10,7 +10,7 @@ O AvalIA possui uma demonstração experimental herdada, organizada em Core API,
+ 
+ | Referência | Estado | Link |
+ |---|---|---|
+-| Última execução registrada | EXEC-2026-09-24-07, integração do PR #1 a `main` | [ponteiro](snapshots/latest_execution.md) |
++| Última execução registrada | EXEC-2026-09-28-05, homologação de BL-AV-2-03 (DEC-AV-026) e execução local dos demais itens da AV-S03 | [ponteiro](snapshots/latest_execution.md) |
+ | Último baseline validado sob esta governança | nenhum promovido (explicitamente não promovido por esta homologação) | [ponteiro](snapshots/latest_validated_baseline.md) |
+ | Baseline herdado candidato | inspeção documental/Git de 2026-09-21 | [BASELINE-001](snapshots/snapshot_BASELINE-001_estado-herdado.md) |
+ | Sprint funcional encerrada | `AV-S01` — homologada por Rafael em 2026-09-23 com `DEBT-AV-009` aceito como débito residual aberto | [documento da sprint](sprints/sprint_AV-S01_autorizacao_retomada_revalidacao.md) |
+@@ -22,7 +22,7 @@ O AvalIA possui uma demonstração experimental herdada, organizada em Core API,
+ 
+ | Componente | Implementação observada | Validação atual nesta execução | Fonte |
+ |---|---|---|---|
+-| Core API | idempotência de revisão humana corrigida; migração NÃO deduplica automaticamente (detecta+aborta, por exigência de Rafael); lint mínimo (Ruff) configurado | 42 passed; Ruff `All checks passed!`; migração validada em SQLite E em PostgreSQL 16 isolado real (com e sem duplicatas); idempotência sob concorrência real confirmada em Postgres (10 e 6 threads) | [última execução](snapshots/latest_execution.md) |
++| Core API | BL-AV-2-03 (autorização por vínculo professor–turma) tecnicamente concluído e aprovado sem ressalvas após 3 rodadas de revisão independente; implementação da AV-S03 permanece local, não integrada e não homologada | revisão independente: focal 20/20 e Core 68/68 em duas execuções consecutivas; confirmação local final: Core 68/68, 12 warnings, Ruff `All checks passed!`; SQLite temporário + FastAPI `TestClient` | [última execução](snapshots/latest_execution.md) |
+ | AI Engine | lint Ruff configurado; fonte não alterada nesta fatia | 21 passed no padrão e 21 passed no modo simulado global; Ruff `All checks passed!` | [última execução](snapshots/latest_execution.md) |
+ | Frontend | React/Vite/TypeScript e build scripts versionados; retomada via API implementada em AV-S01; decisão persistida exibida em modo somente leitura (BL-AV-1-10); ESLint mínimo configurado | build 0 erros; AC-03 validado com evidência visual real no saneamento de 2026-09-23; AC-04/AC-10 revalidados visualmente pós-fix em 2026-09-24 (Chrome real via CDP); ESLint limpo | [última execução](snapshots/latest_execution.md) |
+ | Banco/infra local | configuração e documentação presentes | não inspecionados operacionalmente; serviços não alterados | [baseline](snapshots/snapshot_BASELINE-001_estado-herdado.md) |
+@@ -40,6 +40,7 @@ O AvalIA possui uma demonstração experimental herdada, organizada em Core API,
+ | GOV-005 | homologação de governança + aprovação de sprint | GOV-001 a GOV-004 homologados com 2 ressalvas; `AV-S01` aprovada e autorizada (6 itens, 7 refinamentos); `BL-AV-4B-20/21` detalhados por completo | documento de sprint `AV-S01` criado; backlog detalhado; nenhum código alterado | validação documental registrada no snapshot | homologado/aprovado por Rafael nesta execução (governança e escopo de AV-S01, não as demais sprints) |
+ | AV-S01 (execução + saneamento) | implementação real de código (Core + frontend) + saneamento de lacunas de evidência | autorização por vínculo corrigida em 4 rotas + endpoint de contexto novo; retomada via API no frontend; suíte de regressão (24 casos); saneamento posterior: AC-03 (4 sub-casos) comprovado com validação visual real; causa raiz de `DEBT-AV-009` documentada; identificador de snapshot duplicado reconciliado | Core 35/35; AI Engine 21/21 (padrão)/19/21 (simulado global, débito pré-existente); frontend build 0 erros; AC-03 confirmado por evidência visual real em navegador (Chrome via CDP + Playwright). A validação da IA desta execução foi em modo simulado; não houve revalidação da inferência real/Ollama | verificação independente por Hermes em ambas as fatias; revisões efetivas: backend/contrato por Antigravity CLI, frontend por Codex (3 rodadas), consolidação e guard final por Hermes; Claude Code indisponível (OAuth expirado) | **homologada por Rafael em 2026-09-23 com `DEBT-AV-009` aceito como débito residual aberto; sem autorização de commit/push/tag/deploy/baseline/próxima sprint** |
+ | AV-S02 (execução local) | isolamento de teste do AI Engine; CI mínima local; correção de whitespace; validação visual completa | `BL-AV-1-09` implementado (diff de 2 linhas, suíte 21/21 nos 2 ambientes); `.github/workflows/ci.yml` criado (3 jobs, sem deploy/secrets); `ReviewPage.tsx:25` corrigido, `git diff --check` global sem erros; 11 capturas reais do fluxo completo com IA simulada rotulada | verificação independente por Hermes em cada item; revisões cruzadas: Antigravity CLI aprovou BL-AV-1-09 incondicionalmente; Codex aprovou BL-AV-1-06 condicionalmente (achado: ausência de lint, sem linter configurado no repo); Codex aprovou a correção de whitespace; Antigravity CLI confirmou o achado de idempotência (`DEBT-AV-011`, severidade alta) como gap real | **implementada e validada localmente; CI remota (`DEBT-AV-005`) e homologação do fechamento pendentes; etapa remota aguardando autorização Git específica** |
++| BL-AV-2-03 (encerramento local) | autorização por vínculo professor–turma | tecnicamente concluído; todos os achados das 3 rodadas corrigidos sem regressão | terceira revisão cruzada independente e adversarial pelo Antigravity: **APROVADO SEM RESSALVAS**; focal 20/20; Core 68/68 duas vezes; confirmação Codex: Ruff limpo e Core 68/68 | **homologação formal por Rafael pendente; local, não integrado e sem stage/commit/push/tag/deploy** |
+ 
+ **Trilha proposta "Operação de uma turma":** 8 etapas + 1 sub-etapa (4B), 3 marcos, lidos em 5 fases de execução desde GOV-004 (§11 da trilha), 19 sprints propostas (AV-S01 a AV-S13 e AV-S05B a AV-S10B). `AV-S01` foi homologada; `AV-S02` está implementada e validada localmente, aguardando CI remota e homologação; as demais 17 permanecem não autorizadas. Progresso funcional desta trilha: **7 de 70 itens implementados/homologados (10%)** — o denominador é o backlog canônico em [`backlog/backlog_tecnico_avalia.md`](backlog/backlog_tecnico_avalia.md): 68 itens anteriores + `BL-AV-1-09` (implementado nesta execução) + `BL-AV-1-10` (novo, achado de idempotência, proposto). Os 6 itens de `AV-S01` estão homologados; `BL-AV-1-09` está implementado e validado localmente, mas aguarda a mesma homologação de fechamento de `AV-S02` que o restante da sprint. Este percentual descreve o backlog desta trilha, não maturidade técnica ou qualidade pedagógica do produto.
+ 
+@@ -126,7 +127,8 @@ Destaques atuais: pendência regulatória impede uso com dados reais; estado fun
+ | Aprovar a segunda sprint (`AV-S02`) | Rafael revisar o plano `AV-S02` (CI mínima, visual completo com IA simulada, isolamento de `DEBT-AV-009`) e decidir sobre os 4 pontos do §15 | **aprovada e executada localmente (2026-09-23); CI remota e homologação do fechamento pendentes** — [documento da sprint](sprints/sprint_AV-S02_ci_visual_isolamento_testes.md) §18/§19 |
+ | Autorizar a etapa remota de `AV-S02` | Rafael revisar o pacote de revisão e decidir sobre `git add`/`commit`/`push`, criação da branch e abertura do PR | **executado (2026-09-24)** — branch `feat/av-s01-s02-consolidacao`, 4 commits, PR [#1](https://github.com/rafaelinfopiaui/avalia-platform/pull/1) (rascunho), CI remota real 3/3 jobs verdes (run [35997285722](https://github.com/rafaelinfopiaui/avalia-platform/actions/runs/35997285722), commit `36de551e414cba847e9e369bee10701cd142bb87`) |
+ | Homologar o fechamento de `AV-S02` e autorizar a integração | Rafael revisar o PR #1 e decidir sobre homologação/merge | **homologada e integrada a `main` (2026-09-24)** — merge commit `7f2e0032ac7971ae43db5cc2386da0de321b778f`, CI remota em `main` 3/3 jobs verdes (run [36000432576](https://github.com/rafaelinfopiaui/avalia-platform/actions/runs/36000432576)) |
+-| Decidir a próxima sprint elegível (`AV-S03`) | Rafael revisar a proposta (Etapa 2 — estrutura acadêmica) e suas dependências reais antes de autorizar o início | **proposta apresentada (2026-09-24), não iniciada** — ver `backlog/trilha_operacao_de_turma.md` §11 (Fase 3) e itens `BL-AV-2-01` a `05` |
++| Regularizar o estado de `AV-S03` | Rafael revisar a proposta (Etapa 2 — estrutura acadêmica), o trabalho local existente e suas dependências reais | **BL-AV-2-03 tecnicamente concluído localmente; sprint completa não declarada concluída nem homologada** — o documento de sprint AV-S03 continua ausente deste worktree |
++| Homologar BL-AV-2-03 e decidir futura integração | Rafael revisar o encerramento técnico aprovado sem ressalvas e decidir explicitamente sobre homologação e eventual integração | **pendente** — implementação local em `local/av-s03-recuperacao`, sem stage/commit/push; aprovação técnica não substitui homologação de produto |
+ | Decidir saneamento das duplicatas legadas de revisão humana (`DEBT-AV-011`) | Rafael decidir sobre a proposta de saneamento (backup, classificação equivalente/conflitante, preservação por arquivo em vez de exclusão) apresentada em `backlog/proposta_saneamento_human_reviews_duplicadas.md` | pendente — proposta apresentada em 2026-09-24, não executada |
+ 
+ ## 9. Política de atualização
+diff --git a/docs/governance/snapshots/latest_execution.md b/docs/governance/snapshots/latest_execution.md
+index d5bc41a..a1b089e 100644
+--- a/docs/governance/snapshots/latest_execution.md
++++ b/docs/governance/snapshots/latest_execution.md
+@@ -1,10 +1,12 @@
+ # Última execução registrada
+ 
+-- execução: [EXEC-2026-09-24-07 — integração do PR #1 a `main`](snapshot_EXEC-2026-09-24-07_integracao-main.md);
+-- tipo: integração autorizada e homologada por Rafael — PR #1 retirado de rascunho, merge por merge commit (preservando 6 commits) em `main`, CI remota real disparada pelo push, resultado registrado;
+-- status: concluída — merge commit `7f2e0032ac7971ae43db5cc2386da0de321b778f`, PR [#1](https://github.com/rafaelinfopiaui/avalia-platform/pull/1) `MERGED`, CI remota em `main` 3/3 jobs verdes (run [36000432576](https://github.com/rafaelinfopiaui/avalia-platform/actions/runs/36000432576)); `avalia_dev` reconfirmado sem a migração (`DEBT-AV-011` residual, 3 duplicatas preservadas);
++- execução: [EXEC-2026-09-28-05 — homologação de BL-AV-2-03, execução local dos demais itens da AV-S03](snapshot_EXEC-2026-09-28-05_homologacao-bl-av-2-03-execucao-av-s03.md);
++- tipo: homologação formal (BL-AV-2-03, DEC-AV-026) + revalidação técnica local (BL-AV-2-01/02/04) + validação visual em navegador real (AC-06) + pacote consolidado da AV-S03;
++- status: `BL-AV-2-03` homologado (local, não integrado); `BL-AV-2-01/02/04` implementados e revalidados tecnicamente, sem homologação formal própria; `BL-AV-2-05`/AV-S03 permanecem abertos (AC-07/09/10 pendentes); `avalia_dev` não acessado;
+ - baseline promovido: não;
+-- ação Git/remota: PR retirado de rascunho, merge executado, CI acompanhada; **nenhuma tag, deploy, aplicação de migração operacional ou saneamento de duplicatas executado**.
++- ação Git/remota: **nenhum commit, push, tag, deploy ou ação remota executado**.
++
++Execução imediatamente anterior: [EXEC-2026-09-28-04 — terceira revisão Antigravity e encerramento local de BL-AV-2-03](snapshot_EXEC-2026-09-28-04_BL-AV-2-03-terceira-revisao-antigravity.md).
+ 
+ Execuções anteriores: [EXEC-2026-09-24-06 — homologação da AV-S02 e autorização de integração do PR #1](snapshot_EXEC-2026-09-24-06_homologacao-av-s02.md), [EXEC-2026-09-24-05 — branch, PR e CI remota real do pacote AV-S01+AV-S02](snapshot_EXEC-2026-09-24-05_pr-ci-remota.md), [EXEC-2026-09-24-04 — pacote de revisão para publicação (AV-S01 + AV-S02)](snapshot_EXEC-2026-09-24-04_pacote-revisao.md), [EXEC-2026-09-24-03 — migração sem deduplicação automática + validação em PostgreSQL isolado](snapshot_EXEC-2026-09-24-03_BL-AV-1-10-postgres.md), [EXEC-2026-09-24-02 — correções da revisão independente de BL-AV-1-10](snapshot_EXEC-2026-09-24-02_BL-AV-1-10-revisao.md), [EXEC-2026-09-23-07 — execução local da AV-S02](snapshot_EXEC-2026-09-23-07_AV-S02.md), [EXEC-2026-09-23-06 — homologação da AV-S01 e planejamento da AV-S02](snapshot_EXEC-2026-09-23-06_homologacao_AV-S01_plano_AV-S02.md), [EXEC-2026-09-23-05 — saneamento AV-S01](snapshot_EXEC-2026-09-23-05_AV-S01-saneamento.md), [EXEC-2026-09-23-04 — consolidação completa de AV-S01](snapshot_EXEC-2026-09-23-04_AV-S01.md), [EXEC-2026-09-23-03 — backend AV-S01](snapshot_EXEC-2026-09-23-03_AV-S01-backend.md), [EXEC-2026-09-23-02 — GOV-005](snapshot_EXEC-2026-09-23-02_GOV-005.md), [EXEC-2026-09-23-01 — GOV-004](snapshot_EXEC-2026-09-23-01_GOV-004.md), [EXEC-2026-09-21-03 — GOV-003](snapshot_EXEC-2026-09-21-03_GOV-003.md), [EXEC-2026-09-21-02 — GOV-002](snapshot_EXEC-2026-09-21-02_GOV-002.md), [EXEC-2026-09-21-01 — GOV-001](snapshot_EXEC-2026-09-21-01_GOV-001.md).
+ 
+diff --git a/frontend/.env.example b/frontend/.env.example
+index fecbcc3..7c48f5e 100644
+--- a/frontend/.env.example
++++ b/frontend/.env.example
+@@ -1 +1,2 @@
+ VITE_API_URL=http://localhost:8000/v1
++VITE_ACADEMIC_MODULE_ENABLED=true
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 67a0d0e..fb84b01 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -3,6 +3,7 @@ import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation, use
+ import { Layout } from './components/Layout'
+ import { Spinner } from './components/Spinner'
+ import { AuthProvider, useAuth } from './context/AuthContext'
++import { AcademicPage } from './pages/AcademicPage'
+ import { AnswerPage } from './pages/AnswerPage'
+ import { AssessmentEditorPage } from './pages/AssessmentEditorPage'
+ import { AssessmentsPage } from './pages/AssessmentsPage'
+@@ -12,5 +13,6 @@ import { LoginPage } from './pages/LoginPage'
+ import { ReviewPage } from './pages/ReviewPage'
+ 
+ function SessionGuard() { const { user, loading } = useAuth(); const location = useLocation(); const navigate = useNavigate(); useEffect(() => { const handler = () => navigate('/login', { replace: true, state: { from: location.pathname + location.search } }); window.addEventListener('avalia:unauthorized', handler); return () => window.removeEventListener('avalia:unauthorized', handler) }, [location.pathname, location.search, navigate]); if (loading) return <main className="center-page"><Spinner label="Verificando sessão…" /></main>; return user ? <Outlet /> : <Navigate to="/login" replace state={{ from: location.pathname + location.search }} /> }
+-const router = createBrowserRouter([{ path: '/login', element: <LoginPage />, errorElement: <ErrorPage /> }, { element: <SessionGuard />, children: [{ element: <Layout />, children: [{ path: '/', element: <Navigate to="/avaliacoes" replace /> }, { path: '/avaliacoes', element: <AssessmentsPage /> }, { path: '/avaliacoes/nova', element: <AssessmentEditorPage /> }, { path: '/avaliacoes/:id', element: <AssessmentEditorPage /> }, { path: '/avaliacoes/:id/resposta', element: <AnswerPage /> }, { path: '/correcoes/:id', element: <CorrectionPage /> }, { path: '/correcoes/:id/revisao', element: <ReviewPage /> }] }] }, { path: '*', element: <Navigate to="/avaliacoes" replace /> }])
++const router = createBrowserRouter([{ path: '/login', element: <LoginPage />, errorElement: <ErrorPage /> }, { element: <SessionGuard />, children: [{ element: <Layout />, children: [{ path: '/', element: <Navigate to="/avaliacoes" replace /> }, { path: '/avaliacoes', element: <AssessmentsPage /> }, { path: '/avaliacoes/nova', element: <AssessmentEditorPage /> }, { path: '/avaliacoes/:id', element: <AssessmentEditorPage /> }, { path: '/avaliacoes/:id/resposta', element: <AnswerPage /> }, { path: '/correcoes/:id', element: <CorrectionPage /> }, { path: '/correcoes/:id/revisao', element: <ReviewPage /> }, { path: '/academico', element: <AcademicPage /> }] }] }, { path: '*', element: <Navigate to="/avaliacoes" replace /> }])
++
+ export default function App() { return <AuthProvider><RouterProvider router={router} /></AuthProvider> }
+diff --git a/frontend/src/components/Layout.tsx b/frontend/src/components/Layout.tsx
+index 2fce774..6bf45c8 100644
+--- a/frontend/src/components/Layout.tsx
++++ b/frontend/src/components/Layout.tsx
+@@ -6,7 +6,10 @@ export function Layout() {
+   return <div className="app-shell">
+     <header className="topbar">
+       <NavLink to="/avaliacoes" className="brand" aria-label="AvalIA — início"><span>Aval</span><strong>IA</strong></NavLink>
+-      <nav aria-label="Navegação principal"><NavLink to="/avaliacoes">Avaliações</NavLink></nav>
++      <nav aria-label="Navegação principal">
++        <NavLink to="/avaliacoes">Avaliações</NavLink>
++        <NavLink to="/academico">Gestão Acadêmica</NavLink>
++      </nav>
+       <div className="user-area"><span>{user?.name || user?.email}</span><button className="button button--ghost" onClick={() => { logout(); navigate('/login') }}>Sair</button></div>
+     </header>
+     <main className="page"><Outlet /></main>
+diff --git a/frontend/src/pages/AssessmentEditorPage.tsx b/frontend/src/pages/AssessmentEditorPage.tsx
+index 2603c46..c6134b2 100644
+--- a/frontend/src/pages/AssessmentEditorPage.tsx
++++ b/frontend/src/pages/AssessmentEditorPage.tsx
+@@ -2,33 +2,94 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
+ import { Link, useNavigate, useParams } from 'react-router-dom'
+ import { Alert } from '../components/Alert'
+ import { Spinner } from '../components/Spinner'
+-import { createAssessment, getAssessment, publishAssessment, saveRubric } from '../services/api'
++import { attachAssessmentClassGroup, createAssessment, getAssessment, isAcademicModuleEnabled, listClassGroups, publishAssessment, saveRubric } from '../services/api'
+ import { writeWorkflow } from '../services/workflow'
+-import type { Assessment, Criterion } from '../types'
++import type { Assessment, ClassGroup, Criterion } from '../types'
+ 
+ const blankCriterion = (): Criterion => ({ name: '', description: '', max_score: 0 })
+ export function AssessmentEditorPage() {
+   const { id } = useParams(); const navigate = useNavigate(); const editing = Boolean(id)
++  const academicModuleEnabled = isAcademicModuleEnabled()
+   const [title, setTitle] = useState(''); const [statement, setStatement] = useState(''); const [reference, setReference] = useState(''); const [maxScore, setMaxScore] = useState(5)
+   const [criteria, setCriteria] = useState<Criterion[]>([blankCriterion()]); const [assessment, setAssessment] = useState<Assessment | null>(null)
++  const [classGroups, setClassGroups] = useState<ClassGroup[]>([])
++  const [classGroupId, setClassGroupId] = useState<string>('')
++  const [busyLinkClass, setBusyLinkClass] = useState(false)
+   const [loading, setLoading] = useState(editing); const [busy, setBusy] = useState<'draft' | 'publish' | ''>(''); const [error, setError] = useState(''); const [success, setSuccess] = useState('')
+-  useEffect(() => { if (!id) return; getAssessment(id).then(a => { setAssessment(a); setTitle(a.title); const q = a.question || a.questions?.[0]; if (q) { setStatement(q.statement); setReference(q.reference_answer); setMaxScore(q.max_score); setCriteria(q.rubric?.criteria?.length ? q.rubric.criteria : [blankCriterion()]) } }).catch(e => setError(e.message)).finally(() => setLoading(false)) }, [id])
++
++  useEffect(() => {
++    listClassGroups()
++      .then(setClassGroups)
++      .catch((e: unknown) => {
++        const msg = e instanceof Error ? e.message : 'Não foi possível carregar as turmas.'
++        setError(prev => (prev ? `${prev} | ${msg}` : msg))
++      })
++  }, [])
++
++  useEffect(() => {
++    if (!id) return
++    getAssessment(id).then(a => {
++      setAssessment(a)
++      setTitle(a.title)
++      if (a.class_group_id) setClassGroupId(a.class_group_id)
++      const q = a.question || a.questions?.[0]
++      if (q) {
++        setStatement(q.statement)
++        setReference(q.reference_answer)
++        setMaxScore(q.max_score)
++        setCriteria(q.rubric?.criteria?.length ? q.rubric.criteria : [blankCriterion()])
++      }
++    }).catch(e => setError(e.message)).finally(() => setLoading(false))
++  }, [id])
++
+   const total = useMemo(() => criteria.reduce((sum, item) => sum + (Number(item.max_score) || 0), 0), [criteria])
+   const sameTotal = Math.abs(total - maxScore) < 0.001
+-  const complete = Boolean(title.trim() && statement.trim() && reference.trim() && maxScore > 0 && criteria.length && criteria.every(c => c.name.trim() && c.description.trim() && c.max_score > 0))
++  const complete = Boolean(
++    title.trim() &&
++    statement.trim() &&
++    reference.trim() &&
++    maxScore > 0 &&
++    criteria.length &&
++    criteria.every(c => c.name.trim() && c.description.trim() && c.max_score > 0) &&
++    (!academicModuleEnabled || Boolean(classGroupId))
++  )
+   const canPublish = complete && sameTotal
+   const setCriterion = (index: number, patch: Partial<Criterion>) => setCriteria(old => old.map((item, i) => i === index ? { ...item, ...patch } : item))
+-  const payload = { title: title.trim(), question: { statement: statement.trim(), reference_answer: reference.trim(), max_score: maxScore } }
++
++  async function handleAttachClassGroup() {
++    if (!assessment?.id || !classGroupId) return
++    setError('')
++    setSuccess('')
++    setBusyLinkClass(true)
++    try {
++      const updated = await attachAssessmentClassGroup(assessment.id, classGroupId)
++      setAssessment(updated)
++      setSuccess('Turma vinculada à avaliação com sucesso!')
++    } catch (e) {
++      setError(e instanceof Error ? e.message : 'Não foi possível vincular a turma.')
++    } finally {
++      setBusyLinkClass(false)
++    }
++  }
++
+   async function persist(publish: boolean) {
++    if (academicModuleEnabled && !classGroupId) {
++      setError('A seleção de uma turma vinculada é obrigatória no modo acadêmico.')
++      return
++    }
+     setError(''); setSuccess(''); setBusy(publish ? 'publish' : 'draft')
+     try {
+-      // Nota: o Core desta demo cria avaliação+questão em uma única chamada
+-      // (POST /assessments) e não expõe endpoint de edição de título/questão
+-      // (fora do escopo reduzido, ver docs/backlog.md). Por isso, se a
+-      // avaliação já foi criada nesta sessão, não tentamos atualizá-la — só
+-      // salvamos/atualizamos a rubrica e, se for o caso, publicamos.
++      const payload = {
++        title: title.trim(),
++        class_group_id: classGroupId || undefined,
++        question: { statement: statement.trim(), reference_answer: reference.trim(), max_score: maxScore },
++      }
+       let saved = assessment
+-      if (!saved) saved = await createAssessment(payload)
++      if (!saved) {
++        saved = await createAssessment(payload)
++      } else if (classGroupId && classGroupId !== saved.class_group_id) {
++        saved = await attachAssessmentClassGroup(saved.id, classGroupId)
++      }
+       const question = saved.question || saved.questions?.[0]
+       if (!question?.id) throw new Error('A avaliação foi salva, mas o servidor não informou o identificador da questão.')
+       await saveRubric(question.id, criteria)
+@@ -44,11 +105,58 @@ export function AssessmentEditorPage() {
+   return <><div className="page-heading"><div><Link className="back-link" to="/avaliacoes">← Avaliações</Link><p className="eyebrow">{editing ? 'Editar rascunho' : 'Nova avaliação'}</p><h1>Configure a avaliação</h1></div></div>
+     {error && <Alert>{error}</Alert>}{success && <Alert type="success">{success}</Alert>}
+     <form onSubmit={submit} className="editor-layout">
+-      <section className="panel"><h2>Dados da questão</h2><label>Título da avaliação<input required value={title} onChange={e => setTitle(e.target.value)} placeholder="Ex.: Estruturas de dados" /></label><label>Enunciado<textarea required rows={4} value={statement} onChange={e => setStatement(e.target.value)} placeholder="Digite o que o aluno deve responder" /></label><label>Resposta de referência<textarea required rows={5} value={reference} onChange={e => setReference(e.target.value)} placeholder="Descreva os pontos esperados na resposta" /></label><label className="short-field">Valor máximo da questão<input type="number" min="0.1" step="0.1" required value={maxScore} onChange={e => setMaxScore(Number(e.target.value))} /></label></section>
++      <section className="panel">
++        <h2>Dados da questão</h2>
++        <label>Título da avaliação<input required value={title} onChange={e => setTitle(e.target.value)} placeholder="Ex.: Estruturas de dados" /></label>
++        <label>
++          Turma vinculada{academicModuleEnabled ? ' (obrigatória)' : ' (opcional)'}
++          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
++            <select
++              required={academicModuleEnabled}
++              value={classGroupId}
++              onChange={e => setClassGroupId(e.target.value)}
++              style={{ flex: 1 }}
++            >
++              <option value="">
++                {academicModuleEnabled ? 'Selecione uma turma obrigatória...' : 'Selecione uma turma (opcional)...'}
++              </option>
++              {classGroups.map(cg => (
++                <option key={cg.id} value={cg.id}>
++                  Turma {cg.code} ({cg.period})
++                </option>
++              ))}
++            </select>
++            {editing && classGroupId && classGroupId !== (assessment?.class_group_id || '') && (
++              <button
++                type="button"
++                className="button button--secondary"
++                onClick={() => void handleAttachClassGroup()}
++                disabled={busyLinkClass || Boolean(busy)}
++              >
++                {busyLinkClass ? 'Vinculando…' : 'Vincular turma'}
++              </button>
++            )}
++          </div>
++          {academicModuleEnabled && !classGroupId && (
++            <small style={{ color: '#c53030', display: 'block', marginTop: '0.25rem' }}>
++              Turma é obrigatória para novas avaliações quando o módulo acadêmico está ativo.
++            </small>
++          )}
++          {assessment?.class_group_id && (
++            <small style={{ color: '#087a55', fontWeight: 600, display: 'block', marginTop: '0.25rem' }}>
++              ✓ Avaliação vinculada à turma {classGroups.find(c => c.id === assessment.class_group_id)?.code || assessment.class_group_id}
++            </small>
++          )}
++        </label>
++        <label>Enunciado<textarea required rows={4} value={statement} onChange={e => setStatement(e.target.value)} placeholder="Digite o que o aluno deve responder" /></label>
++        <label>Resposta de referência<textarea required rows={5} value={reference} onChange={e => setReference(e.target.value)} placeholder="Descreva os pontos esperados na resposta" /></label>
++        <label className="short-field">Valor máximo da questão<input type="number" min="0.1" step="0.1" required value={maxScore} onChange={e => setMaxScore(Number(e.target.value))} /></label>
++      </section>
+       <section className="panel"><div className="section-heading"><div><h2>Rubrica por critérios</h2><p>Defina como os {maxScore.toLocaleString('pt-BR')} pontos serão distribuídos.</p></div><button type="button" className="button button--secondary" onClick={() => setCriteria(c => [...c, blankCriterion()])}>Adicionar critério</button></div>
+         <div className={`total-check ${sameTotal ? 'total-check--ok' : 'total-check--error'}`} role="status"><span>Soma dos critérios</span><strong>{total.toLocaleString('pt-BR')} de {maxScore.toLocaleString('pt-BR')} pontos</strong><small>{sameTotal ? 'A soma está correta.' : `Ajuste a rubrica: faltam ${Math.abs(maxScore - total).toLocaleString('pt-BR')} ponto(s) ${total < maxScore ? 'para completar' : 'em excesso'}.`}</small></div>
+         <div className="criteria-list">{criteria.map((criterion, index) => <fieldset className="criterion-editor" key={index}><legend>Critério {index + 1}</legend><label>Nome<input required value={criterion.name} onChange={e => setCriterion(index, { name: e.target.value })} /></label><label>Descrição<textarea required rows={2} value={criterion.description} onChange={e => setCriterion(index, { description: e.target.value })} /></label><label className="short-field">Pontos máximos<input type="number" min="0.1" step="0.1" required value={criterion.max_score} onChange={e => setCriterion(index, { max_score: Number(e.target.value) })} /></label>{criteria.length > 1 && <button type="button" className="link-button link-button--danger" onClick={() => setCriteria(c => c.filter((_, i) => i !== index))}>Remover critério</button>}</fieldset>)}</div>
+       </section>
+-      <div className="sticky-actions"><button className="button button--secondary" disabled={Boolean(busy)}>{busy === 'draft' ? 'Salvando…' : 'Salvar rascunho'}</button><div><button type="button" className="button button--primary" disabled={!canPublish || Boolean(busy)} onClick={() => void persist(true)}>{busy === 'publish' ? 'Publicando…' : 'Publicar e inserir resposta'}</button>{!canPublish && <small className="action-hint">Preencha todos os campos e faça a soma da rubrica coincidir com o valor da questão.</small>}</div></div>
++      <div className="sticky-actions"><button className="button button--secondary" disabled={Boolean(busy)}>{busy === 'draft' ? 'Salvando…' : 'Salvar rascunho'}</button><div><button type="button" className="button button--primary" disabled={!canPublish || Boolean(busy)} onClick={() => void persist(true)}>{busy === 'publish' ? 'Publicando…' : 'Publicar e inserir resposta'}</button>{!canPublish && <small className="action-hint">{academicModuleEnabled && !classGroupId ? 'Selecione uma turma vinculada, preencha todos os campos e faça a soma da rubrica coincidir com o valor da questão.' : 'Preencha todos os campos e faça a soma da rubrica coincidir com o valor da questão.'}</small>}</div></div>
+     </form></>
+ }
++
+diff --git a/frontend/src/services/api.ts b/frontend/src/services/api.ts
+index 96318c4..182d5b7 100644
+--- a/frontend/src/services/api.ts
++++ b/frontend/src/services/api.ts
+@@ -1,4 +1,22 @@
+-import type { ApiErrorBody, Assessment, Answer, CorrectionJob, Criterion, HumanReviewSummary, JobStatus, User } from '../types'
++import type {
++  ApiErrorBody,
++  Assessment,
++  Answer,
++  ClassGroup,
++  CorrectionJob,
++  Course,
++  CourseDiscipline,
++  Criterion,
++  Discipline,
++  Enrollment,
++  EnrollmentStatus,
++  HumanReviewSummary,
++  JobStatus,
++  Organization,
++  ProfessorClassLink,
++  Student,
++  User,
++} from '../types'
+ 
+ const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000/v1').replace(/\/$/, '')
+ const ACCESS_TOKEN_KEY = 'avalia_access_token'
+@@ -37,12 +55,33 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+   if (text) { try { data = JSON.parse(text) } catch { data = undefined } }
+   if (!response.ok) {
+     const raw = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>
+-    const detail = raw.detail && typeof raw.detail === 'object' ? raw.detail as Record<string, unknown> : raw
++    const detailObj = raw.detail && typeof raw.detail === 'object' && !Array.isArray(raw.detail)
++      ? (raw.detail as Record<string, unknown>)
++      : null
++
++    let extractedMessage: string | undefined = undefined
++    if (typeof raw.message === 'string' && raw.message.trim()) {
++      extractedMessage = raw.message
++    } else if (detailObj && typeof detailObj.message === 'string' && detailObj.message.trim()) {
++      extractedMessage = detailObj.message
++    } else if (typeof raw.detail === 'string' && raw.detail.trim()) {
++      extractedMessage = raw.detail
++    } else if (Array.isArray(raw.detail) && raw.detail.length > 0) {
++      const first = raw.detail[0]
++      if (first && typeof first === 'object' && typeof (first as Record<string, unknown>).msg === 'string') {
++        extractedMessage = (first as Record<string, unknown>).msg as string
++      }
++    }
++
+     const body: ApiErrorBody = {
+-      code: typeof detail.code === 'string' ? detail.code : undefined,
+-      message: typeof detail.message === 'string' ? detail.message : defaultMessage(response.status),
+-      correlation_id: typeof detail.correlation_id === 'string' ? detail.correlation_id : undefined,
+-      field_errors: Array.isArray(detail.field_errors) ? detail.field_errors as ApiErrorBody['field_errors'] : undefined,
++      code: typeof detailObj?.code === 'string' ? detailObj.code : (typeof raw.code === 'string' ? raw.code : undefined),
++      message: extractedMessage || defaultMessage(response.status),
++      correlation_id: typeof detailObj?.correlation_id === 'string'
++        ? detailObj.correlation_id
++        : (typeof raw.correlation_id === 'string' ? raw.correlation_id : undefined),
++      field_errors: Array.isArray(detailObj?.field_errors)
++        ? (detailObj.field_errors as ApiErrorBody['field_errors'])
++        : (Array.isArray(raw.field_errors) ? (raw.field_errors as ApiErrorBody['field_errors']) : undefined),
+     }
+     if (response.status === 401) {
+       // Evita disparar o evento repetidamente quando várias chamadas concorrentes
+@@ -69,7 +108,11 @@ export async function listAssessments(): Promise<Assessment[]> {
+   return Array.isArray(data) ? data : data.items || data.assessments || []
+ }
+ export const getAssessment = (id: string) => request<Assessment>(`/assessments/${id}`)
+-export const createAssessment = (payload: { title: string; question: Omit<import('../types').Question, 'id' | 'rubric'> }) => request<Assessment>('/assessments', { method: 'POST', body: JSON.stringify(payload) })
++export const createAssessment = (payload: {
++  title: string
++  class_group_id?: string | null
++  question: Omit<import('../types').Question, 'id' | 'rubric'>
++}) => request<Assessment>('/assessments', { method: 'POST', body: JSON.stringify(payload) })
+ export const updateAssessment = (id: string, payload: unknown) => request<Assessment>(`/assessments/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+ export const saveRubric = (questionId: string, criteria: Criterion[]) => request(`/questions/${questionId}/rubric`, { method: 'POST', body: JSON.stringify({ criteria: criteria.map(({ name, description, max_score }) => ({ name, description, max_score })) }) })
+ export const publishAssessment = (id: string) => request<Assessment>(`/assessments/${id}/publish`, { method: 'POST' })
+@@ -97,3 +140,58 @@ export interface CorrectionJobContext {
+ export const getCorrectionContext = (jobId: string) => request<CorrectionJobContext>(`/correction-jobs/${jobId}/context`)
+ 
+ export const submitReview = (correctionId: string, payload: { decision: 'APPROVE' | 'ALTER'; criteria_scores?: { criterion_id: string; score: number }[]; justification?: string }) => request(`/corrections/${correctionId}/reviews`, { method: 'POST', body: JSON.stringify(payload) })
++
++// ---------------- Gestão Acadêmica (BL-AV-2-04) ----------------
++export const attachAssessmentClassGroup = (assessmentId: string, classGroupId: string) =>
++  request<Assessment>(`/assessments/${assessmentId}/class-group`, {
++    method: 'POST',
++    body: JSON.stringify({ class_group_id: classGroupId }),
++  })
++
++export const listOrganizations = () => request<Organization[]>('/organizations')
++export const createOrganization = (payload: { name: string }) =>
++  request<Organization>('/organizations', { method: 'POST', body: JSON.stringify(payload) })
++
++export const listCourses = () => request<Course[]>('/courses')
++export const createCourse = (payload: { organization_id: string; name: string; code: string }) =>
++  request<Course>('/courses', { method: 'POST', body: JSON.stringify(payload) })
++
++export const listDisciplines = () => request<Discipline[]>('/disciplines')
++export const createDiscipline = (payload: { organization_id: string; name: string; code: string }) =>
++  request<Discipline>('/disciplines', { method: 'POST', body: JSON.stringify(payload) })
++
++export const listCourseDisciplines = () => request<CourseDiscipline[]>('/course-disciplines')
++export const createCourseDiscipline = (payload: { course_id: string; discipline_id: string }) =>
++  request<CourseDiscipline>('/course-disciplines', { method: 'POST', body: JSON.stringify(payload) })
++
++export const listClassGroups = () => request<ClassGroup[]>('/class-groups')
++export const createClassGroup = (payload: { course_discipline_id: string; period: string; code: string }) =>
++  request<ClassGroup>('/class-groups', { method: 'POST', body: JSON.stringify(payload) })
++
++export const listStudents = () => request<Student[]>('/students')
++export const createStudent = (payload: { organization_id: string; name: string; external_id: string }) =>
++  request<Student>('/students', { method: 'POST', body: JSON.stringify(payload) })
++
++export const listEnrollments = () => request<Enrollment[]>('/enrollments')
++export const createEnrollment = (payload: {
++  class_group_id: string
++  student_id: string
++  status?: EnrollmentStatus
++}) => request<Enrollment>('/enrollments', { method: 'POST', body: JSON.stringify(payload) })
++
++export const listProfessorClassLinks = () => request<ProfessorClassLink[]>('/professor-class-links')
++
++export function isAcademicModuleEnabled(): boolean {
++  const envVal = import.meta.env.VITE_ACADEMIC_MODULE_ENABLED
++  if (typeof envVal === 'string') {
++    return ['1', 'true', 'yes', 'on'].includes(envVal.toLowerCase())
++  }
++  // O backend (core/app/config.py) usa ACADEMIC_MODULE_ENABLED com default "false".
++  // O frontend precisa espelhar o MESMO default para não divergir do backend:
++  // sem configuração explícita em ambos os lados, o módulo acadêmico está
++  // DESLIGADO. Configure VITE_ACADEMIC_MODULE_ENABLED=true no ambiente do
++  // frontend sempre que ACADEMIC_MODULE_ENABLED=true estiver configurado no
++  // backend (ver frontend/.env.example).
++  return false
++}
++
+diff --git a/frontend/src/styles/theme.css b/frontend/src/styles/theme.css
+index bd0098a..9eb23a1 100644
+--- a/frontend/src/styles/theme.css
++++ b/frontend/src/styles/theme.css
+@@ -1,4 +1,4 @@
+ @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@600;700&display=swap');
+-:root{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#17223b;background:#f4f6f8;font-synthesis:none;--navy:#0d1b3d;--teal:#0f8f87;--cyan:#00a8ca;--violet:#6d51ef;--light:#f4f6f8;--red:#b42318;--green:#087a55;--border:#d7dce3}*{box-sizing:border-box}body{margin:0;min-width:320px;min-height:100vh}h1,h2,h3,.brand{font-family:Poppins,system-ui,sans-serif;color:var(--navy);margin-top:0}h1{font-size:clamp(1.75rem,3vw,2.5rem);line-height:1.15;margin-bottom:.5rem}h2{font-size:1.15rem}p{line-height:1.6}a{color:#075f73}button,input,textarea{font:inherit}button,a{touch-action:manipulation}:focus-visible{outline:3px solid var(--cyan);outline-offset:3px;border-radius:4px}.topbar{height:72px;background:var(--navy);color:#fff;display:flex;align-items:center;padding:0 clamp(1rem,4vw,3.5rem);gap:2rem}.topbar nav{flex:1}.topbar nav a{color:#fff;text-decoration:none;font-weight:600;padding:.75rem}.topbar nav a.active{border-bottom:3px solid var(--cyan)}.brand{font-size:1.45rem;color:#fff;text-decoration:none;letter-spacing:-.04em}.brand strong{color:var(--cyan)}.brand--large{font-size:2.1rem;color:var(--navy)}.brand--large strong{color:var(--violet)}.user-area{display:flex;align-items:center;gap:1rem;font-size:.9rem}.page{width:min(1180px,calc(100% - 2rem));margin:0 auto;padding:2.5rem 0 8rem}.page-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:2rem;margin-bottom:2rem}.eyebrow,.label{display:block;text-transform:uppercase;letter-spacing:.09em;font-size:.75rem;font-weight:700;color:#536176;margin-bottom:.5rem}.button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;border-radius:9px;border:1px solid transparent;padding:.65rem 1.1rem;text-decoration:none;font-weight:600;cursor:pointer}.button:disabled{opacity:.5;cursor:not-allowed}.button--primary{background:var(--teal);color:#fff}.button--primary:hover:not(:disabled){background:#0b746e}.button--secondary{background:#fff;color:var(--navy);border-color:#9da8b8}.button--ai{background:var(--violet);color:#fff}.button--ghost{background:transparent;color:inherit;border-color:currentColor}.button--full{width:100%}.button-row{display:flex;gap:.75rem;flex-wrap:wrap}.link-button,.back-link{border:0;background:none;color:#075f73;text-decoration:underline;font-weight:600;cursor:pointer;padding:.25rem}.link-button--danger{color:var(--red)}.panel,.assessment-card,.empty-state,.criterion-review{background:#fff;border:1px solid var(--border);border-radius:14px;padding:1.5rem;box-shadow:0 4px 18px rgba(13,27,61,.05)}.card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem}.assessment-card{display:flex;flex-direction:column;align-items:flex-start}.assessment-card p{flex:1}.status{display:inline-block;border-radius:999px;padding:.3rem .7rem;background:#e8edf3;color:#33415c;font-size:.75rem;font-weight:700;margin-bottom:1rem}.status--published,.status--publicada{background:#daf5ed;color:#075f45}.empty-state{text-align:center;padding:4rem 1rem}.alert{padding:1rem 1.1rem;border-radius:9px;border-left:5px solid;margin:1rem 0;line-height:1.5}.alert--error{background:#fff0ee;color:#7a271a;border-color:var(--red)}.alert--warning{background:#fff7df;color:#6c4b00;border-color:#d99b00}.alert--info{background:#eaf8fb;color:#084f60;border-color:var(--cyan)}.alert--success{background:#e5f7f0;color:#075f45;border-color:var(--green)}.loading{display:flex;align-items:center;justify-content:center;gap:.65rem;padding:1rem}.spinner{width:20px;height:20px;border:3px solid #b8c1ce;border-top-color:var(--teal);border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.login-page,.center-page{min-height:100vh;display:grid;place-items:center;padding:1rem;background:radial-gradient(circle at 80% 10%,rgba(123,97,255,.16),transparent 30%),linear-gradient(145deg,#edf8f9,#f4f6f8 50%)}.login-card{background:#fff;border-radius:18px;width:min(440px,100%);padding:clamp(1.5rem,5vw,3rem);box-shadow:0 20px 60px rgba(13,27,61,.12)}.form-stack,.editor-layout{display:grid;gap:1.25rem}.form-stack label,.editor-layout label,.human-decision label{display:grid;gap:.45rem;font-weight:600;color:var(--navy)}input,textarea{width:100%;border:1px solid #aeb7c5;border-radius:8px;padding:.75rem;background:#fff;color:#17223b}textarea{resize:vertical}input:focus,textarea:focus{border-color:var(--cyan)}.editor-layout{gap:1.5rem}.section-heading,.criterion-title{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem}.short-field{max-width:220px}.total-check{display:grid;grid-template-columns:1fr auto;gap:.2rem 1rem;padding:1rem;border-radius:9px;margin:1rem 0}.total-check small{grid-column:1/-1}.total-check--ok{background:#e5f7f0;color:#075f45}.total-check--error{background:#fff0ee;color:#7a271a}.criteria-list{display:grid;gap:1rem}.criterion-editor{display:grid;grid-template-columns:2fr 3fr 1fr;gap:1rem;border:1px solid var(--border);border-radius:10px;padding:1rem}.criterion-editor legend{font-family:Poppins;font-weight:600;color:var(--navy);padding:0 .4rem}.criterion-editor .link-button{grid-column:1/-1;justify-self:start}.sticky-actions{position:sticky;bottom:1rem;background:#fff;border:1px solid var(--border);border-radius:12px;padding:1rem;display:flex;justify-content:flex-end;align-items:flex-start;gap:1rem;box-shadow:0 8px 30px rgba(13,27,61,.15);z-index:2}.sticky-actions>div{display:grid;gap:.4rem}.action-hint{max-width:430px;color:#6b3740}.two-column,.review-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:1.5rem}.question-preview{background:var(--navy);color:#fff}.question-preview h2{color:#fff}.processing-card{width:min(660px,100%);margin:3rem auto;text-align:center;background:#fff;padding:3rem;border-radius:18px;box-shadow:0 10px 35px rgba(13,27,61,.1)}.process-icon{width:76px;height:76px;border-radius:22px;background:linear-gradient(135deg,var(--violet),var(--cyan));color:#fff;display:grid;place-items:center;margin:0 auto 1.5rem;font-family:Poppins;font-weight:700;font-size:1.25rem}.process-icon--falha{background:var(--red)}.processing-card .button-row{justify-content:center}.review-source{position:sticky;top:1rem;align-self:start}.answer-box{margin-top:2rem;padding:1.25rem;background:var(--light);border-radius:10px;white-space:pre-wrap}.review-criteria{display:grid;gap:1rem}.criterion-review{padding:1.25rem}.criterion-title h2{margin-bottom:0}.ai-suggestion{margin-top:1rem;border-left:4px solid var(--violet);background:#f4f1ff;padding:1rem;border-radius:0 9px 9px 0}.ai-label{color:#5138c5;text-transform:uppercase;letter-spacing:.06em;font-weight:700;font-size:.75rem}.confidence{display:block;font-weight:600;margin-top:.65rem}.confidence--alta{color:#087a55}.confidence--média{color:#795b00}.confidence--baixa{color:#a22a20}.score-input{width:85px;text-align:right}.field-error{color:var(--red)}.decision-bar{position:sticky;bottom:0;display:grid;grid-template-columns:1fr 1.3fr;background:#fff;border:1px solid var(--border);border-radius:14px;margin-top:1.5rem;box-shadow:0 -8px 30px rgba(13,27,61,.12);overflow:hidden;z-index:3}.ai-total,.human-decision{padding:1.25rem;display:grid;gap:.6rem}.ai-total{background:#f4f1ff;border-right:1px solid #d9d0ff}.ai-total>span,.human-decision>span{font-size:.75rem;text-transform:uppercase;letter-spacing:.07em;font-weight:700}.human-decision{border-top:4px solid var(--teal)}.divergence{color:#744b00;background:#fff7df;padding:.5rem;border-radius:6px;margin:0}.error-page{min-height:100vh;display:grid;place-content:center;justify-items:center;text-align:center;padding:2rem}
++:root{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#17223b;background:#f4f6f8;font-synthesis:none;--navy:#0d1b3d;--teal:#0f8f87;--cyan:#00a8ca;--violet:#6d51ef;--light:#f4f6f8;--red:#b42318;--green:#087a55;--border:#d7dce3}*{box-sizing:border-box}body{margin:0;min-width:320px;min-height:100vh}h1,h2,h3,.brand{font-family:Poppins,system-ui,sans-serif;color:var(--navy);margin-top:0}h1{font-size:clamp(1.75rem,3vw,2.5rem);line-height:1.15;margin-bottom:.5rem}h2{font-size:1.15rem}p{line-height:1.6}a{color:#075f73}button,input,textarea,select{font:inherit}button,a{touch-action:manipulation}:focus-visible{outline:3px solid var(--cyan);outline-offset:3px;border-radius:4px}.topbar{height:72px;background:var(--navy);color:#fff;display:flex;align-items:center;padding:0 clamp(1rem,4vw,3.5rem);gap:2rem}.topbar nav{flex:1}.topbar nav a{color:#fff;text-decoration:none;font-weight:600;padding:.75rem}.topbar nav a.active{border-bottom:3px solid var(--cyan)}.brand{font-size:1.45rem;color:#fff;text-decoration:none;letter-spacing:-.04em}.brand strong{color:var(--cyan)}.brand--large{font-size:2.1rem;color:var(--navy)}.brand--large strong{color:var(--violet)}.user-area{display:flex;align-items:center;gap:1rem;font-size:.9rem}.page{width:min(1180px,calc(100% - 2rem));margin:0 auto;padding:2.5rem 0 8rem}.page-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:2rem;margin-bottom:2rem}.eyebrow,.label{display:block;text-transform:uppercase;letter-spacing:.09em;font-size:.75rem;font-weight:700;color:#536176;margin-bottom:.5rem}.button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;border-radius:9px;border:1px solid transparent;padding:.65rem 1.1rem;text-decoration:none;font-weight:600;cursor:pointer}.button:disabled{opacity:.5;cursor:not-allowed}.button--primary{background:var(--teal);color:#fff}.button--primary:hover:not(:disabled){background:#0b746e}.button--secondary{background:#fff;color:var(--navy);border-color:#9da8b8}.button--ai{background:var(--violet);color:#fff}.button--ghost{background:transparent;color:inherit;border-color:currentColor}.button--full{width:100%}.button-row{display:flex;gap:.75rem;flex-wrap:wrap}.link-button,.back-link{border:0;background:none;color:#075f73;text-decoration:underline;font-weight:600;cursor:pointer;padding:.25rem}.link-button--danger{color:var(--red)}.panel,.assessment-card,.empty-state,.criterion-review{background:#fff;border:1px solid var(--border);border-radius:14px;padding:1.5rem;box-shadow:0 4px 18px rgba(13,27,61,.05)}.card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem}.assessment-card{display:flex;flex-direction:column;align-items:flex-start}.assessment-card p{flex:1}.status{display:inline-block;border-radius:999px;padding:.3rem .7rem;background:#e8edf3;color:#33415c;font-size:.75rem;font-weight:700;margin-bottom:1rem}.status--published,.status--publicada{background:#daf5ed;color:#075f45}.empty-state{text-align:center;padding:4rem 1rem}.alert{padding:1rem 1.1rem;border-radius:9px;border-left:5px solid;margin:1rem 0;line-height:1.5}.alert--error{background:#fff0ee;color:#7a271a;border-color:var(--red)}.alert--warning{background:#fff7df;color:#6c4b00;border-color:#d99b00}.alert--info{background:#eaf8fb;color:#084f60;border-color:var(--cyan)}.alert--success{background:#e5f7f0;color:#075f45;border-color:var(--green)}.loading{display:flex;align-items:center;justify-content:center;gap:.65rem;padding:1rem}.spinner{width:20px;height:20px;border:3px solid #b8c1ce;border-top-color:var(--teal);border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.login-page,.center-page{min-height:100vh;display:grid;place-items:center;padding:1rem;background:radial-gradient(circle at 80% 10%,rgba(123,97,255,.16),transparent 30%),linear-gradient(145deg,#edf8f9,#f4f6f8 50%)}.login-card{background:#fff;border-radius:18px;width:min(440px,100%);padding:clamp(1.5rem,5vw,3rem);box-shadow:0 20px 60px rgba(13,27,61,.12)}.form-stack,.editor-layout{display:grid;gap:1.25rem}.form-stack label,.editor-layout label,.human-decision label{display:grid;gap:.45rem;font-weight:600;color:var(--navy)}input,textarea,select{width:100%;border:1px solid #aeb7c5;border-radius:8px;padding:.75rem;background:#fff;color:#17223b}textarea{resize:vertical}input:focus,textarea:focus,select:focus{border-color:var(--cyan)}.data-table{width:100%;border-collapse:collapse;margin-top:1rem;text-align:left;font-size:.9rem}.data-table th,.data-table td{padding:.75rem;border-bottom:1px solid var(--border)}.data-table th{background:var(--light);font-weight:600;color:var(--navy)}.data-table tr:hover{background:rgba(13,27,61,.02)}.table-responsive{overflow-x:auto;-webkit-overflow-scrolling:touch}.badge{display:inline-block;padding:.2rem .5rem;border-radius:6px;font-size:.75rem;font-weight:600;background:#e8edf3;color:#33415c}.editor-layout{gap:1.5rem}.section-heading,.criterion-title{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem}.short-field{max-width:220px}.total-check{display:grid;grid-template-columns:1fr auto;gap:.2rem 1rem;padding:1rem;border-radius:9px;margin:1rem 0}.total-check small{grid-column:1/-1}.total-check--ok{background:#e5f7f0;color:#075f45}.total-check--error{background:#fff0ee;color:#7a271a}.criteria-list{display:grid;gap:1rem}.criterion-editor{display:grid;grid-template-columns:2fr 3fr 1fr;gap:1rem;border:1px solid var(--border);border-radius:10px;padding:1rem}.criterion-editor legend{font-family:Poppins;font-weight:600;color:var(--navy);padding:0 .4rem}.criterion-editor .link-button{grid-column:1/-1;justify-self:start}.sticky-actions{position:sticky;bottom:1rem;background:#fff;border:1px solid var(--border);border-radius:12px;padding:1rem;display:flex;justify-content:flex-end;align-items:flex-start;gap:1rem;box-shadow:0 8px 30px rgba(13,27,61,.15);z-index:2}.sticky-actions>div{display:grid;gap:.4rem}.action-hint{max-width:430px;color:#6b3740}.two-column,.review-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:1.5rem}.question-preview{background:var(--navy);color:#fff}.question-preview h2{color:#fff}.processing-card{width:min(660px,100%);margin:3rem auto;text-align:center;background:#fff;padding:3rem;border-radius:18px;box-shadow:0 10px 35px rgba(13,27,61,.1)}.process-icon{width:76px;height:76px;border-radius:22px;background:linear-gradient(135deg,var(--violet),var(--cyan));color:#fff;display:grid;place-items:center;margin:0 auto 1.5rem;font-family:Poppins;font-weight:700;font-size:1.25rem}.process-icon--falha{background:var(--red)}.processing-card .button-row{justify-content:center}.review-source{position:sticky;top:1rem;align-self:start}.answer-box{margin-top:2rem;padding:1.25rem;background:var(--light);border-radius:10px;white-space:pre-wrap}.review-criteria{display:grid;gap:1rem}.criterion-review{padding:1.25rem}.criterion-title h2{margin-bottom:0}.ai-suggestion{margin-top:1rem;border-left:4px solid var(--violet);background:#f4f1ff;padding:1rem;border-radius:0 9px 9px 0}.ai-label{color:#5138c5;text-transform:uppercase;letter-spacing:.06em;font-weight:700;font-size:.75rem}.confidence{display:block;font-weight:600;margin-top:.65rem}.confidence--alta{color:#087a55}.confidence--média{color:#795b00}.confidence--baixa{color:#a22a20}.score-input{width:85px;text-align:right}.field-error{color:var(--red)}.decision-bar{position:sticky;bottom:0;display:grid;grid-template-columns:1fr 1.3fr;background:#fff;border:1px solid var(--border);border-radius:14px;margin-top:1.5rem;box-shadow:0 -8px 30px rgba(13,27,61,.12);overflow:hidden;z-index:3}.ai-total,.human-decision{padding:1.25rem;display:grid;gap:.6rem}.ai-total{background:#f4f1ff;border-right:1px solid #d9d0ff}.ai-total>span,.human-decision>span{font-size:.75rem;text-transform:uppercase;letter-spacing:.07em;font-weight:700}.human-decision{border-top:4px solid var(--teal)}.divergence{color:#744b00;background:#fff7df;padding:.5rem;border-radius:6px;margin:0}.error-page{min-height:100vh;display:grid;place-content:center;justify-items:center;text-align:center;padding:2rem}
+ @media(max-width:760px){.topbar{height:auto;min-height:68px;flex-wrap:wrap;padding:1rem}.topbar nav{order:3;flex-basis:100%}.user-area span{display:none}.page-heading,.section-heading{display:grid}.two-column,.review-layout,.decision-bar{grid-template-columns:1fr}.criterion-editor{grid-template-columns:1fr}.review-source{position:static}.decision-bar{position:static}.ai-total{border-right:0}.sticky-actions{flex-direction:column}.sticky-actions,.sticky-actions>div,.sticky-actions .button{width:100%}.page{padding-top:1.5rem}}
+ @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important}}
+diff --git a/frontend/src/types.ts b/frontend/src/types.ts
+index e005675..de7862b 100644
+--- a/frontend/src/types.ts
++++ b/frontend/src/types.ts
+@@ -1,10 +1,70 @@
+ export type AssessmentStatus = 'DRAFT' | 'PUBLISHED' | 'RASCUNHO' | 'PUBLICADA'
+ export type JobStatus = 'PENDENTE' | 'PROCESSANDO' | 'SUGERIDA' | 'FALHA'
++export type EnrollmentStatus = 'ACTIVE' | 'SUSPENDED' | 'WITHDRAWN' | 'COMPLETED'
++export type ProfessorRole = 'responsible' | 'collaborator'
++
++export interface Organization {
++  id: string
++  name: string
++}
++
++export interface Course {
++  id: string
++  organization_id: string
++  name: string
++  code: string
++}
++
++export interface Discipline {
++  id: string
++  organization_id: string
++  name: string
++  code: string
++}
++
++export interface CourseDiscipline {
++  id: string
++  course_id: string
++  discipline_id: string
++}
++
++export interface ClassGroup {
++  id: string
++  course_discipline_id: string
++  period: string
++  code: string
++}
++
++export interface Student {
++  id: string
++  organization_id: string
++  name: string
++  external_id: string
++}
++
++export interface Enrollment {
++  id: string
++  class_group_id: string
++  student_id: string
++  status: EnrollmentStatus
++  enrolled_at: string
++  ended_at?: string | null
++}
++
++export interface ProfessorClassLink {
++  id: string
++  professor_id: string
++  class_group_id: string
++  role: ProfessorRole
++  active: boolean
++  starts_at?: string | null
++  ends_at?: string | null
++}
+ 
+ export interface User { id?: string; name?: string; email: string; role?: string }
+ export interface Criterion { id?: string; name: string; description: string; max_score: number }
+ export interface Question { id?: string; statement: string; reference_answer: string; max_score: number; rubric?: { criteria: Criterion[] } }
+-export interface Assessment { id: string; title: string; status: AssessmentStatus; question?: Question; questions?: Question[]; created_at?: string; updated_at?: string }
++export interface Assessment { id: string; title: string; status: AssessmentStatus; class_group_id?: string | null; question?: Question; questions?: Question[]; created_at?: string; updated_at?: string }
+ export interface Answer { id: string; question_id: string; student_name?: string; text: string }
+ // Alinhado ao schema real do Core (app/schemas.py CriterionScoreOut / AIExecutionOut / CorrectionJobOut)
+ export interface CriterionSuggestion { criterion_id: string; criterion_name?: string; score: number; max_score: number; reason?: string; evidence?: string; confidence?: number; was_clamped?: boolean }
+@@ -22,3 +82,4 @@ export interface HumanReviewSummary {
+   created_at: string;
+ }
+ export interface ApiErrorBody { code?: string; message?: string; correlation_id?: string; field_errors?: { field?: string; reason?: string }[] }
++

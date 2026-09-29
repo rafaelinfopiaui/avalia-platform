@@ -1,0 +1,5 @@
+branch: local/av-s03-recuperacao
+HEAD: 66c95201daf893fa7b2852e0d94b20314f8d8f34
+upstream (origin/main): 66c95201daf893fa7b2852e0d94b20314f8d8f34
+divergência HEAD vs upstream: 0	0
+data de geração: 2026-09-28 23:04:40 -0300

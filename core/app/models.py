@@ -47,6 +47,18 @@ class ReviewDecision(str, enum.Enum):
     ALTER = "ALTER"
 
 
+class EnrollmentStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+    SUSPENDED = "SUSPENDED"
+    WITHDRAWN = "WITHDRAWN"
+    COMPLETED = "COMPLETED"
+
+
+class ProfessorRole(str, enum.Enum):
+    RESPONSIBLE = "responsible"
+    COLLABORATOR = "collaborator"
+
+
 class User(Base):
     __tablename__ = "users"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
@@ -62,6 +74,11 @@ class Assessment(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
     title: Mapped[str] = mapped_column(String, nullable=False)
     owner_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
+    # Nullable preserves legacy assessments. Creation-time enforcement belongs to
+    # BL-AV-2-03 and is activated through Settings.academic_module_enabled.
+    class_group_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("class_groups.id"), nullable=True
+    )
     status: Mapped[AssessmentStatus] = mapped_column(
         Enum(AssessmentStatus), default=AssessmentStatus.RASCUNHO, nullable=False
     )
@@ -71,6 +88,118 @@ class Assessment(Base):
     )
 
     questions: Mapped[list["Question"]] = relationship(back_populates="assessment")
+
+
+class Organization(Base):
+    __tablename__ = "organizations"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class Course(Base):
+    __tablename__ = "courses"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "code", name="uq_courses_organization_code"),
+    )
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    organization_id: Mapped[str] = mapped_column(
+        String, ForeignKey("organizations.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    code: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class Discipline(Base):
+    __tablename__ = "disciplines"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "code", name="uq_disciplines_organization_code"),
+    )
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    organization_id: Mapped[str] = mapped_column(
+        String, ForeignKey("organizations.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    code: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class CourseDiscipline(Base):
+    __tablename__ = "course_disciplines"
+    __table_args__ = (
+        UniqueConstraint("course_id", "discipline_id", name="uq_course_disciplines_pair"),
+    )
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    course_id: Mapped[str] = mapped_column(String, ForeignKey("courses.id"), nullable=False)
+    discipline_id: Mapped[str] = mapped_column(
+        String, ForeignKey("disciplines.id"), nullable=False
+    )
+
+
+class ClassGroup(Base):
+    __tablename__ = "class_groups"
+    __table_args__ = (
+        UniqueConstraint(
+            "course_discipline_id",
+            "period",
+            "code",
+            name="uq_class_groups_curriculum_period_code",
+        ),
+    )
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    course_discipline_id: Mapped[str] = mapped_column(
+        String, ForeignKey("course_disciplines.id"), nullable=False
+    )
+    period: Mapped[str] = mapped_column(String, nullable=False)
+    code: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class Student(Base):
+    __tablename__ = "students"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "external_id", name="uq_students_organization_external"),
+    )
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    organization_id: Mapped[str] = mapped_column(
+        String, ForeignKey("organizations.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    external_id: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class Enrollment(Base):
+    __tablename__ = "enrollments"
+    # Deliberately no unique constraint on (class_group_id, student_id):
+    # historical reenrollment is valid. BL-AV-2-03 prevents simultaneous ACTIVE rows.
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    class_group_id: Mapped[str] = mapped_column(
+        String, ForeignKey("class_groups.id"), nullable=False
+    )
+    student_id: Mapped[str] = mapped_column(String, ForeignKey("students.id"), nullable=False)
+    status: Mapped[EnrollmentStatus] = mapped_column(
+        Enum(EnrollmentStatus), default=EnrollmentStatus.ACTIVE, nullable=False
+    )
+    enrolled_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class ProfessorClassLink(Base):
+    __tablename__ = "professor_class_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "professor_id", "class_group_id", "role", name="uq_professor_class_links_role"
+        ),
+    )
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    professor_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
+    class_group_id: Mapped[str] = mapped_column(
+        String, ForeignKey("class_groups.id"), nullable=False
+    )
+    role: Mapped[ProfessorRole] = mapped_column(
+        Enum(ProfessorRole, values_callable=lambda enum_type: [item.value for item in enum_type]),
+        nullable=False,
+    )
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Question(Base):

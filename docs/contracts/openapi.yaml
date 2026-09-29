@@ -5,6 +5,18 @@ info:
   description: >
     Subconjunto do contrato completo do PRD (seção 13), suficiente para a
     jornada demonstrada. Envelope de erro segue o padrão do PRD (13.1).
+
+
+    Nota de arquitetura (AC-09, AV-S03, 2026-09-28): `Organization` é uma
+    entidade de domínio da estrutura acadêmica (agrupa Curso/Disciplina/Turma),
+    não uma fronteira de isolamento multi-tenant. Não há requisito aprovado de
+    multi-tenancy nesta trilha. O escopo de leitura de um professor é derivado
+    dos seus vínculos ativos de turma (`ProfessorClassLink` → `ClassGroup` →
+    `CourseDiscipline` → `Course`/`Discipline` → `Organization`), nunca do
+    inverso (não existe filtro "por organização do usuário" independente do
+    vínculo real de turma). Administradores mantêm acesso global sem qualquer
+    escopo de organização. Ver revisão completa em
+    `docs/governance/evidence/AV-S03/AC-07-AC-09_revisao_arquitetura.md`.
 servers:
   - url: http://localhost:8000/v1
 paths:
@@ -55,8 +67,15 @@ paths:
     post:
       summary: Criar avaliação em rascunho
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssessmentCreate' }
       responses:
         "201": { description: Criada }
+        "403": { description: Professor sem vínculo ativo com a turma }
+        "422": { description: Turma obrigatória quando o módulo acadêmico está habilitado }
 
   /assessments/{id}/publish:
     post:
@@ -168,7 +187,154 @@ paths:
       responses:
         "200": { description: OK, sem dados sensíveis }
 
+  # ---- AV-S03: estrutura acadêmica (DEC-AV-023) ----
+  /organizations:
+    get: { summary: Listar organizações no escopo autorizado, security: [{ bearerAuth: [] }], responses: { "200": { description: OK } } }
+    post:
+      summary: Criar organização (admin)
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OrganizationInput' } } } }
+      responses: { "201": { description: Criada }, "403": { description: Somente admin } }
+  /organizations/{id}:
+    get: { summary: Ler organização no escopo autorizado, security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "200": { description: OK }, "403": { description: Fora do escopo } } }
+    patch:
+      summary: Editar organização (admin)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OrganizationInput' } } } }
+      responses: { "200": { description: Atualizada }, "403": { description: Somente admin } }
+    delete: { summary: Excluir organização (admin), security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "204": { description: Excluída }, "403": { description: Somente admin } } }
+
+  /courses:
+    get: { summary: Listar cursos no escopo autorizado, security: [{ bearerAuth: [] }], responses: { "200": { description: OK } } }
+    post:
+      summary: Criar curso (admin)
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CourseInput' } } } }
+      responses: { "201": { description: Criado }, "403": { description: Somente admin } }
+  /courses/{id}:
+    get: { summary: Ler curso no escopo autorizado, security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "200": { description: OK }, "403": { description: Fora do escopo } } }
+    patch:
+      summary: Editar curso (admin)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CourseInput' } } } }
+      responses: { "200": { description: Atualizado }, "403": { description: Somente admin } }
+    delete: { summary: Excluir curso (admin), security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "204": { description: Excluído }, "403": { description: Somente admin } } }
+
+  /disciplines:
+    get: { summary: Listar disciplinas no escopo autorizado, security: [{ bearerAuth: [] }], responses: { "200": { description: OK } } }
+    post:
+      summary: Criar disciplina (admin)
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DisciplineInput' } } } }
+      responses: { "201": { description: Criada }, "403": { description: Somente admin } }
+  /disciplines/{id}:
+    get: { summary: Ler disciplina no escopo autorizado, security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "200": { description: OK }, "403": { description: Fora do escopo } } }
+    patch:
+      summary: Editar disciplina (admin)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DisciplineInput' } } } }
+      responses: { "200": { description: Atualizada }, "403": { description: Somente admin } }
+    delete: { summary: Excluir disciplina (admin), security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "204": { description: Excluída }, "403": { description: Somente admin } } }
+
+  /course-disciplines:
+    get: { summary: Listar associações curriculares no escopo autorizado, security: [{ bearerAuth: [] }], responses: { "200": { description: OK } } }
+    post:
+      summary: Criar associação curso-disciplina (admin)
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CourseDisciplineInput' } } } }
+      responses: { "201": { description: Criada }, "409": { description: Associação duplicada } }
+  /course-disciplines/{id}:
+    get: { summary: Ler associação curricular no escopo autorizado, security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "200": { description: OK }, "403": { description: Fora do escopo } } }
+    patch:
+      summary: Editar associação curso-disciplina (admin)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CourseDisciplineInput' } } } }
+      responses: { "200": { description: Atualizada }, "403": { description: Somente admin }, "409": { description: Associação duplicada } }
+    delete: { summary: Excluir associação (admin), security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "204": { description: Excluída }, "403": { description: Somente admin } } }
+
+  /class-groups:
+    get: { summary: Listar turmas com vínculo ativo/vigente, security: [{ bearerAuth: [] }], responses: { "200": { description: OK } } }
+    post:
+      summary: Criar turma (admin)
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ClassGroupInput' } } } }
+      responses: { "201": { description: Criada }, "403": { description: Somente admin }, "409": { description: Identidade duplicada } }
+  /class-groups/{id}:
+    get: { summary: Ler turma com vínculo ativo/vigente, security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "200": { description: OK }, "403": { description: Sem vínculo ativo } } }
+    patch:
+      summary: Editar turma (admin)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ClassGroupInput' } } } }
+      responses: { "200": { description: Atualizada }, "403": { description: Somente admin }, "409": { description: Identidade duplicada } }
+    delete: { summary: Excluir turma (admin), security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "204": { description: Excluída }, "403": { description: Somente admin } } }
+
+  /professor-class-links:
+    get: { summary: Listar vínculos (admin global; professor somente os próprios), security: [{ bearerAuth: [] }], responses: { "200": { description: OK } } }
+    post:
+      summary: Criar vínculo professor-turma (admin)
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProfessorClassLinkInput' } } } }
+      responses: { "201": { description: Criado }, "403": { description: Somente admin }, "409": { description: Vínculo duplicado } }
+  /professor-class-links/{id}:
+    get: { summary: Ler vínculo no escopo autorizado, security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "200": { description: OK }, "403": { description: Fora do escopo } } }
+    patch:
+      summary: Editar vínculo professor-turma (admin)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProfessorClassLinkUpdate' } } } }
+      responses: { "200": { description: Atualizado }, "403": { description: Somente admin } }
+    delete: { summary: Excluir vínculo (admin), security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "204": { description: Excluído }, "403": { description: Somente admin } } }
+
+  /students:
+    get: { summary: Listar alunos matriculados nas turmas ativas do professor, security: [{ bearerAuth: [] }], responses: { "200": { description: OK } } }
+    post:
+      summary: Criar identidade global de aluno (admin)
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/StudentInput' } } } }
+      responses: { "201": { description: Criado }, "403": { description: Somente admin } }
+  /students/{id}:
+    get: { summary: Ler aluno no escopo autorizado, security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "200": { description: OK }, "403": { description: Fora do escopo } } }
+    patch:
+      summary: Editar identidade global de aluno (admin)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/StudentInput' } } } }
+      responses: { "200": { description: Atualizado }, "403": { description: Somente admin } }
+    delete: { summary: Excluir aluno (admin), security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "204": { description: Excluído }, "403": { description: Somente admin } } }
+
+  /enrollments:
+    get: { summary: Listar matrículas no escopo autorizado, security: [{ bearerAuth: [] }], responses: { "200": { description: OK } } }
+    post:
+      summary: Matricular aluno (admin ou professor responsável com vínculo ativo)
+      security: [{ bearerAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/EnrollmentInput' } } } }
+      responses: { "201": { description: Criada }, "403": { description: Sem poder de matrícula }, "409": { description: Matrícula ativa duplicada } }
+  /enrollments/{id}:
+    get: { summary: Ler matrícula no escopo autorizado, security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "200": { description: OK }, "403": { description: Fora do escopo } } }
+    patch:
+      summary: Editar/encerrar matrícula (admin ou professor responsável com vínculo ativo)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/EnrollmentUpdate' } } } }
+      responses: { "200": { description: Atualizada }, "403": { description: Sem poder de matrícula } }
+    delete: { summary: Excluir matrícula (admin), security: [{ bearerAuth: [] }], parameters: [{ $ref: '#/components/parameters/ResourceId' }], responses: { "204": { description: Excluída }, "403": { description: Somente admin } } }
+
+  /assessments/{id}/class-group:
+    post:
+      summary: Vincular avaliação a turma; professor exige propriedade e vínculo ativo, admin é global
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AssessmentClassGroupInput' } } } }
+      responses: { "200": { description: Vinculada }, "403": { description: Sem propriedade ou vínculo ativo } }
+
 components:
+  parameters:
+    ResourceId: { name: id, in: path, required: true, schema: { type: string } }
   securitySchemes:
     bearerAuth:
       type: http
@@ -269,3 +435,70 @@ components:
       properties:
         id: { type: string }
         title: { type: string }
+    OrganizationInput:
+      type: object
+      required: [name]
+      properties: { name: { type: string, minLength: 1 } }
+    CourseInput:
+      type: object
+      required: [organization_id, name, code]
+      properties: { organization_id: { type: string }, name: { type: string }, code: { type: string } }
+    DisciplineInput:
+      type: object
+      required: [organization_id, name, code]
+      properties: { organization_id: { type: string }, name: { type: string }, code: { type: string } }
+    CourseDisciplineInput:
+      type: object
+      required: [course_id, discipline_id]
+      properties: { course_id: { type: string }, discipline_id: { type: string } }
+    ClassGroupInput:
+      type: object
+      required: [course_discipline_id, period, code]
+      properties: { course_discipline_id: { type: string }, period: { type: string }, code: { type: string } }
+    ProfessorClassLinkInput:
+      type: object
+      required: [professor_id, class_group_id, role]
+      properties:
+        professor_id: { type: string }
+        class_group_id: { type: string }
+        role: { type: string, enum: [responsible, collaborator] }
+        active: { type: boolean, default: true }
+        starts_at: { type: string, format: date-time, nullable: true }
+        ends_at: { type: string, format: date-time, nullable: true }
+    ProfessorClassLinkUpdate:
+      type: object
+      properties:
+        role: { type: string, enum: [responsible, collaborator] }
+        active: { type: boolean }
+        starts_at: { type: string, format: date-time, nullable: true }
+        ends_at: { type: string, format: date-time, nullable: true }
+    StudentInput:
+      type: object
+      required: [organization_id, name, external_id]
+      properties: { organization_id: { type: string }, name: { type: string }, external_id: { type: string } }
+    EnrollmentInput:
+      type: object
+      required: [class_group_id, student_id]
+      properties:
+        class_group_id: { type: string }
+        student_id: { type: string }
+        status: { type: string, enum: [ACTIVE, SUSPENDED, WITHDRAWN, COMPLETED], default: ACTIVE }
+        enrolled_at: { type: string, format: date-time, nullable: true }
+        ended_at: { type: string, format: date-time, nullable: true }
+    EnrollmentUpdate:
+      type: object
+      properties:
+        status: { type: string, enum: [ACTIVE, SUSPENDED, WITHDRAWN, COMPLETED] }
+        enrolled_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time, nullable: true }
+    AssessmentClassGroupInput:
+      type: object
+      required: [class_group_id]
+      properties: { class_group_id: { type: string } }
+    AssessmentCreate:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        class_group_id: { type: string, nullable: true }
+        question: { $ref: '#/components/schemas/QuestionInput' }

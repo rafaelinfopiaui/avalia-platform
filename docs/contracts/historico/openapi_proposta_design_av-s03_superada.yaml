@@ -1,0 +1,538 @@
+openapi: 3.0.3
+# ============================================================================
+# ARQUIVO HISTÓRICO — SUPERADO. NÃO É O CONTRATO VIGENTE.
+# ============================================================================
+# Esta é a proposta de design do contrato da AV-S03 elaborada durante o
+# planejamento da sprint (~2026-09-24), ANTES da implementação de
+# BL-AV-2-01/02/03. Nunca foi verificada contra código real e diverge do
+# que foi efetivamente implementado (paths, schemas e nomes de campos
+# diferem — ex.: `/class-groups/{id}/professors` e `/class-groups/{id}/
+# enrollments` aqui propostos não correspondem às rotas reais, que são
+# `/professor-class-links` e `/enrollments` como recursos próprios).
+#
+# O CONTRATO VIGENTE é docs/contracts/openapi.yaml na raiz do repositório,
+# reconciliado em 2026-09-29 a partir do schema OpenAPI real gerado pela
+# aplicação (FastAPI app.openapi()) sobre o código de
+# core/app/routers/academic.py, íntegro na branch
+# feat/av-s03-estrutura-academica (PR #3) e a partir dela em main após
+# integração.
+#
+# Preservado aqui apenas como registro histórico do design original,
+# conforme decisão de Rafael de 2026-09-29 (reconciliação pré-merge do
+# PR #3). Ver docs/governance/snapshots/ para o snapshot de reconciliação
+# correspondente. NÃO editar este arquivo para acompanhar mudanças de
+# contrato — ele é congelado no estado em que foi superado.
+# ============================================================================
+info:
+  title: AvalIA Core API — contrato mínimo da demonstração
+  version: "0.1.0-demo"
+  description: >
+    Subconjunto do contrato completo do PRD (seção 13), suficiente para a
+    jornada demonstrada. Envelope de erro segue o padrão do PRD (13.1).
+servers:
+  - url: http://localhost:8000/v1
+paths:
+  /auth/login:
+    post:
+      summary: Criar sessão
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200":
+          description: Login bem-sucedido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: { type: string }
+                  refresh_token: { type: string }
+                  token_type: { type: string, example: bearer }
+        "401":
+          description: Credenciais inválidas (mensagem não revela se e-mail existe)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /me:
+    get:
+      summary: Perfil do usuário autenticado
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+        "401": { description: Token ausente/expirado }
+
+  /assessments:
+    get:
+      summary: Listar avaliações do professor autenticado
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Criar avaliação em rascunho
+      security: [{ bearerAuth: [] }]
+      responses:
+        "201": { description: Criada }
+
+  /assessments/{id}/publish:
+    post:
+      summary: Publicar avaliação (valida questão, valor, referência, rubrica)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Publicada }
+        "422":
+          description: Validação falhou (ex. soma da rubrica != valor da questão)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /questions/{id}/rubric:
+    post:
+      summary: Criar/publicar versão de rubrica
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RubricInput' }
+      responses:
+        "201": { description: Rubrica criada }
+        "422":
+          description: RUBRIC_TOTAL_MISMATCH — soma dos critérios != valor da questão
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /answers:
+    post:
+      summary: Registrar resposta digitada de aluno fictício
+      security: [{ bearerAuth: [] }]
+      responses:
+        "201": { description: Resposta registrada }
+
+  /answers/{id}/corrections:
+    post:
+      summary: Solicitar correção assistida (cria CorrectionJob)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "202": { description: Job aceito (assíncrono) }
+        "503":
+          description: AI Engine indisponível — modo manual habilitado, não fabrica resultado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /correction-jobs/{id}:
+    get:
+      summary: Acompanhar estado do processamento
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Estado atual (PENDENTE|PROCESSANDO|SUGERIDA|FALHA)
+
+  /correction-jobs/{id}/context:
+    get:
+      summary: Obter contexto agregado para retomar a revisão
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Job, resposta, questão e resumo da avaliação vinculada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CorrectionJobContextOut' }
+        "401": { description: Token ausente ou inválido }
+        "403": { description: Professor sem vínculo com a avaliação }
+        "404": { description: Job ou recurso da cadeia relacional não encontrado }
+
+  /corrections/{id}/reviews:
+    post:
+      summary: Registrar decisão humana (aprovar/alterar)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HumanReviewInput' }
+      responses:
+        "200": { description: Revisão registrada ou reenvio equivalente à decisão já existente (idempotente) }
+        "403":
+          description: Sem permissão sobre este recurso
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        "409":
+          description: Já existe uma decisão humana diferente registrada para este job; a decisão existente é preservada e retornada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewConflictOut' }
+
+  /health:
+    get:
+      summary: Health check (Core + AI Engine)
+      responses:
+        "200": { description: OK, sem dados sensíveis }
+
+  # ---- AV-S03: estrutura acadêmica (DEC-AV-023) ----
+  /organizations:
+    get:
+      summary: Listar organizações (admin vê todas; professor vê apenas as derivadas de suas turmas ativas)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Criar organização (somente admin)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "201": { description: Criada }
+        "403": { description: Somente admin }
+
+  /courses:
+    get:
+      summary: Listar cursos (admin global; professor apenas dos cursos de suas turmas ativas)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Criar curso (somente admin)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "201": { description: Criado }
+        "403": { description: Somente admin }
+
+  /disciplines:
+    get:
+      summary: Listar disciplinas (mesmo escopo de cursos)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Criar disciplina (somente admin)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "201": { description: Criada }
+        "403": { description: Somente admin }
+
+  /course-disciplines:
+    get:
+      summary: Listar associações curriculares curso↔disciplina
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Criar associação curricular curso↔disciplina (somente admin)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "201": { description: Criada }
+        "409":
+          description: Associação já existe para este par (course_id, discipline_id)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /class-groups:
+    get:
+      summary: Listar turmas (admin global; professor apenas as turmas com vínculo ativo)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Criar turma (somente admin)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "201": { description: Criada }
+        "422":
+          description: CLASS_GROUP_IDENTITY_CONFLICT — (course_discipline_id, period, code) já existe
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        "403": { description: Somente admin }
+
+  /class-groups/{id}/professors:
+    get:
+      summary: Listar vínculos professor↔turma (admin global; professor vê apenas os próprios)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+        "403": { description: Sem vínculo com a turma }
+    post:
+      summary: Criar/atualizar vínculo professor↔turma (somente admin; professor não pode autoatribuir-se)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProfessorClassLinkInput' }
+      responses:
+        "201": { description: Vínculo criado/atualizado }
+        "403": { description: Somente admin gerencia vínculos }
+
+  /students:
+    get:
+      summary: Listar alunos (identidade global; admin global, professor apenas dos matriculados em suas turmas ativas)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Criar identidade global de aluno (somente admin)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "201": { description: Criado }
+        "403": { description: Somente admin edita identidade global do aluno }
+
+  /class-groups/{id}/enrollments:
+    get:
+      summary: Listar matrículas da turma (admin global; professor com vínculo ativo na turma)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+        "403": { description: Sem vínculo ativo com a turma }
+    post:
+      summary: Matricular aluno na turma (admin ou professor com vínculo ativo e papel autorizado)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EnrollmentInput' }
+      responses:
+        "201": { description: Matrícula criada }
+        "403": { description: Sem vínculo ativo ou papel sem permissão de matrícula }
+
+  /enrollments/{id}:
+    patch:
+      summary: Alterar status/datas da matrícula ou encerrar (admin ou professor com vínculo ativo e papel autorizado)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Matrícula atualizada }
+        "403": { description: Sem vínculo ativo ou papel sem permissão }
+
+  /assessments/{id}/class-group:
+    post:
+      summary: Vincular avaliação a uma turma (somente o proprietário da avaliação, com vínculo ativo na turma)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Vínculo aplicado }
+        "403":
+          description: Sem propriedade da avaliação ou sem vínculo ativo com a turma
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [code, message, correlation_id]
+      properties:
+        code: { type: string, example: RUBRIC_TOTAL_MISMATCH }
+        message: { type: string, example: "A soma dos critérios deve ser 5,0." }
+        details: { type: object }
+        correlation_id: { type: string }
+        field_errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              reason: { type: string }
+    RubricInput:
+      type: object
+      required: [criteria]
+      properties:
+        criteria:
+          type: array
+          items:
+            type: object
+            required: [name, max_score]
+            properties:
+              name: { type: string }
+              description: { type: string }
+              max_score: { type: number, minimum: 0, exclusiveMinimum: true }
+    HumanReviewInput:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [APPROVE, ALTER] }
+        criteria_scores:
+          type: array
+          items:
+            type: object
+            properties:
+              criterion_id: { type: string }
+              score: { type: number, minimum: 0 }
+        justification:
+          type: string
+          description: Obrigatória quando decision=ALTER
+    CorrectionJobContextOut:
+      type: object
+      required: [job, answer, question, assessment]
+      properties:
+        job: { type: object, description: Representação CorrectionJobOut }
+        answer: { type: object, description: Representação AnswerOut }
+        question: { type: object, description: Representação QuestionOut, incluindo rubricas }
+        assessment:
+          $ref: '#/components/schemas/AssessmentSummaryOut'
+        human_review:
+          description: >-
+            Decisão humana já persistida para este job, se existir; null quando o job
+            ainda aguarda revisão. Presente para a UI recuperar e exibir a decisão
+            já registrada (autor, data, nota, justificativa) sem reoferecer o
+            formulário de primeira aprovação.
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/HumanReviewSummaryOut'
+    HumanReviewSummaryOut:
+      type: object
+      required: [id, reviewer_id, reviewer_email, decision, final_total, final_scores, created_at]
+      properties:
+        id: { type: string }
+        reviewer_id: { type: string }
+        reviewer_email: { type: string, format: email }
+        decision: { type: string, enum: [APPROVE, ALTER] }
+        final_total: { type: number }
+        final_scores:
+          type: array
+          items:
+            type: object
+            properties:
+              criterion_id: { type: string }
+              score: { type: string }
+        justification: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+    ReviewConflictOut:
+      type: object
+      required: [code, message, existing_review, correlation_id]
+      properties:
+        code: { type: string, example: REVIEW_ALREADY_EXISTS }
+        message: { type: string, example: "Este job já possui uma decisão humana registrada." }
+        existing_review:
+          $ref: '#/components/schemas/HumanReviewSummaryOut'
+        correlation_id: { type: string }
+    AssessmentSummaryOut:
+      type: object
+      required: [id, title]
+      properties:
+        id: { type: string }
+        title: { type: string }
+
+    # ---- AV-S03: estrutura acadêmica (DEC-AV-023) ----
+    ProfessorClassLinkInput:
+      type: object
+      required: [professor_id, role]
+      properties:
+        professor_id: { type: string }
+        role: { type: string, enum: [responsible, collaborator] }
+        active: { type: boolean, default: true }
+        starts_at: { type: string, format: date-time, nullable: true }
+        ends_at: { type: string, format: date-time, nullable: true }
+    EnrollmentInput:
+      type: object
+      required: [student_id]
+      properties:
+        student_id: { type: string }
+        status: { type: string, enum: [ACTIVE, SUSPENDED, WITHDRAWN, COMPLETED], default: ACTIVE }
+        enrolled_at: { type: string, format: date-time, nullable: true }
+        ended_at: { type: string, format: date-time, nullable: true }
+    OrganizationOut:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+    CourseOut:
+      type: object
+      required: [id, organization_id, name, code]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        name: { type: string }
+        code: { type: string }
+    DisciplineOut:
+      type: object
+      required: [id, organization_id, name, code]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        name: { type: string }
+        code: { type: string }
+    CourseDisciplineOut:
+      type: object
+      required: [id, course_id, discipline_id]
+      properties:
+        id: { type: string }
+        course_id: { type: string }
+        discipline_id: { type: string }
+    ClassGroupOut:
+      type: object
+      required: [id, course_discipline_id, period, code]
+      properties:
+        id: { type: string }
+        course_discipline_id: { type: string }
+        period: { type: string }
+        code: { type: string }
+    StudentOut:
+      type: object
+      required: [id, organization_id, name, external_id]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        name: { type: string }
+        external_id: { type: string }
+    EnrollmentOut:
+      type: object
+      required: [id, class_group_id, student_id, status]
+      properties:
+        id: { type: string }
+        class_group_id: { type: string }
+        student_id: { type: string }
+        status: { type: string, enum: [ACTIVE, SUSPENDED, WITHDRAWN, COMPLETED] }
+        enrolled_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time, nullable: true }
+    ProfessorClassLinkOut:
+      type: object
+      required: [id, professor_id, class_group_id, role, active]
+      properties:
+        id: { type: string }
+        professor_id: { type: string }
+        class_group_id: { type: string }
+        role: { type: string, enum: [responsible, collaborator] }
+        active: { type: boolean }
+        starts_at: { type: string, format: date-time, nullable: true }
+        ends_at: { type: string, format: date-time, nullable: true }

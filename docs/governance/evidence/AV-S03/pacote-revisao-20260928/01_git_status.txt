@@ -1,0 +1,27 @@
+ M core/app/config.py
+ M core/app/main.py
+ M core/app/models.py
+ M core/app/schemas.py
+ M docs/contracts/openapi.yaml
+ M docs/governance/executive_technical_dashboard.md
+ M docs/governance/snapshots/latest_execution.md
+ M frontend/.env.example
+ M frontend/src/App.tsx
+ M frontend/src/components/Layout.tsx
+ M frontend/src/pages/AssessmentEditorPage.tsx
+ M frontend/src/services/api.ts
+ M frontend/src/styles/theme.css
+ M frontend/src/types.ts
+?? core/alembic/versions/c4a8b2d91e37_add_academic_structure.py
+?? core/app/routers/
+?? core/app/tests/test_academic_authorization.py
+?? core/app/tests/test_academic_structure.py
+?? docs/governance/evidence/AV-S03/
+?? docs/governance/snapshots/snapshot_EXEC-2026-09-28-01_BL-AV-2-03-testes.md
+?? docs/governance/snapshots/snapshot_EXEC-2026-09-28-02_BL-AV-2-03-revisao-antigravity.md
+?? docs/governance/snapshots/snapshot_EXEC-2026-09-28-03_BL-AV-2-03-segunda-revisao-antigravity.md
+?? docs/governance/snapshots/snapshot_EXEC-2026-09-28-04_BL-AV-2-03-terceira-revisao-antigravity.md
+?? docs/governance/snapshots/snapshot_EXEC-2026-09-28-05_homologacao-bl-av-2-03-execucao-av-s03.md
+?? docs/governance/snapshots/snapshot_EXEC-2026-09-28-06_BL-AV-2-04-revisao-codex.md
+?? docs/governance/snapshots/snapshot_EXEC-2026-09-28-07_BL-AV-2-04-correcao-revalidacao.md
+?? frontend/src/pages/AcademicPage.tsx

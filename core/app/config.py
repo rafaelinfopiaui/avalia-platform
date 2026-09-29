@@ -15,6 +15,9 @@ class Settings:
         self.jwt_access_minutes = int(os.getenv("JWT_ACCESS_MINUTES", "30"))
         self.jwt_refresh_minutes = int(os.getenv("JWT_REFRESH_MINUTES", "1440"))
         self.ai_engine_url = os.getenv("AI_ENGINE_URL", "http://localhost:8001")
+        self.academic_module_enabled = os.getenv(
+            "ACADEMIC_MODULE_ENABLED", "false"
+        ).lower() in {"1", "true", "yes", "on"}
         self.cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
         # NOTA (bug corrigido): "professor@avalia.local" NUNCA funciona como e-mail de
         # login porque o schema LoginRequest usa pydantic.EmailStr, cuja biblioteca

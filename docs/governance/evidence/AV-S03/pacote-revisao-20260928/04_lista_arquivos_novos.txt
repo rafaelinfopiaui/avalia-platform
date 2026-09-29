@@ -1,0 +1,17 @@
+core/alembic/versions/c4a8b2d91e37_add_academic_structure.py
+core/app/routers/__init__.py
+core/app/routers/academic.py
+core/app/tests/test_academic_authorization.py
+core/app/tests/test_academic_structure.py
+docs/governance/evidence/AV-S03/AC-07-AC-09_revisao_arquitetura.md
+docs/governance/evidence/AV-S03/AC-10-scripts/ac10_scenarios.py
+docs/governance/evidence/AV-S03/AC-10-scripts/ac10_seed.py
+docs/governance/evidence/AV-S03/AC-10_validacao_denominador.md
+docs/governance/snapshots/snapshot_EXEC-2026-09-28-01_BL-AV-2-03-testes.md
+docs/governance/snapshots/snapshot_EXEC-2026-09-28-02_BL-AV-2-03-revisao-antigravity.md
+docs/governance/snapshots/snapshot_EXEC-2026-09-28-03_BL-AV-2-03-segunda-revisao-antigravity.md
+docs/governance/snapshots/snapshot_EXEC-2026-09-28-04_BL-AV-2-03-terceira-revisao-antigravity.md
+docs/governance/snapshots/snapshot_EXEC-2026-09-28-05_homologacao-bl-av-2-03-execucao-av-s03.md
+docs/governance/snapshots/snapshot_EXEC-2026-09-28-06_BL-AV-2-04-revisao-codex.md
+docs/governance/snapshots/snapshot_EXEC-2026-09-28-07_BL-AV-2-04-correcao-revalidacao.md
+frontend/src/pages/AcademicPage.tsx
