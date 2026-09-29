@@ -1,6 +1,6 @@
 # Dashboard Executivo de Evolução Técnica — AvalIA
 
-> Atualização: 2026-09-29 (homologação de BL-AV-2-04 e da AV-S03; integração do PR #3 a `main`) · Fonte canônica versionada em Markdown · Estado: `AV-S03` **homologada por Rafael** (`DEC-AV-027`) e **integrada a `main`** via merge commit `c39186596ca21dc1e8bf7bd2d52f09f4a9a00598` (7 commits preservados); CI remota em `main` 3/3 jobs verdes (run [36541693375](https://github.com/rafaelinfopiaui/avalia-platform/actions/runs/36541693375)); 11 de 12 critérios de aceite (AC-01 a AC-12) executados e confirmados com evidência real; `DEBT-AV-012` aceito como débito residual; contrato `docs/contracts/openapi.yaml` reconciliado pré-merge (proposta de design antiga preservada como histórico em `docs/contracts/historico/`); `avalia_dev` não foi acessado; nenhuma migração operacional aplicada; nenhum baseline operacional promovido; nenhuma nova sprint iniciada
+> Atualização: 2026-09-29 (AC-05 fechado com evidência real; reconciliação do conteúdo do PR #2 contra `main`) · Fonte canônica versionada em Markdown · Estado: `AV-S03` **homologada por Rafael** (`DEC-AV-027`) e **integrada a `main`** via merge commit `c39186596ca21dc1e8bf7bd2d52f09f4a9a00598` (7 commits preservados); CI remota em `main` 3/3 jobs verdes (run [36541693375](https://github.com/rafaelinfopiaui/avalia-platform/actions/runs/36541693375)); **12 de 12 critérios de aceite (AC-01 a AC-12) executados e confirmados com evidência real** (AC-05 fechado nesta rodada); `DEBT-AV-012` aceito como débito residual; contrato `docs/contracts/openapi.yaml` reconciliado pré-merge; `avalia_dev` acessado apenas em leitura read-only para reconfirmar estado de `DEBT-AV-011` (nenhuma escrita); nenhuma migração operacional aplicada; nenhum baseline operacional promovido; nenhuma nova sprint iniciada. **Encerramento documental (este dashboard) permanece em PR #4, ainda em rascunho, aguardando decisão de merge de Rafael; PR #2 permanece aberto, aguardando decisão de fechamento — nenhum dos dois está concluído nesta atualização.**
 
 ## 1. Leitura executiva
 
@@ -10,7 +10,9 @@ O AvalIA possui uma demonstração experimental herdada, organizada em Core API,
 
 | Referência | Estado | Link |
 |---|---|---|
-| Última execução registrada | EXEC-2026-09-29-02, homologação de BL-AV-2-04/AV-S03 (DEC-AV-027) e integração do PR #3 a `main` | [ponteiro](snapshots/latest_execution.md) |
+| Última execução registrada | EXEC-2026-09-29-03, fechamento de AC-05 e reconciliação do conteúdo do PR #2 contra `main` | [ponteiro](snapshots/latest_execution.md) |
+| PR #2 (`docs/av-s02-encerramento-planos-operacionais`) | aberto, em rascunho; conteúdo reconciliado contra `main` — recomendação de fechar sem merge registrada; **decisão pendente de Rafael** | [snapshot de reconciliação](snapshots/snapshot_RECONCILIACAO-2026-09-29-02_desvio-processo-2026-09-24.md) |
+| PR #4 (`docs/av-s03-encerramento-integracao`) | aberto, em rascunho; encerramento documental da AV-S03 + reconciliação de AC-05/PR #2; **decisão de merge pendente de Rafael** | https://github.com/rafaelinfopiaui/avalia-platform/pull/4 |
 | Último baseline validado sob esta governança | nenhum promovido (explicitamente não promovido por esta homologação) | [ponteiro](snapshots/latest_validated_baseline.md) |
 | Baseline herdado candidato | inspeção documental/Git de 2026-09-21 | [BASELINE-001](snapshots/snapshot_BASELINE-001_estado-herdado.md) |
 | Sprint funcional encerrada | `AV-S01` — homologada por Rafael em 2026-09-23 com `DEBT-AV-009` aceito como débito residual aberto | [documento da sprint](sprints/sprint_AV-S01_autorizacao_retomada_revalidacao.md) |
