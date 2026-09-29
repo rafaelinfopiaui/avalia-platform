@@ -23,26 +23,48 @@ produção, sem resolver `DEC-AV-007` para a trilha completa).
   para um PostgreSQL isolado dedicado (não incluído no repositório) e devem ser executados a partir
   do diretório `core/` do projeto, com o virtualenv do Core ativado.
 
-## 2. Denominador seedado (conforme aprovação de 2026-09-28)
+## 2. Dados seedados — denominador principal (DEC-AV-007) vs. cenário adicional (§4.2)
 
-| Item | Quantidade seedada | Observação |
-|---|---|---|
-| Organização | 1 | `Instituto AC-10` |
-| Curso | 1 principal + 1 adicional | o curso adicional existe apenas para provar o cenário "disciplina em mais de um curso" (exigido pelo texto vigente §4.2); o denominador principal de turmas usa o curso 1 |
-| Disciplina | 2 | uma delas (`Estruturas de Dados`) associada a AMBOS os cursos |
-| Turma | 2 | `T01` (curso 1 + disciplina 1) e `T02` (curso 1 + disciplina 2) |
-| Professor | 2 | `prof_a` e `prof_b`, com permissões DISTINTAS (ver seção 3) |
-| Alunos matriculados por turma | 10 por turma (20 matrículas, 19 alunos únicos) | 1 aluno matriculado em AMBAS as turmas, cobrindo "aluno em mais de uma turma" |
-| Avaliações por turma | 2 por turma (4 no total) | 2 na turma 1 (por `prof_a`), 2 na turma 2 (por `admin`, já que `prof_b` tem vínculo expirado lá) |
+Esta seção distingue explicitamente duas origens de dados, que não devem ser confundidas:
+
+**(A) Denominador principal**, exatamente como reconfirmado por Rafael em `DEC-AV-007`
+(2026-09-28): "1 organização, 1 curso, 2 disciplinas, 2 turmas, 2 professores, 10 alunos
+matriculados por turma, 2 avaliações por turma — incluindo explicitamente os cenários de aluno em
+múltiplas turmas e professores com permissões distintas". Nenhum item desta lista (A) foi
+acrescentado por iniciativa própria desta execução; todos foram explicitamente aprovados.
+
+**(B) Dado adicional, fora do denominador aprovado**, acrescentado por decisão de execução para
+cobrir uma exigência textual do documento da sprint (§4.2, "disciplina em mais de um curso") que
+`DEC-AV-007` não cobre literalmente (o denominador fala em "1 curso", singular). Este item (B) é
+preservado como cenário à parte, isolado do restante da validação, para que a leitura da tabela
+abaixo não confunda os dois conjuntos.
+
+| Item | Origem | Quantidade seedada | Observação |
+|---|---|---|---|
+| Organização | (A) denominador aprovado | 1 | `Instituto AC-10` |
+| Curso — principal | (A) denominador aprovado | 1 | usado por todas as 2 turmas do denominador |
+| Curso — adicional | **(B) fora do denominador**, acrescentado só para o cenário de §4.2 | 1 | não participa de nenhuma turma, matrícula ou avaliação; existe apenas como segundo ponto de associação da disciplina compartilhada (ver linha seguinte) |
+| Disciplina | (A) denominador aprovado | 2 | uma delas (`Estruturas de Dados`) recebe uma associação adicional (B) ao curso adicional, apenas para o teste de §4.2 — sua associação ao curso principal (A) é a que participa do restante da validação |
+| Turma | (A) denominador aprovado | 2 | `T01` e `T02`, ambas vinculadas ao curso **principal** (A); o curso adicional (B) não tem turmas |
+| Professor | (A) denominador aprovado | 2 | `prof_a` e `prof_b`, com permissões DISTINTAS (ver seção 3) |
+| Alunos matriculados por turma | (A) denominador aprovado | 10 por turma (20 matrículas, 19 alunos únicos) | 1 aluno matriculado em AMBAS as turmas, cobrindo "aluno em mais de uma turma" |
+| Avaliações por turma | (A) denominador aprovado | 2 por turma (4 no total) | 2 na turma 1 (por `prof_a`), 2 na turma 2 (por `admin`, já que `prof_b` tem vínculo expirado lá) |
+
+Consequência prática: os cenários 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 da seção 4
+abaixo exercitam exclusivamente o denominador principal (A) — 1 organização, 1 curso, 2 turmas
+sobre esse curso, 2 professores, 20 matrículas, 4 avaliações. Apenas o cenário 3 ("disciplina em
+mais de um curso") exercita o dado adicional (B); é o único ponto da validação que depende do
+curso extra, e seu resultado é reportado separadamente na seção 3 abaixo para não ser confundido
+com o restante da cobertura do denominador aprovado.
 
 ## 3. Cenários adicionais exigidos pelo texto vigente da sprint (§4.2) e pela aprovação de 2026-09-28
 
-| Cenário exigido | Como foi coberto |
-|---|---|
-| aluno em mais de uma turma | 1 aluno (`Aluno Compartilhado Multi-Turma`) matriculado ACTIVE nas turmas T01 e T02 |
-| professores com permissões distintas | `prof_a` = RESPONSIBLE na T01, sem vínculo na T02; `prof_b` = COLLABORATOR na T01, RESPONSIBLE **expirado** na T02 |
-| disciplina em mais de um curso | disciplina `Estruturas de Dados` associada via `CourseDiscipline` tanto ao curso 1 quanto ao curso 2 |
-| vínculo expirado | vínculo de `prof_b` na T02 com `ends_at` no passado (60 dias atrás a -1 dia) |
+| Cenário exigido | Origem | Como foi coberto |
+|---|---|---|
+| aluno em mais de uma turma | (A) denominador aprovado (`DEC-AV-007`) | 1 aluno (`Aluno Compartilhado Multi-Turma`) matriculado ACTIVE nas turmas T01 e T02 |
+| professores com permissões distintas | (A) denominador aprovado (`DEC-AV-007`) | `prof_a` = RESPONSIBLE na T01, sem vínculo na T02; `prof_b` = COLLABORATOR na T01, RESPONSIBLE **expirado** na T02 |
+| disciplina em mais de um curso | **(B) fora do denominador aprovado**, exigência textual de §4.2 não coberta literalmente por `DEC-AV-007` | disciplina `Estruturas de Dados` associada via `CourseDiscipline` tanto ao curso principal (A) quanto ao curso adicional (B); nenhuma turma, matrícula ou avaliação usa o curso adicional |
+| vínculo expirado | (A) denominador aprovado (`DEC-AV-007`) | vínculo de `prof_b` na T02 com `ends_at` no passado (60 dias atrás a -1 dia) |
 
 ## 4. Resultado real da execução (16/16 cenários, evidência de código de status HTTP real)
 
@@ -50,7 +72,7 @@ produção, sem resolver `DEC-AV-007` para a trilha completa).
 |---|---|---|---|
 | 1 | login real (admin, prof_a, prof_b) | PASS | 3x `POST /v1/auth/login` → 200, JWT emitido |
 | 2 | estrutura: 1 org, 2 cursos, 2 disciplinas | PASS | IDs reais retornados por `POST /v1/organizations`, `/v1/courses`, `/v1/disciplines` |
-| 3 | disciplina em mais de um curso | PASS | 2 `CourseDiscipline` criadas para a mesma disciplina em cursos diferentes |
+| 3 | disciplina em mais de um curso **(B, fora do denominador aprovado)** | PASS | 2 `CourseDiscipline` criadas para a mesma disciplina em cursos diferentes |
 | 4 | estrutura: 2 turmas | PASS | `POST /v1/class-groups` x2, unicidade `(course_discipline_id, period, code)` respeitada |
 | 5 | professores com permissões distintas | PASS | vínculos criados: RESPONSIBLE/COLLABORATOR/RESPONSIBLE-expirado |
 | 6 | 10 alunos matriculados por turma | PASS | 20 `POST /v1/enrollments` retornaram 201 |
@@ -86,13 +108,19 @@ suíte homologada.
 
 ## 7. Veredito
 
-**AC-10: ATENDIDO.** O denominador aprovado por Rafael em 2026-09-28 foi seedado integralmente em
-ambiente isolado (PostgreSQL dedicado, fora de `avalia_dev`), incluindo os 4 cenários adicionais
-exigidos pelo texto vigente da sprint (§4.2). A matriz de autorização foi exercitada via HTTP real
-contra esse denominador, com 16/16 cenários passando, e a suíte homologada de `BL-AV-2-03`
+**AC-10: ATENDIDO.** O denominador principal aprovado por Rafael em `DEC-AV-007` (2026-09-28) foi
+seedado integralmente em ambiente isolado (PostgreSQL dedicado, fora de `avalia_dev`) — 1
+organização, 1 curso, 2 disciplinas, 2 turmas, 2 professores, 10 alunos/turma, 2 avaliações/turma
+— incluindo os cenários de aluno multi-turma, professores com permissões distintas e vínculo
+expirado, todos explicitamente parte desse denominador. Adicionalmente, um curso extra (fora do
+denominador aprovado) foi seedado apenas para cobrir a exigência textual de §4.2 ("disciplina em
+mais de um curso"), que `DEC-AV-007` não cobre literalmente por falar em "1 curso" — esse dado
+adicional está isolado e identificado na seção 2 e não contamina a leitura do denominador principal.
+A matriz de autorização foi exercitada via HTTP real, com 16/16 cenários passando (15 sobre o
+denominador principal, 1 sobre o dado adicional de §4.2), e a suíte homologada de `BL-AV-2-03`
 permaneceu 68/68 sem regressão. Nenhum resultado desta validação é generalizado além do
-denominador aprovado (não há alegação de capacidade, desempenho ou comportamento sob volume
-diferente do seedado).
+denominador aprovado nem do dado adicional isolado (não há alegação de capacidade, desempenho ou
+comportamento sob volume diferente do seedado).
 
 ## 8. Limpeza do ambiente
 

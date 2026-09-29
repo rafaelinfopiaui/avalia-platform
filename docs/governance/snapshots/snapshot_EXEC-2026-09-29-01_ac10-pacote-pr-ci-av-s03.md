@@ -78,11 +78,16 @@ do repositório (branch documental de encerramento da AV-S02, base do PR #2). As
 reconciliadas trazendo as decisões já autorizadas (`DEC-AV-023/024/025/026`) para esta branch, junto
 das atualizações desta rodada.
 
-**Divergência identificada e preservada deliberadamente, não resolvida por este commit:**
-`docs/contracts/openapi.yaml` tem duas versões incompatíveis — a desta branch é o contrato REAL,
-extraído do código testado e homologado (`BL-AV-2-03`); a do checkout principal é uma proposta de
-design mais antiga, nunca implementada nem testada. A reconciliação entre as duas fica para decisão
-de Rafael antes de qualquer merge.
+**Divergência identificada nesta rodada e RESOLVIDA em 2026-09-29 (reconciliação
+pré-merge do PR #3, ver `snapshot_RECONCILIACAO-2026-09-29-01_contrato-openapi-av-s03.md`):**
+`docs/contracts/openapi.yaml` tinha duas versões incompatíveis — a desta branch,
+conferida rota-a-rota contra o schema OpenAPI real gerado pela aplicação
+(`app.openapi()`) sobre o código de `BL-AV-2-03`; e a do checkout principal,
+uma proposta de design mais antiga, nunca implementada. Nota de correção
+terminológica: a formulação "contrato REAL, testado e homologado" usada
+abaixo confundia estados distintos (revisão técnica, testes automatizados e
+homologação formal de Rafael); a formulação correta e a decisão de
+reconciliação estão registradas no documento de reconciliação linkado acima.
 
 ## 6. Organização dos commits (branch `feat/av-s03-estrutura-academica`, a partir de `main`)
 
