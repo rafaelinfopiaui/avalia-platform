@@ -1,0 +1,16 @@
+{
+  "step1_direct_nav_to_academico_unauth": {
+    "url": "http://127.0.0.1:5183/login",
+    "redirected_to_login": true
+  },
+  "step2_history_state_after_redirect": {
+    "usr": {
+      "from": "/academico"
+    },
+    "key": "rjiaodmz",
+    "idx": 0
+  },
+  "step4_wait_for_url_academico": "OK - navegou para /academico",
+  "step4_url_after_login": "http://127.0.0.1:5183/academico",
+  "step4_returned_to_academico": true
+}
