@@ -1,0 +1,3452 @@
+diff --git a/core/alembic/versions/c4a8b2d91e37_add_academic_structure.py b/core/alembic/versions/c4a8b2d91e37_add_academic_structure.py
+new file mode 100644
+index 0000000..898c9ed
+--- /dev/null
++++ b/core/alembic/versions/c4a8b2d91e37_add_academic_structure.py
+@@ -0,0 +1,165 @@
++"""add academic structure
++
++Revision ID: c4a8b2d91e37
++Revises: 7b1d6d853f20
++Create Date: 2026-09-24 00:00:00.000000
++
++"""
++from typing import Sequence, Union
++
++import sqlalchemy as sa
++from alembic import op
++
++revision: str = "c4a8b2d91e37"
++down_revision: Union[str, Sequence[str], None] = "7b1d6d853f20"
++branch_labels: Union[str, Sequence[str], None] = None
++depends_on: Union[str, Sequence[str], None] = None
++
++
++def upgrade() -> None:
++    op.create_table(
++        "organizations",
++        sa.Column("id", sa.String(), nullable=False),
++        sa.Column("name", sa.String(), nullable=False),
++        sa.PrimaryKeyConstraint("id"),
++    )
++    op.create_table(
++        "courses",
++        sa.Column("id", sa.String(), nullable=False),
++        sa.Column("organization_id", sa.String(), nullable=False),
++        sa.Column("name", sa.String(), nullable=False),
++        sa.Column("code", sa.String(), nullable=False),
++        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"]),
++        sa.PrimaryKeyConstraint("id"),
++        sa.UniqueConstraint("organization_id", "code", name="uq_courses_organization_code"),
++    )
++    op.create_table(
++        "disciplines",
++        sa.Column("id", sa.String(), nullable=False),
++        sa.Column("organization_id", sa.String(), nullable=False),
++        sa.Column("name", sa.String(), nullable=False),
++        sa.Column("code", sa.String(), nullable=False),
++        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"]),
++        sa.PrimaryKeyConstraint("id"),
++        sa.UniqueConstraint("organization_id", "code", name="uq_disciplines_organization_code"),
++    )
++    op.create_table(
++        "course_disciplines",
++        sa.Column("id", sa.String(), nullable=False),
++        sa.Column("course_id", sa.String(), nullable=False),
++        sa.Column("discipline_id", sa.String(), nullable=False),
++        sa.ForeignKeyConstraint(["course_id"], ["courses.id"]),
++        sa.ForeignKeyConstraint(["discipline_id"], ["disciplines.id"]),
++        sa.PrimaryKeyConstraint("id"),
++        sa.UniqueConstraint("course_id", "discipline_id", name="uq_course_disciplines_pair"),
++    )
++    op.create_table(
++        "class_groups",
++        sa.Column("id", sa.String(), nullable=False),
++        sa.Column("course_discipline_id", sa.String(), nullable=False),
++        sa.Column("period", sa.String(), nullable=False),
++        sa.Column("code", sa.String(), nullable=False),
++        sa.ForeignKeyConstraint(["course_discipline_id"], ["course_disciplines.id"]),
++        sa.PrimaryKeyConstraint("id"),
++        sa.UniqueConstraint(
++            "course_discipline_id",
++            "period",
++            "code",
++            name="uq_class_groups_curriculum_period_code",
++        ),
++    )
++    op.create_table(
++        "students",
++        sa.Column("id", sa.String(), nullable=False),
++        sa.Column("organization_id", sa.String(), nullable=False),
++        sa.Column("name", sa.String(), nullable=False),
++        sa.Column("external_id", sa.String(), nullable=False),
++        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"]),
++        sa.PrimaryKeyConstraint("id"),
++        sa.UniqueConstraint(
++            "organization_id", "external_id", name="uq_students_organization_external"
++        ),
++    )
++    op.create_table(
++        "enrollments",
++        sa.Column("id", sa.String(), nullable=False),
++        sa.Column("class_group_id", sa.String(), nullable=False),
++        sa.Column("student_id", sa.String(), nullable=False),
++        sa.Column(
++            "status",
++            sa.Enum("ACTIVE", "SUSPENDED", "WITHDRAWN", "COMPLETED", name="enrollmentstatus"),
++            nullable=False,
++        ),
++        sa.Column("enrolled_at", sa.DateTime(), nullable=False),
++        sa.Column("ended_at", sa.DateTime(), nullable=True),
++        sa.ForeignKeyConstraint(["class_group_id"], ["class_groups.id"]),
++        sa.ForeignKeyConstraint(["student_id"], ["students.id"]),
++        sa.PrimaryKeyConstraint("id"),
++    )
++    op.create_table(
++        "professor_class_links",
++        sa.Column("id", sa.String(), nullable=False),
++        sa.Column("professor_id", sa.String(), nullable=False),
++        sa.Column("class_group_id", sa.String(), nullable=False),
++        sa.Column("role", sa.Enum("responsible", "collaborator", name="professorrole"), nullable=False),
++        sa.Column("active", sa.Boolean(), nullable=False),
++        sa.Column("starts_at", sa.DateTime(), nullable=True),
++        sa.Column("ends_at", sa.DateTime(), nullable=True),
++        sa.ForeignKeyConstraint(["professor_id"], ["users.id"]),
++        sa.ForeignKeyConstraint(["class_group_id"], ["class_groups.id"]),
++        sa.PrimaryKeyConstraint("id"),
++        sa.UniqueConstraint(
++            "professor_id", "class_group_id", "role", name="uq_professor_class_links_role"
++        ),
++    )
++    op.add_column("assessments", sa.Column("class_group_id", sa.String(), nullable=True))
++    op.create_foreign_key(
++        "fk_assessments_class_group_id",
++        "assessments",
++        "class_groups",
++        ["class_group_id"],
++        ["id"],
++    )
++
++
++def downgrade() -> None:
++    connection = op.get_bind()
++    blockers = []
++    checks = (
++        ("organizations", "SELECT EXISTS (SELECT 1 FROM organizations)"),
++        ("courses", "SELECT EXISTS (SELECT 1 FROM courses)"),
++        ("disciplines", "SELECT EXISTS (SELECT 1 FROM disciplines)"),
++        ("course_disciplines", "SELECT EXISTS (SELECT 1 FROM course_disciplines)"),
++        ("class_groups", "SELECT EXISTS (SELECT 1 FROM class_groups)"),
++        ("students", "SELECT EXISTS (SELECT 1 FROM students)"),
++        ("enrollments", "SELECT EXISTS (SELECT 1 FROM enrollments)"),
++        ("professor_class_links", "SELECT EXISTS (SELECT 1 FROM professor_class_links)"),
++        (
++            "assessments.class_group_id",
++            "SELECT EXISTS (SELECT 1 FROM assessments WHERE class_group_id IS NOT NULL)",
++        ),
++    )
++    for label, query in checks:
++        if connection.exec_driver_sql(query).scalar():
++            blockers.append(label)
++
++    if blockers:
++        raise RuntimeError(
++            "Downgrade c4a8b2d91e37 bloqueado antes de qualquer DROP: existem dados "
++            f"dependentes em {', '.join(blockers)}. Preserve/exporte esses dados por um "
++            "procedimento separado e autorizado antes de tentar novamente."
++        )
++
++    op.drop_constraint("fk_assessments_class_group_id", "assessments", type_="foreignkey")
++    op.drop_column("assessments", "class_group_id")
++    op.drop_table("professor_class_links")
++    op.drop_table("enrollments")
++    op.drop_table("students")
++    op.drop_table("class_groups")
++    op.drop_table("course_disciplines")
++    op.drop_table("disciplines")
++    op.drop_table("courses")
++    op.drop_table("organizations")
++
++    sa.Enum(name="professorrole").drop(connection, checkfirst=True)
++    sa.Enum(name="enrollmentstatus").drop(connection, checkfirst=True)
+diff --git a/core/app/routers/__init__.py b/core/app/routers/__init__.py
+new file mode 100644
+index 0000000..f7ec5ce
+--- /dev/null
++++ b/core/app/routers/__init__.py
+@@ -0,0 +1 @@
++"""API routers."""
+diff --git a/core/app/routers/academic.py b/core/app/routers/academic.py
+new file mode 100644
+index 0000000..20cf3c4
+--- /dev/null
++++ b/core/app/routers/academic.py
+@@ -0,0 +1,517 @@
++from datetime import datetime
++
++from fastapi import APIRouter, Depends, HTTPException, Response
++from pydantic import BaseModel, ConfigDict
++from sqlalchemy import and_, or_
++from sqlalchemy.exc import IntegrityError
++from sqlalchemy.orm import Session
++
++from app.db import get_db
++from app.deps import require_role
++from app.models import (
++    Assessment,
++    ClassGroup,
++    Course,
++    CourseDiscipline,
++    Discipline,
++    Enrollment,
++    EnrollmentStatus,
++    Organization,
++    ProfessorClassLink,
++    ProfessorRole,
++    Role,
++    Student,
++    User,
++)
++
++router = APIRouter(prefix="/v1", tags=["academic"])
++
++
++class AcademicSchema(BaseModel):
++    model_config = ConfigDict(from_attributes=True)
++
++
++class OrganizationInput(AcademicSchema):
++    name: str
++
++
++class OrganizationOut(OrganizationInput):
++    id: str
++
++
++class CourseInput(AcademicSchema):
++    organization_id: str
++    name: str
++    code: str
++
++
++class CourseOut(CourseInput):
++    id: str
++
++
++class DisciplineInput(AcademicSchema):
++    organization_id: str
++    name: str
++    code: str
++
++
++class DisciplineOut(DisciplineInput):
++    id: str
++
++
++class CourseDisciplineInput(AcademicSchema):
++    course_id: str
++    discipline_id: str
++
++
++class CourseDisciplineOut(CourseDisciplineInput):
++    id: str
++
++
++class ClassGroupInput(AcademicSchema):
++    course_discipline_id: str
++    period: str
++    code: str
++
++
++class ClassGroupOut(ClassGroupInput):
++    id: str
++
++
++class ProfessorClassLinkInput(AcademicSchema):
++    professor_id: str
++    class_group_id: str
++    role: ProfessorRole
++    active: bool = True
++    starts_at: datetime | None = None
++    ends_at: datetime | None = None
++
++
++class ProfessorClassLinkUpdate(AcademicSchema):
++    role: ProfessorRole | None = None
++    active: bool | None = None
++    starts_at: datetime | None = None
++    ends_at: datetime | None = None
++
++
++class ProfessorClassLinkOut(ProfessorClassLinkInput):
++    id: str
++
++
++class StudentInput(AcademicSchema):
++    organization_id: str
++    name: str
++    external_id: str
++
++
++class StudentOut(StudentInput):
++    id: str
++
++
++class EnrollmentInput(AcademicSchema):
++    class_group_id: str
++    student_id: str
++    status: EnrollmentStatus = EnrollmentStatus.ACTIVE
++    enrolled_at: datetime | None = None
++    ended_at: datetime | None = None
++
++
++class EnrollmentUpdate(AcademicSchema):
++    status: EnrollmentStatus | None = None
++    enrolled_at: datetime | None = None
++    ended_at: datetime | None = None
++
++
++class EnrollmentOut(AcademicSchema):
++    id: str
++    class_group_id: str
++    student_id: str
++    status: EnrollmentStatus
++    enrolled_at: datetime
++    ended_at: datetime | None
++
++
++class AssessmentClassGroupInput(AcademicSchema):
++    class_group_id: str
++
++
++def active_link_condition(now: datetime | None = None):
++    moment = now or datetime.utcnow()
++    return and_(
++        ProfessorClassLink.active.is_(True),
++        or_(ProfessorClassLink.starts_at.is_(None), ProfessorClassLink.starts_at <= moment),
++        or_(ProfessorClassLink.ends_at.is_(None), ProfessorClassLink.ends_at >= moment),
++    )
++
++
++def has_active_class_link(db: Session, user: User, class_group_id: str, *, responsible: bool = False) -> bool:
++    if user.role == Role.ADMIN:
++        return True
++    query = db.query(ProfessorClassLink).filter(
++        ProfessorClassLink.professor_id == user.id,
++        ProfessorClassLink.class_group_id == class_group_id,
++        active_link_condition(),
++    )
++    if responsible:
++        query = query.filter(ProfessorClassLink.role == ProfessorRole.RESPONSIBLE)
++    return query.first() is not None
++
++
++def require_active_class_link(db: Session, user: User, class_group_id: str, *, responsible: bool = False) -> None:
++    if not has_active_class_link(db, user, class_group_id, responsible=responsible):
++        raise HTTPException(status_code=403, detail="Vínculo ativo com a turma é obrigatório.")
++
++
++def require_assessment_mutation(db: Session, user: User, assessment: Assessment) -> None:
++    if user.role == Role.ADMIN:
++        return
++    if assessment.owner_id != user.id:
++        raise HTTPException(status_code=403, detail="Sem permissão sobre esta avaliação.")
++    if assessment.class_group_id is not None:
++        require_active_class_link(db, user, assessment.class_group_id)
++
++
++def _get(db: Session, model, resource_id: str):
++    item = db.get(model, resource_id)
++    if item is None:
++        raise HTTPException(status_code=404, detail="Recurso não encontrado.")
++    return item
++
++
++def _commit(db: Session, item, duplicate_message: str = "Conflito de integridade."):
++    try:
++        db.commit()
++    except IntegrityError as exc:
++        db.rollback()
++        raise HTTPException(status_code=409, detail=duplicate_message) from exc
++    db.refresh(item)
++    return item
++
++
++def _update(item, payload: BaseModel) -> None:
++    for field, value in payload.model_dump(exclude_unset=True).items():
++        setattr(item, field, value)
++
++
++def _delete(db: Session, item) -> Response:
++    try:
++        db.delete(item)
++        db.commit()
++    except IntegrityError as exc:
++        db.rollback()
++        raise HTTPException(status_code=409, detail="Recurso possui dependências.") from exc
++    return Response(status_code=204)
++
++
++def _admin(user: User) -> None:
++    if user.role != Role.ADMIN:
++        raise HTTPException(status_code=403, detail="Somente administradores.")
++
++
++def _active_class_ids(db: Session, user: User):
++    return db.query(ProfessorClassLink.class_group_id).filter(
++        ProfessorClassLink.professor_id == user.id, active_link_condition()
++    )
++
++
++def _organization_ids_for_user(db: Session, user: User):
++    return (
++        db.query(Course.organization_id)
++        .join(CourseDiscipline, CourseDiscipline.course_id == Course.id)
++        .join(ClassGroup, ClassGroup.course_discipline_id == CourseDiscipline.id)
++        .filter(ClassGroup.id.in_(_active_class_ids(db, user)))
++    )
++
++
++@router.get("/organizations", response_model=list[OrganizationOut])
++def list_organizations(db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
++    query = db.query(Organization)
++    if user.role == Role.PROFESSOR:
++        query = query.filter(Organization.id.in_(_organization_ids_for_user(db, user)))
++    return query.all()
++
++
++@router.post("/organizations", response_model=OrganizationOut, status_code=201)
++def create_organization(
++    payload: OrganizationInput, db: Session = Depends(get_db), user: User = Depends(require_role("admin"))
++):
++    item = Organization(**payload.model_dump())
++    db.add(item)
++    return _commit(db, item)
++
++
++@router.get("/organizations/{resource_id}", response_model=OrganizationOut)
++def get_organization(
++    resource_id: str, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))
++):
++    query = db.query(Organization).filter(Organization.id == resource_id)
++    if user.role == Role.PROFESSOR:
++        query = query.filter(Organization.id.in_(_organization_ids_for_user(db, user)))
++    item = query.first()
++    if item is None:
++        raise HTTPException(status_code=404, detail="Recurso não encontrado.")
++    return item
++
++
++@router.patch("/organizations/{resource_id}", response_model=OrganizationOut)
++def update_organization(
++    resource_id: str,
++    payload: OrganizationInput,
++    db: Session = Depends(get_db),
++    user: User = Depends(require_role("admin")),
++):
++    item = _get(db, Organization, resource_id)
++    _update(item, payload)
++    return _commit(db, item)
++
++
++@router.delete("/organizations/{resource_id}", status_code=204)
++def delete_organization(resource_id: str, db: Session = Depends(get_db), user: User = Depends(require_role("admin"))):
++    return _delete(db, _get(db, Organization, resource_id))
++
++
++def _register_admin_crud(path: str, model, input_schema, output_schema, scope_filter):
++    async def list_items(db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
++        query = db.query(model)
++        if user.role == Role.PROFESSOR:
++            query = scope_filter(query, db, user)
++        return query.all()
++
++    async def create_item(
++        payload: input_schema, db: Session = Depends(get_db), user: User = Depends(require_role("admin"))
++    ):
++        item = model(**payload.model_dump())
++        db.add(item)
++        return _commit(db, item)
++
++    async def get_item(
++        resource_id: str, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))
++    ):
++        query = db.query(model)
++        if user.role == Role.PROFESSOR:
++            query = scope_filter(query, db, user)
++        item = query.filter(model.id == resource_id).first()
++        if item is None:
++            raise HTTPException(status_code=404, detail="Recurso não encontrado.")
++        return item
++
++    async def update_item(
++        resource_id: str,
++        payload: input_schema,
++        db: Session = Depends(get_db),
++        user: User = Depends(require_role("admin")),
++    ):
++        item = _get(db, model, resource_id)
++        _update(item, payload)
++        return _commit(db, item)
++
++    async def delete_item(resource_id: str, db: Session = Depends(get_db), user: User = Depends(require_role("admin"))):
++        return _delete(db, _get(db, model, resource_id))
++
++    names = model.__name__.lower()
++    router.add_api_route(path, list_items, methods=["GET"], response_model=list[output_schema], name=f"list_{names}")
++    router.add_api_route(
++        path, create_item, methods=["POST"], response_model=output_schema, status_code=201, name=f"create_{names}"
++    )
++    router.add_api_route(
++        f"{path}/{{resource_id}}", get_item, methods=["GET"], response_model=output_schema, name=f"get_{names}"
++    )
++    router.add_api_route(
++        f"{path}/{{resource_id}}", update_item, methods=["PATCH"], response_model=output_schema, name=f"update_{names}"
++    )
++    router.add_api_route(
++        f"{path}/{{resource_id}}", delete_item, methods=["DELETE"], status_code=204, name=f"delete_{names}"
++    )
++
++
++def _course_scope(query, db, user):
++    return query.filter(Course.organization_id.in_(_organization_ids_for_user(db, user)))
++
++
++def _discipline_scope(query, db, user):
++    return query.filter(Discipline.organization_id.in_(_organization_ids_for_user(db, user)))
++
++
++def _association_scope(query, db, user):
++    return (
++        query.join(ClassGroup, ClassGroup.course_discipline_id == CourseDiscipline.id)
++        .filter(ClassGroup.id.in_(_active_class_ids(db, user)))
++        .distinct()
++    )
++
++
++def _class_scope(query, db, user):
++    return query.filter(ClassGroup.id.in_(_active_class_ids(db, user)))
++
++
++_register_admin_crud("/courses", Course, CourseInput, CourseOut, _course_scope)
++_register_admin_crud("/disciplines", Discipline, DisciplineInput, DisciplineOut, _discipline_scope)
++_register_admin_crud(
++    "/course-disciplines", CourseDiscipline, CourseDisciplineInput, CourseDisciplineOut, _association_scope
++)
++_register_admin_crud("/class-groups", ClassGroup, ClassGroupInput, ClassGroupOut, _class_scope)
++
++
++@router.get("/professor-class-links", response_model=list[ProfessorClassLinkOut])
++def list_links(db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
++    query = db.query(ProfessorClassLink)
++    if user.role == Role.PROFESSOR:
++        query = query.filter(ProfessorClassLink.professor_id == user.id)
++    return query.all()
++
++
++@router.post("/professor-class-links", response_model=ProfessorClassLinkOut, status_code=201)
++def create_link(
++    payload: ProfessorClassLinkInput, db: Session = Depends(get_db), user: User = Depends(require_role("admin"))
++):
++    professor = _get(db, User, payload.professor_id)
++    if professor.role != Role.PROFESSOR:
++        raise HTTPException(status_code=422, detail="O usuário informado não é professor.")
++    _get(db, ClassGroup, payload.class_group_id)
++    item = ProfessorClassLink(**payload.model_dump())
++    db.add(item)
++    return _commit(db, item, "Vínculo duplicado.")
++
++
++@router.get("/professor-class-links/{resource_id}", response_model=ProfessorClassLinkOut)
++def get_link(resource_id: str, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
++    query = db.query(ProfessorClassLink).filter(ProfessorClassLink.id == resource_id)
++    if user.role == Role.PROFESSOR:
++        query = query.filter(ProfessorClassLink.professor_id == user.id)
++    item = query.first()
++    if item is None:
++        raise HTTPException(status_code=404, detail="Recurso não encontrado.")
++    return item
++
++
++@router.patch("/professor-class-links/{resource_id}", response_model=ProfessorClassLinkOut)
++def update_link(
++    resource_id: str,
++    payload: ProfessorClassLinkUpdate,
++    db: Session = Depends(get_db),
++    user: User = Depends(require_role("admin")),
++):
++    item = _get(db, ProfessorClassLink, resource_id)
++    _update(item, payload)
++    return _commit(db, item)
++
++
++@router.delete("/professor-class-links/{resource_id}", status_code=204)
++def delete_link(resource_id: str, db: Session = Depends(get_db), user: User = Depends(require_role("admin"))):
++    return _delete(db, _get(db, ProfessorClassLink, resource_id))
++
++
++def _student_scope(query, db, user):
++    return (
++        query.join(Enrollment, Enrollment.student_id == Student.id)
++        .filter(Enrollment.class_group_id.in_(_active_class_ids(db, user)))
++        .distinct()
++    )
++
++
++_register_admin_crud("/students", Student, StudentInput, StudentOut, _student_scope)
++
++
++def _enrollment_scope(query, db, user):
++    return query.filter(Enrollment.class_group_id.in_(_active_class_ids(db, user)))
++
++
++@router.get("/enrollments", response_model=list[EnrollmentOut])
++def list_enrollments(db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))):
++    query = db.query(Enrollment)
++    if user.role == Role.PROFESSOR:
++        query = _enrollment_scope(query, db, user)
++    return query.all()
++
++
++@router.post("/enrollments", response_model=EnrollmentOut, status_code=201)
++def create_enrollment(
++    payload: EnrollmentInput, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))
++):
++    class_query = db.query(ClassGroup).filter(ClassGroup.id == payload.class_group_id)
++    if user.role == Role.PROFESSOR:
++        class_query = class_query.filter(ClassGroup.id.in_(_active_class_ids(db, user)))
++    if class_query.first() is None:
++        raise HTTPException(status_code=404, detail="Recurso não encontrado.")
++    require_active_class_link(db, user, payload.class_group_id, responsible=True)
++    _get(db, Student, payload.student_id)
++    if (
++        payload.status == EnrollmentStatus.ACTIVE
++        and db.query(Enrollment)
++        .filter_by(class_group_id=payload.class_group_id, student_id=payload.student_id, status=EnrollmentStatus.ACTIVE)
++        .first()
++    ):
++        raise HTTPException(status_code=409, detail="Matrícula ativa duplicada.")
++    values = payload.model_dump()
++    if values["enrolled_at"] is None:
++        values.pop("enrolled_at")
++    item = Enrollment(**values)
++    db.add(item)
++    return _commit(db, item)
++
++
++@router.get("/enrollments/{resource_id}", response_model=EnrollmentOut)
++def get_enrollment(
++    resource_id: str, db: Session = Depends(get_db), user: User = Depends(require_role("professor", "admin"))
++):
++    query = db.query(Enrollment).filter(Enrollment.id == resource_id)
++    if user.role == Role.PROFESSOR:
++        query = _enrollment_scope(query, db, user)
++    item = query.first()
++    if item is None:
++        raise HTTPException(status_code=404, detail="Recurso não encontrado.")
++    return item
++
++
++@router.patch("/enrollments/{resource_id}", response_model=EnrollmentOut)
++def update_enrollment(
++    resource_id: str,
++    payload: EnrollmentUpdate,
++    db: Session = Depends(get_db),
++    user: User = Depends(require_role("professor", "admin")),
++):
++    query = db.query(Enrollment).filter(Enrollment.id == resource_id)
++    if user.role == Role.PROFESSOR:
++        query = query.filter(
++            Enrollment.class_group_id.in_(
++                db.query(ProfessorClassLink.class_group_id).filter(
++                    ProfessorClassLink.professor_id == user.id,
++                    ProfessorClassLink.role == ProfessorRole.RESPONSIBLE,
++                    active_link_condition(),
++                )
++            )
++        )
++    item = query.first()
++    if item is None:
++        raise HTTPException(status_code=404, detail="Recurso não encontrado.")
++    _update(item, payload)
++    return _commit(db, item)
++
++
++@router.delete("/enrollments/{resource_id}", status_code=204)
++def delete_enrollment(resource_id: str, db: Session = Depends(get_db), user: User = Depends(require_role("admin"))):
++    return _delete(db, _get(db, Enrollment, resource_id))
++
++
++@router.post("/assessments/{assessment_id}/class-group")
++def attach_assessment_class_group(
++    assessment_id: str,
++    payload: AssessmentClassGroupInput,
++    db: Session = Depends(get_db),
++    user: User = Depends(require_role("professor", "admin")),
++):
++    assessment_query = db.query(Assessment).filter(Assessment.id == assessment_id)
++    if user.role == Role.PROFESSOR:
++        assessment_query = assessment_query.filter(Assessment.owner_id == user.id)
++    assessment = assessment_query.first()
++    if assessment is None:
++        raise HTTPException(status_code=404, detail="Recurso não encontrado.")
++    require_assessment_mutation(db, user, assessment)
++
++    class_query = db.query(ClassGroup).filter(ClassGroup.id == payload.class_group_id)
++    if user.role == Role.PROFESSOR:
++        class_query = class_query.filter(ClassGroup.id.in_(_active_class_ids(db, user)))
++    if class_query.first() is None:
++        raise HTTPException(status_code=404, detail="Recurso não encontrado.")
++    assessment.class_group_id = payload.class_group_id
++    return _commit(db, assessment)
+diff --git a/core/app/tests/test_academic_authorization.py b/core/app/tests/test_academic_authorization.py
+new file mode 100644
+index 0000000..6626712
+--- /dev/null
++++ b/core/app/tests/test_academic_authorization.py
+@@ -0,0 +1,463 @@
++from datetime import datetime, timedelta
++
++import pytest
++
++import app.main as main_module
++from app.models import (
++    Answer,
++    Assessment,
++    ClassGroup,
++    CorrectionJob,
++    Course,
++    CourseDiscipline,
++    Discipline,
++    Enrollment,
++    JobStatus,
++    Organization,
++    ProfessorClassLink,
++    ProfessorRole,
++    Question,
++    Rubric,
++    Student,
++    User,
++)
++
++
++def _headers(token):
++    return {"Authorization": f"Bearer {token}"}
++
++
++def _user(db_session, email):
++    return db_session.query(User).filter_by(email=email).one()
++
++
++def _academic_context(db_session, suffix="one"):
++    organization = Organization(name=f"Organization {suffix}")
++    db_session.add(organization)
++    db_session.flush()
++    course = Course(organization_id=organization.id, name=f"Course {suffix}", code=f"COURSE-{suffix}")
++    discipline = Discipline(
++        organization_id=organization.id,
++        name=f"Discipline {suffix}",
++        code=f"DISC-{suffix}",
++    )
++    db_session.add_all([course, discipline])
++    db_session.flush()
++    course_discipline = CourseDiscipline(course_id=course.id, discipline_id=discipline.id)
++    db_session.add(course_discipline)
++    db_session.flush()
++    class_group = ClassGroup(
++        course_discipline_id=course_discipline.id,
++        period="2026-2",
++        code=f"GROUP-{suffix}",
++    )
++    student = Student(
++        organization_id=organization.id,
++        name=f"Student {suffix}",
++        external_id=f"STUDENT-{suffix}",
++    )
++    db_session.add_all([class_group, student])
++    db_session.commit()
++    return organization, course_discipline, class_group, student
++
++
++def _link_professor(
++    db_session,
++    professor,
++    class_group,
++    *,
++    role=ProfessorRole.RESPONSIBLE,
++    starts_at=None,
++    ends_at=None,
++):
++    link = ProfessorClassLink(
++        professor_id=professor.id,
++        class_group_id=class_group.id,
++        role=role,
++        starts_at=starts_at,
++        ends_at=ends_at,
++    )
++    db_session.add(link)
++    db_session.commit()
++    return link
++
++
++def test_active_professor_can_list_and_create_resources_in_own_class(
++    client, db_session, professor_token
++):
++    professor = _user(db_session, "professor@example.com")
++    _, _, class_group, student = _academic_context(db_session)
++    _link_professor(db_session, professor, class_group)
++    headers = _headers(professor_token)
++
++    response = client.get("/v1/class-groups", headers=headers)
++    assert response.status_code == 200, response.text
++    assert [item["id"] for item in response.json()] == [class_group.id]
++
++    response = client.post(
++        "/v1/enrollments",
++        headers=headers,
++        json={"class_group_id": class_group.id, "student_id": student.id},
++    )
++    assert response.status_code == 201, response.text
++    assert response.json()["class_group_id"] == class_group.id
++
++    response = client.post(
++        "/v1/assessments",
++        headers=headers,
++        json={"title": "Authorized assessment", "class_group_id": class_group.id},
++    )
++    assert response.status_code == 201, response.text
++    assert response.json()["class_group_id"] == class_group.id
++
++
++def test_professor_without_link_cannot_discover_or_use_another_class(client, db_session, professor_token):
++    _, _, class_group, student = _academic_context(db_session)
++    headers = _headers(professor_token)
++
++    response = client.get(f"/v1/class-groups/{class_group.id}", headers=headers)
++    assert response.status_code == 404, response.text
++
++    response = client.post(
++        "/v1/enrollments",
++        headers=headers,
++        json={"class_group_id": class_group.id, "student_id": student.id},
++    )
++    assert response.status_code == 404, response.text
++
++
++def test_collaborator_cannot_create_enrollment(client, db_session, professor_token):
++    professor = _user(db_session, "professor@example.com")
++    _, _, class_group, student = _academic_context(db_session)
++    _link_professor(db_session, professor, class_group, role=ProfessorRole.COLLABORATOR)
++
++    headers = _headers(professor_token)
++    existing_student = client.post(
++        "/v1/enrollments",
++        headers=headers,
++        json={"class_group_id": class_group.id, "student_id": student.id},
++    )
++    missing_student = client.post(
++        "/v1/enrollments",
++        headers=headers,
++        json={"class_group_id": class_group.id, "student_id": "missing-student"},
++    )
++
++    assert existing_student.status_code == missing_student.status_code == 403
++    assert existing_student.json() == missing_student.json()
++
++
++def test_professor_link_scope_hides_other_professor_link_and_admin_keeps_global_access(
++    client, db_session, professor_token, second_professor_token, admin_token
++):
++    second_professor = _user(db_session, "second.professor@example.com")
++    _, _, class_group, _ = _academic_context(db_session)
++    other_link = _link_professor(db_session, second_professor, class_group)
++
++    out_of_scope = client.get(
++        f"/v1/professor-class-links/{other_link.id}", headers=_headers(professor_token)
++    )
++    missing = client.get(
++        "/v1/professor-class-links/missing-link", headers=_headers(professor_token)
++    )
++    own = client.get(
++        f"/v1/professor-class-links/{other_link.id}", headers=_headers(second_professor_token)
++    )
++    admin = client.get(
++        f"/v1/professor-class-links/{other_link.id}", headers=_headers(admin_token)
++    )
++
++    assert out_of_scope.status_code == missing.status_code == 404
++    assert out_of_scope.json() == missing.json()
++    assert own.status_code == 200, own.text
++    assert admin.status_code == 200, admin.text
++
++
++@pytest.mark.parametrize(
++    ("academic_module_enabled", "expected_status"),
++    [(False, 201), (True, 422)],
++)
++def test_academic_module_flag_controls_creation_of_legacy_assessment_without_class(
++    client, professor_token, monkeypatch, academic_module_enabled, expected_status
++):
++    monkeypatch.setattr(main_module.settings, "academic_module_enabled", academic_module_enabled)
++
++    response = client.post(
++        "/v1/assessments",
++        headers=_headers(professor_token),
++        json={"title": f"Legacy flag {academic_module_enabled}"},
++    )
++
++    assert response.status_code == expected_status, response.text
++
++
++@pytest.mark.parametrize("academic_module_enabled", [False, True])
++def test_linked_assessment_creation_is_allowed_with_flag_on_or_off(
++    client, db_session, professor_token, monkeypatch, academic_module_enabled
++):
++    monkeypatch.setattr(main_module.settings, "academic_module_enabled", academic_module_enabled)
++    professor = _user(db_session, "professor@example.com")
++    _, _, class_group, _ = _academic_context(db_session, f"flag-{academic_module_enabled}")
++    _link_professor(db_session, professor, class_group)
++
++    response = client.post(
++        "/v1/assessments",
++        headers=_headers(professor_token),
++        json={"title": "Linked assessment", "class_group_id": class_group.id},
++    )
++
++    assert response.status_code == 201, response.text
++    assert response.json()["class_group_id"] == class_group.id
++
++
++@pytest.mark.parametrize("academic_module_enabled", [False, True])
++def test_linked_assessment_mutation_requires_active_link_regardless_of_flag(
++    client, db_session, professor_token, monkeypatch, academic_module_enabled
++):
++    monkeypatch.setattr(main_module.settings, "academic_module_enabled", academic_module_enabled)
++    professor = _user(db_session, "professor@example.com")
++    _, _, class_group, _ = _academic_context(db_session, f"mutation-{academic_module_enabled}")
++    assessment = Assessment(
++        title="Already linked",
++        owner_id=professor.id,
++        class_group_id=class_group.id,
++    )
++    db_session.add(assessment)
++    db_session.commit()
++
++    response = client.patch(
++        f"/v1/assessments/{assessment.id}",
++        headers=_headers(professor_token),
++        json={"title": "Forbidden without active link"},
++    )
++
++    assert response.status_code == 403, response.text
++
++
++def test_academic_routes_require_authentication(client):
++    assert client.get("/v1/class-groups").status_code == 401
++    assert client.post("/v1/enrollments", json={}).status_code == 401
++
++
++def test_out_of_scope_and_missing_resources_have_identical_status(
++    client, db_session, professor_token
++):
++    _, _, class_group, student = _academic_context(db_session)
++    enrollment = Enrollment(class_group_id=class_group.id, student_id=student.id)
++    db_session.add(enrollment)
++    db_session.commit()
++    headers = _headers(professor_token)
++
++    class_out_of_scope = client.get(f"/v1/class-groups/{class_group.id}", headers=headers)
++    class_missing = client.get("/v1/class-groups/missing-class", headers=headers)
++    enrollment_out_of_scope = client.get(f"/v1/enrollments/{enrollment.id}", headers=headers)
++    enrollment_missing = client.get("/v1/enrollments/missing-enrollment", headers=headers)
++
++    assert class_out_of_scope.status_code == class_missing.status_code == 404
++    assert enrollment_out_of_scope.status_code == enrollment_missing.status_code == 404
++
++
++def test_expired_link_does_not_authorize_new_operations(client, db_session, professor_token):
++    professor = _user(db_session, "professor@example.com")
++    _, _, class_group, _ = _academic_context(db_session)
++    _link_professor(
++        db_session,
++        professor,
++        class_group,
++        ends_at=datetime.utcnow() - timedelta(minutes=1),
++    )
++
++    response = client.post(
++        "/v1/assessments",
++        headers=_headers(professor_token),
++        json={"title": "Too late", "class_group_id": class_group.id},
++    )
++    assert response.status_code == 403, response.text
++
++
++def test_future_link_does_not_authorize_access_yet(client, db_session, professor_token):
++    professor = _user(db_session, "professor@example.com")
++    _, _, class_group, _ = _academic_context(db_session)
++    _link_professor(
++        db_session,
++        professor,
++        class_group,
++        starts_at=datetime.utcnow() + timedelta(days=1),
++    )
++
++    response = client.get(f"/v1/class-groups/{class_group.id}", headers=_headers(professor_token))
++    assert response.status_code == 404, response.text
++
++
++def test_admin_has_global_access_across_organizations_and_classes(client, db_session, admin_token):
++    first_organization, _, first_class, _ = _academic_context(db_session, "first")
++    second_organization, _, second_class, _ = _academic_context(db_session, "second")
++    headers = _headers(admin_token)
++
++    organizations = client.get("/v1/organizations", headers=headers)
++    assert organizations.status_code == 200, organizations.text
++    assert {item["id"] for item in organizations.json()} == {
++        first_organization.id,
++        second_organization.id,
++    }
++
++    classes = client.get("/v1/class-groups", headers=headers)
++    assert classes.status_code == 200, classes.text
++    assert {item["id"] for item in classes.json()} == {first_class.id, second_class.id}
++
++    for class_group in (first_class, second_class):
++        response = client.get(f"/v1/class-groups/{class_group.id}", headers=headers)
++        assert response.status_code == 200, response.text
++
++
++def test_legacy_assessment_remains_accessible_to_owner_and_admin(
++    client, db_session, professor_token, admin_token
++):
++    professor = _user(db_session, "professor@example.com")
++    assessment = Assessment(title="Legacy assessment", owner_id=professor.id)
++    db_session.add(assessment)
++    db_session.commit()
++
++    owner_response = client.get(
++        f"/v1/assessments/{assessment.id}", headers=_headers(professor_token)
++    )
++    assert owner_response.status_code == 200, owner_response.text
++    assert owner_response.json()["class_group_id"] is None
++
++    admin_response = client.get(f"/v1/assessments/{assessment.id}", headers=_headers(admin_token))
++    assert admin_response.status_code == 200, admin_response.text
++    assert admin_response.json()["id"] == assessment.id
++
++
++def test_expired_professor_can_read_but_not_edit_or_republish_linked_assessment(
++    client, db_session, professor_token
++):
++    professor = _user(db_session, "professor@example.com")
++    _, _, class_group, _ = _academic_context(db_session)
++    _link_professor(
++        db_session,
++        professor,
++        class_group,
++        ends_at=datetime.utcnow() - timedelta(minutes=1),
++    )
++    assessment = Assessment(
++        title="Previously linked assessment",
++        owner_id=professor.id,
++        class_group_id=class_group.id,
++    )
++    db_session.add(assessment)
++    db_session.commit()
++    headers = _headers(professor_token)
++
++    read_response = client.get(f"/v1/assessments/{assessment.id}", headers=headers)
++    assert read_response.status_code == 200, read_response.text
++
++    edit_response = client.patch(
++        f"/v1/assessments/{assessment.id}",
++        headers=headers,
++        json={"title": "Forbidden edit"},
++    )
++    assert edit_response.status_code == 403, edit_response.text
++
++    publish_response = client.post(f"/v1/assessments/{assessment.id}/publish", headers=headers)
++    assert publish_response.status_code == 403, publish_response.text
++
++
++def test_expired_professor_cannot_write_operational_class_flow(
++    client, db_session, professor_token
++):
++    professor = _user(db_session, "professor@example.com")
++    _, _, class_group, _ = _academic_context(db_session)
++    _link_professor(
++        db_session,
++        professor,
++        class_group,
++        ends_at=datetime.utcnow() - timedelta(minutes=1),
++    )
++    assessment = Assessment(
++        title="Expired operational flow",
++        owner_id=professor.id,
++        class_group_id=class_group.id,
++    )
++    db_session.add(assessment)
++    db_session.flush()
++    question = Question(
++        assessment_id=assessment.id,
++        statement="Question",
++        reference_answer="Reference",
++        max_score=1,
++    )
++    db_session.add(question)
++    db_session.flush()
++    answer = Answer(question_id=question.id, student_name_fake="Student", text="Answer")
++    rubric = Rubric(question_id=question.id, version=1, is_published=True)
++    db_session.add_all([answer, rubric])
++    db_session.flush()
++    job = CorrectionJob(
++        answer_id=answer.id,
++        rubric_id=rubric.id,
++        status=JobStatus.SUGERIDA,
++        attempt=1,
++    )
++    db_session.add(job)
++    db_session.commit()
++    headers = _headers(professor_token)
++
++    create_answer = client.post(
++        "/v1/answers",
++        headers=headers,
++        json={"question_id": question.id, "student_name_fake": "Other", "text": "Text"},
++    )
++    request_correction = client.post(f"/v1/answers/{answer.id}/corrections", headers=headers)
++    review = client.post(
++        f"/v1/corrections/{job.id}/reviews",
++        headers=headers,
++        json={"decision": "APPROVE", "criteria_scores": []},
++    )
++
++    assert create_answer.status_code == 403, create_answer.text
++    assert request_correction.status_code == 403, request_correction.text
++    assert review.status_code == 403, review.text
++
++
++def test_expired_current_class_link_blocks_assessment_reassignment(
++    client, db_session, professor_token
++):
++    professor = _user(db_session, "professor@example.com")
++    _, _, current_class, _ = _academic_context(db_session, "current")
++    _, _, new_class, _ = _academic_context(db_session, "new")
++    _link_professor(
++        db_session,
++        professor,
++        current_class,
++        ends_at=datetime.utcnow() - timedelta(minutes=1),
++    )
++    _link_professor(db_session, professor, new_class)
++    assessment = Assessment(
++        title="Cannot reassign",
++        owner_id=professor.id,
++        class_group_id=current_class.id,
++    )
++    db_session.add(assessment)
++    db_session.commit()
++
++    response = client.post(
++        f"/v1/assessments/{assessment.id}/class-group",
++        headers=_headers(professor_token),
++        json={"class_group_id": new_class.id},
++    )
++
++    assert response.status_code == 403, response.text
++
++
++def test_duplicate_class_group_returns_integrity_conflict(client, db_session, admin_token):
++    _, course_discipline, class_group, _ = _academic_context(db_session)
++    payload = {
++        "course_discipline_id": course_discipline.id,
++        "period": class_group.period,
++        "code": class_group.code,
++    }
++
++    response = client.post("/v1/class-groups", headers=_headers(admin_token), json=payload)
++    assert response.status_code == 409, response.text
++    assert response.json()["detail"] == "Conflito de integridade."
+diff --git a/core/app/tests/test_academic_structure.py b/core/app/tests/test_academic_structure.py
+new file mode 100644
+index 0000000..d1a4318
+--- /dev/null
++++ b/core/app/tests/test_academic_structure.py
+@@ -0,0 +1,142 @@
++from datetime import datetime, timedelta
++
++import pytest
++from sqlalchemy.exc import IntegrityError
++
++from app.models import (
++    Assessment,
++    ClassGroup,
++    Course,
++    CourseDiscipline,
++    Discipline,
++    Enrollment,
++    EnrollmentStatus,
++    Organization,
++    ProfessorClassLink,
++    ProfessorRole,
++    Role,
++    Student,
++    User,
++)
++
++
++def _base_hierarchy(db_session):
++    organization = Organization(name="Instituição Fictícia")
++    db_session.add(organization)
++    db_session.flush()
++    course = Course(organization_id=organization.id, name="Engenharia", code="ENG")
++    discipline = Discipline(organization_id=organization.id, name="Cálculo", code="CALC")
++    db_session.add_all([course, discipline])
++    db_session.flush()
++    association = CourseDiscipline(course_id=course.id, discipline_id=discipline.id)
++    db_session.add(association)
++    db_session.flush()
++    class_group = ClassGroup(
++        course_discipline_id=association.id, period="2026-2", code="T01"
++    )
++    student = Student(
++        organization_id=organization.id, name="Aluno Fictício", external_id="STU-001"
++    )
++    professor = User(
++        email="academic.professor@example.com",
++        password_hash="not-a-real-password",
++        role=Role.PROFESSOR,
++    )
++    db_session.add_all([class_group, student, professor])
++    db_session.flush()
++    return organization, course, discipline, association, class_group, student, professor
++
++
++def test_complete_academic_hierarchy(db_session):
++    *_, class_group, student, professor = _base_hierarchy(db_session)
++    enrollment = Enrollment(class_group_id=class_group.id, student_id=student.id)
++    link = ProfessorClassLink(
++        professor_id=professor.id,
++        class_group_id=class_group.id,
++        role=ProfessorRole.RESPONSIBLE,
++    )
++    db_session.add_all([enrollment, link])
++    db_session.commit()
++
++    assert enrollment.status is EnrollmentStatus.ACTIVE
++    assert enrollment.enrolled_at is not None
++    assert link.active is True
++    assert db_session.get(ProfessorClassLink, link.id) is link
++
++
++def test_duplicate_class_group_identity_is_rejected(db_session):
++    *_, association, class_group, _, _ = _base_hierarchy(db_session)
++    db_session.add(
++        ClassGroup(
++            course_discipline_id=association.id,
++            period=class_group.period,
++            code=class_group.code,
++        )
++    )
++    with pytest.raises(IntegrityError):
++        db_session.commit()
++
++
++def test_student_can_be_active_in_more_than_one_class_group(db_session):
++    *_, association, first_group, student, _ = _base_hierarchy(db_session)
++    second_group = ClassGroup(
++        course_discipline_id=association.id, period="2026-2", code="T02"
++    )
++    db_session.add(second_group)
++    db_session.flush()
++    db_session.add_all(
++        [
++            Enrollment(class_group_id=first_group.id, student_id=student.id),
++            Enrollment(class_group_id=second_group.id, student_id=student.id),
++        ]
++    )
++    db_session.commit()
++
++    enrollments = db_session.query(Enrollment).filter_by(student_id=student.id).all()
++    assert len(enrollments) == 2
++    assert {item.class_group_id for item in enrollments} == {first_group.id, second_group.id}
++
++
++def test_discipline_can_belong_to_more_than_one_course(db_session):
++    organization, _, discipline, _, _, _, _ = _base_hierarchy(db_session)
++    second_course = Course(organization_id=organization.id, name="Computação", code="COMP")
++    db_session.add(second_course)
++    db_session.flush()
++    db_session.add(CourseDiscipline(course_id=second_course.id, discipline_id=discipline.id))
++    db_session.commit()
++
++    associations = db_session.query(CourseDiscipline).filter_by(discipline_id=discipline.id).all()
++    assert len(associations) == 2
++
++
++def test_expired_professor_link_is_persisted(db_session):
++    *_, class_group, _, professor = _base_hierarchy(db_session)
++    expired_at = datetime.utcnow() - timedelta(days=1)
++    link = ProfessorClassLink(
++        professor_id=professor.id,
++        class_group_id=class_group.id,
++        role=ProfessorRole.COLLABORATOR,
++        ends_at=expired_at,
++    )
++    db_session.add(link)
++    db_session.commit()
++    db_session.expire_all()
++
++    persisted = db_session.get(ProfessorClassLink, link.id)
++    assert persisted is not None
++    assert persisted.ends_at == expired_at
++
++
++def test_legacy_assessment_without_class_group_remains_valid(db_session):
++    professor = User(
++        email="legacy.owner@example.com",
++        password_hash="not-a-real-password",
++        role=Role.PROFESSOR,
++    )
++    db_session.add(professor)
++    db_session.flush()
++    assessment = Assessment(title="Avaliação legada", owner_id=professor.id)
++    db_session.add(assessment)
++    db_session.commit()
++
++    assert assessment.class_group_id is None
+diff --git a/docs/governance/evidence/AV-S03/AC-07-AC-09_revisao_arquitetura.md b/docs/governance/evidence/AV-S03/AC-07-AC-09_revisao_arquitetura.md
+new file mode 100644
+index 0000000..9796d01
+--- /dev/null
++++ b/docs/governance/evidence/AV-S03/AC-07-AC-09_revisao_arquitetura.md
+@@ -0,0 +1,57 @@
++# Revisão de arquitetura AC-07 / AC-09 — AV-S03
++
++Data: 2026-09-28
++Escopo: implementação reconstruída em `local/av-s03-recuperacao`, base `66c95201daf893fa7b2852e0d94b20314f8d8f34`
++Revisor factual: Hermes (inspeção direta de código e contrato)
++
++## 1. Pergunta avaliada
++
++Confirmar que `Organization` foi implementada como entidade de domínio da estrutura acadêmica, não como fronteira implícita de isolamento multi-tenant; e que o contrato/documentação tornam essa distinção explícita.
++
++## 2. Evidência do modelo
++
++- `User` (`core/app/models.py:62-69`) não possui `organization_id` nem qualquer atributo de tenant.
++- `Organization` é entidade pai de `Course`, `Discipline` e `Student` por FK de domínio.
++- `ClassGroup` referencia `CourseDiscipline`, que referencia `Course` + `Discipline`.
++- `ProfessorClassLink` referencia diretamente `User` + `ClassGroup` e contém papel/estado/vigência.
++- Não existe tabela de membership de usuário→organização nem claim de organização no JWT.
++
++Conclusão: o modelo não representa isolamento multi-tenant.
++
++## 3. Evidência das queries de autorização
++
++A busca estática e a leitura de `core/app/routers/academic.py` encontraram usos de `organization_id` nas queries apenas em:
++
++1. `_organization_ids_for_user` (`academic.py:217-223`): deriva organizações a partir dos vínculos ativos reais do professor:
++   `ProfessorClassLink` → `ClassGroup` → `CourseDiscipline` → `Course.organization_id`.
++2. `_course_scope` (`academic.py:327-328`): restringe cursos às organizações derivadas por `_organization_ids_for_user`.
++3. `_discipline_scope` (`academic.py:331-332`): restringe disciplinas às mesmas organizações derivadas.
++
++Não existe query que faça `resource.organization_id == user.organization_id`, porque `User` não possui `organization_id`. Não existe middleware, dependency ou policy global que aplique filtro de organização a todas as queries. O escopo nasce do vínculo professor↔turma, conforme a matriz aprovada, e a organização é apenas o ancestral estrutural necessário para navegar Curso/Disciplina/Turma.
++
++`Student` não usa organização como fronteira de autorização: `_student_scope` filtra por `Enrollment.class_group_id` dentro das turmas ativas do professor, conforme a decisão que separa identidade global do aluno de matrícula.
++
++Administradores ignoram os filtros de escopo de professor e mantêm acesso global, como demonstrado pelos testes de `BL-AV-2-03` homologados.
++
++## 4. Risco de ambiguidade documental identificado e corrigido
++
++Antes desta revisão, `docs/contracts/openapi.yaml` listava os endpoints acadêmicos, mas não dizia explicitamente que `Organization` não é tenant. Isso deixava margem para interpretação indevida futura.
++
++Correção documental aplicada em 2026-09-28: a descrição do contrato agora declara explicitamente:
++
++- `Organization` é entidade de domínio acadêmico;
++- não é fronteira de isolamento multi-tenant;
++- não há requisito aprovado de multi-tenancy;
++- escopo de professor é derivado de vínculo ativo de turma;
++- admin mantém acesso global.
++
++Nenhuma alteração de código foi necessária para AC-07/AC-09.
++
++## 5. Veredito
++
++- AC-07: ATENDIDO. A implementação não trata Organização como tenant, e nenhuma query é globalizada implicitamente por `organization_id` sem vínculo real de turma.
++- AC-09: ATENDIDO após a correção documental em `docs/contracts/openapi.yaml`; contrato e este registro distinguem estrutura acadêmica de multi-tenancy.
++
++## 6. Limite desta conclusão
++
++Esta revisão prova o comportamento do código e contrato atuais da AV-S03. Não aprova uma arquitetura multi-tenant futura e não deve ser reinterpretada como autorização para introduzir isolamento por organização sem nova decisão/ADR.
+diff --git a/docs/governance/evidence/AV-S03/AC-10-scripts/ac10_scenarios.py b/docs/governance/evidence/AV-S03/AC-10-scripts/ac10_scenarios.py
+new file mode 100644
+index 0000000..0caef65
+--- /dev/null
++++ b/docs/governance/evidence/AV-S03/AC-10-scripts/ac10_scenarios.py
+@@ -0,0 +1,169 @@
++"""
++Continuação da validação AC-10: cria 2 avaliações por turma e exercita a matriz
++de autorização real com o denominador aprovado, via HTTP real (TestClient).
++"""
++import os
++import sys
++import json
++
++os.environ["DATABASE_URL"] = "postgresql+psycopg2://rafaeloliveira@/avalia_ac10_validacao?host=/tmp&port=55437"
++os.environ["JWT_SECRET"] = "ac10-validacao-secret"
++os.environ["AI_ENGINE_URL"] = "http://localhost:9999"
++os.environ["ACADEMIC_MODULE_ENABLED"] = "true"
++
++# Execute a partir do diretório core/ do projeto (com o virtualenv do Core ativado).
++sys.path.insert(0, os.getcwd())
++
++from fastapi.testclient import TestClient  # noqa: E402
++from sqlalchemy import create_engine  # noqa: E402
++from sqlalchemy.orm import sessionmaker  # noqa: E402
++
++import app.main as main_module  # noqa: E402
++from app import db as db_module  # noqa: E402
++
++engine = create_engine(os.environ["DATABASE_URL"], future=True)
++SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
++
++
++def override_get_db():
++    db = SessionLocal()
++    try:
++        yield db
++    finally:
++        db.close()
++
++
++main_module.app.dependency_overrides[db_module.get_db] = override_get_db
++client = TestClient(main_module.app)
++
++with open("/tmp/av_s03_ac10_seed_ids.json") as f:
++    ids = json.load(f)
++
++def auth(token):
++    return {"Authorization": f"Bearer {token}"}
++
++admin_token = ids["admin_token"]
++prof_a_token = ids["prof_a_token"]
++prof_b_token = ids["prof_b_token"]
++class_1_id = ids["class_1_id"]
++class_2_id = ids["class_2_id"]
++
++RESULTS = []
++def log(scenario, ok, detail):
++    RESULTS.append({"scenario": scenario, "ok": ok, "detail": detail})
++    status = "PASS" if ok else "FAIL"
++    print(f"[{status}] {scenario}: {detail}")
++
++# ---------------------------------------------------------------------------
++# 6. 2 avaliações por turma (denominador: 2 avaliações/turma)
++#    prof_a (RESPONSIBLE turma1) cria 2 avaliações na turma 1
++# ---------------------------------------------------------------------------
++assessment_ids_t1 = []
++for i in range(2):
++    payload = {
++        "title": f"Avaliação T1 #{i+1}",
++        "class_group_id": class_1_id,
++        "question": {"statement": f"Enunciado {i+1}", "reference_answer": "Resposta de referência", "max_score": 10},
++    }
++    r = client.post("/v1/assessments", json=payload, headers=auth(prof_a_token))
++    assert r.status_code == 201, f"criação avaliação t1 #{i+1} falhou: {r.status_code} {r.text}"
++    assessment_ids_t1.append(r.json()["id"])
++
++log("estrutura: 2 avaliações na turma 1 (por prof_a RESPONSIBLE)", True, f"ids={assessment_ids_t1}")
++
++# ---------------------------------------------------------------------------
++# 7. CENÁRIO: prof_b tem vínculo EXPIRADO na turma 2 -> NÃO pode criar avaliação nova lá
++# ---------------------------------------------------------------------------
++payload_t2 = {
++    "title": "Avaliação T2 tentativa com vínculo expirado",
++    "class_group_id": class_2_id,
++    "question": {"statement": "Enunciado", "reference_answer": "Resposta", "max_score": 10},
++}
++r = client.post("/v1/assessments", json=payload_t2, headers=auth(prof_b_token))
++ok = r.status_code == 403
++log("cenário: vínculo EXPIRADO não concede acesso a operação NOVA", ok,
++    f"prof_b tentou criar avaliação na turma 2 (vínculo expirado) -> status {r.status_code} (esperado 403)")
++
++# ---------------------------------------------------------------------------
++# 8. CENÁRIO: admin cria avaliação na turma 2 mesmo sem vínculo (acesso global)
++# ---------------------------------------------------------------------------
++payload_t2_admin = {
++    "title": "Avaliação T2 criada pelo admin",
++    "class_group_id": class_2_id,
++    "question": {"statement": "Enunciado admin", "reference_answer": "Resposta admin", "max_score": 10},
++}
++r = client.post("/v1/assessments", json=payload_t2_admin, headers=auth(admin_token))
++ok = r.status_code == 201
++assessment_t2_admin_id = r.json().get("id") if ok else None
++log("cenário: admin mantém acesso global (sem vínculo de turma)", ok,
++    f"admin criou avaliação na turma 2 -> status {r.status_code} (esperado 201)")
++
++# segunda avaliação na turma 2, pelo admin, para completar o denominador (2 avaliações/turma)
++r2 = client.post("/v1/assessments", json={
++    "title": "Avaliação T2 #2 criada pelo admin",
++    "class_group_id": class_2_id,
++    "question": {"statement": "Enunciado 2", "reference_answer": "Resposta 2", "max_score": 10},
++}, headers=auth(admin_token))
++ok2 = r2.status_code == 201
++log("estrutura: 2 avaliações na turma 2 (via admin, dado vínculo expirado de prof_b)", ok2,
++    f"status={r2.status_code}")
++
++# ---------------------------------------------------------------------------
++# 9. CENÁRIO: prof_b (COLLABORATOR na turma 1) NÃO pode editar avaliação de prof_a
++#    (colaborador não herda edição de avaliação alheia)
++# ---------------------------------------------------------------------------
++target_assessment_id = assessment_ids_t1[0]
++r = client.get(f"/v1/assessments/{target_assessment_id}", headers=auth(prof_b_token))
++# NOTA: a implementação atual (BL-AV-2-03 homologado) restringe leitura de avaliação por
++# ownership estrito (owner_id == user.id) para qualquer professor, sem exceção para
++# colaborador de turma. Isso é consistente com a matriz aprovada (seção 5.1 da sprint):
++# "própria ou acesso explicitamente concedido pela política de papel" — e nenhuma política
++# de papel concede leitura de avaliação alheia a colaboradores nesta implementação.
++# A expectativa correta é 403, não 200 (correção aplicada após primeira execução real
++# revelar que a hipótese inicial deste script estava desalinhada com o comportamento
++# homologado, não com um defeito do código).
++read_blocked = r.status_code == 403
++log("cenário: COLLABORATOR não lê avaliação alheia da turma vinculada (ownership estrito, comportamento homologado em BL-AV-2-03)", read_blocked,
++    f"prof_b (COLLABORATOR turma1) tentou ler avaliação de prof_a -> status {r.status_code} (esperado 403, ownership estrito)")
++
++# tentativa de publicar (mutação) por um colaborador que não é dono
++r = client.post(f"/v1/assessments/{target_assessment_id}/publish", headers=auth(prof_b_token))
++mutation_blocked = r.status_code == 403
++log("cenário: COLLABORATOR não herda edição/mutação de avaliação alheia", mutation_blocked,
++    f"prof_b tentou publicar avaliação de prof_a -> status {r.status_code} (esperado 403)")
++
++# ---------------------------------------------------------------------------
++# 10. CENÁRIO: prof_a (RESPONSIBLE turma1) NÃO acessa recursos da turma 2 (sem vínculo lá)
++# ---------------------------------------------------------------------------
++r = client.get(f"/v1/assessments/{assessment_t2_admin_id}", headers=auth(prof_a_token)) if assessment_t2_admin_id else None
++if r is not None:
++    blocked = r.status_code in (403, 404)
++    log("cenário: professor sem vínculo na turma não acessa avaliação alheia daquela turma", blocked,
++        f"prof_a (sem vínculo turma2) tentou ler avaliação da turma2 -> status {r.status_code} (esperado 403/404)")
++
++# ---------------------------------------------------------------------------
++# 11. CENÁRIO: aluno em múltiplas turmas aparece corretamente em ambas as listagens de alunos
++#     do(s) professor(es) vinculados a cada turma
++# ---------------------------------------------------------------------------
++r = client.get("/v1/students", headers=auth(prof_a_token))
++prof_a_students = r.json() if r.status_code == 200 else []
++shared_in_prof_a = any(s["id"] == ids["shared_student_id"] for s in prof_a_students)
++log("cenário: aluno compartilhado visível ao professor da turma 1", shared_in_prof_a,
++    f"prof_a vê {len(prof_a_students)} alunos; aluno compartilhado presente={shared_in_prof_a}")
++
++r = client.get("/v1/students", headers=auth(admin_token))
++admin_students = r.json() if r.status_code == 200 else []
++log("cenário: admin vê todos os alunos (escopo global)", len(admin_students) == 19,
++    f"admin vê {len(admin_students)} alunos únicos (esperado 19: 9+9+1 compartilhado)")
++
++# ---------------------------------------------------------------------------
++# Resumo
++# ---------------------------------------------------------------------------
++with open("/tmp/av_s03_ac10_results_part2.json", "w") as f:
++    json.dump(RESULTS, f, indent=2)
++
++total = len(RESULTS)
++passed = sum(1 for r in RESULTS if r["ok"])
++print(f"\n=== RESUMO PARTE 2: {passed}/{total} cenários PASS ===")
++if passed != total:
++    sys.exit(1)
+diff --git a/docs/governance/evidence/AV-S03/AC-10-scripts/ac10_seed.py b/docs/governance/evidence/AV-S03/AC-10-scripts/ac10_seed.py
+new file mode 100644
+index 0000000..6a39773
+--- /dev/null
++++ b/docs/governance/evidence/AV-S03/AC-10-scripts/ac10_seed.py
+@@ -0,0 +1,251 @@
++"""
++Validação real AC-10 (denominador AV-S03) em PostgreSQL isolado.
++
++Denominador aprovado por Rafael em 2026-09-28 (DEC-AV-007, restrito à AV-S03):
++- 1 organização
++- 1 curso
++- 2 disciplinas
++- 2 turmas
++- 2 professores
++- 10 alunos matriculados por turma
++- 2 avaliações por turma
++
++Cenários adicionais exigidos pelo texto vigente da sprint (§4.2, aprovados em 2026-09-24,
++não removidos em 2026-09-28):
++- aluno em mais de uma turma
++- disciplina em mais de um curso
++- professores com permissões distintas (RESPONSIBLE vs COLLABORATOR vs sem vínculo)
++- vínculo expirado (ends_at no passado)
++
++Este script usa FastAPI TestClient sobre o app real, com DATABASE_URL apontando para o
++PostgreSQL isolado (não SQLite), exercitando os endpoints HTTP reais (não chamadas diretas
++de função), e login real com JWT real.
++"""
++import os
++import sys
++from datetime import datetime, timedelta
++
++os.environ["DATABASE_URL"] = "postgresql+psycopg2://rafaeloliveira@/avalia_ac10_validacao?host=/tmp&port=55437"
++os.environ["JWT_SECRET"] = "ac10-validacao-secret"
++os.environ["AI_ENGINE_URL"] = "http://localhost:9999"
++os.environ["ACADEMIC_MODULE_ENABLED"] = "true"
++
++# Execute a partir do diretório core/ do projeto (com o virtualenv do Core ativado),
++# não do diretório onde este script está armazenado (evidência em
++# docs/governance/evidence/AV-S03/AC-10-scripts/). O import de `app` abaixo depende de
++# `core/` estar no sys.path, o que só ocorre executando com cwd=core/.
++sys.path.insert(0, os.getcwd())
++
++from fastapi.testclient import TestClient  # noqa: E402
++from sqlalchemy import create_engine, text  # noqa: E402
++from sqlalchemy.orm import sessionmaker  # noqa: E402
++
++import app.main as main_module  # noqa: E402
++from app.db import Base  # noqa: E402
++from app.models import Role, User, ProfessorRole, EnrollmentStatus  # noqa: E402
++from app.security import hash_password  # noqa: E402
++
++RESULTS = []
++
++
++def log(scenario, ok, detail):
++    RESULTS.append({"scenario": scenario, "ok": ok, "detail": detail})
++    status = "PASS" if ok else "FAIL"
++    print(f"[{status}] {scenario}: {detail}")
++
++
++engine = create_engine(os.environ["DATABASE_URL"], future=True)
++
++# Limpa dados de execuções anteriores do script (schema já criado via alembic upgrade head)
++with engine.begin() as conn:
++    for tbl in [
++        "audit_events", "human_reviews", "criterion_scores", "ai_executions",
++        "correction_jobs", "answers", "rubric_criteria", "rubrics", "questions",
++        "assessments", "enrollments", "professor_class_links", "class_groups",
++        "course_disciplines", "students", "disciplines", "courses", "organizations",
++        "users",
++    ]:
++        conn.execute(text(f"TRUNCATE TABLE {tbl} RESTART IDENTITY CASCADE"))
++
++SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
++
++
++def override_get_db():
++    db = SessionLocal()
++    try:
++        yield db
++    finally:
++        db.close()
++
++
++from app import db as db_module  # noqa: E402
++main_module.app.dependency_overrides[db_module.get_db] = override_get_db
++
++client = TestClient(main_module.app)
++
++# ---------------------------------------------------------------------------
++# 1. Seed base: admin + 2 professores
++# ---------------------------------------------------------------------------
++session = SessionLocal()
++admin = User(email="admin.ac10@avalia-platform.example", password_hash=hash_password("Admin123!"), role=Role.ADMIN)
++prof_a = User(email="prof.a.ac10@avalia-platform.example", password_hash=hash_password("ProfA123!"), role=Role.PROFESSOR)
++prof_b = User(email="prof.b.ac10@avalia-platform.example", password_hash=hash_password("ProfB123!"), role=Role.PROFESSOR)
++session.add_all([admin, prof_a, prof_b])
++session.commit()
++session.refresh(admin)
++session.refresh(prof_a)
++session.refresh(prof_b)
++session.close()
++
++def login(email, password):
++    r = client.post("/v1/auth/login", json={"email": email, "password": password})
++    assert r.status_code == 200, f"login failed for {email}: {r.status_code} {r.text}"
++    return r.json()["access_token"]
++
++admin_token = login("admin.ac10@avalia-platform.example", "Admin123!")
++prof_a_token = login("prof.a.ac10@avalia-platform.example", "ProfA123!")
++prof_b_token = login("prof.b.ac10@avalia-platform.example", "ProfB123!")
++
++def auth(token):
++    return {"Authorization": f"Bearer {token}"}
++
++log("login admin/prof_a/prof_b", True, "3 logins reais via /v1/auth/login, JWT emitido")
++
++# ---------------------------------------------------------------------------
++# 2. Estrutura acadêmica: 1 organização, 1 curso, 2 disciplinas
++#    (segunda disciplina em curso adicional para cobrir "disciplina em mais de um curso")
++# ---------------------------------------------------------------------------
++r = client.post("/v1/organizations", json={"name": "Instituto AC-10"}, headers=auth(admin_token))
++assert r.status_code == 201, r.text
++org_id = r.json()["id"]
++
++r = client.post("/v1/courses", json={"organization_id": org_id, "name": "Engenharia de Software", "code": "ENG-SOFT"}, headers=auth(admin_token))
++assert r.status_code == 201, r.text
++course_1_id = r.json()["id"]
++
++# curso adicional apenas para provar "disciplina em mais de um curso" via segunda associação curricular
++r = client.post("/v1/courses", json={"organization_id": org_id, "name": "Ciência da Computação", "code": "CIENCIA-COMP"}, headers=auth(admin_token))
++assert r.status_code == 201, r.text
++course_2_id = r.json()["id"]
++
++r = client.post("/v1/disciplines", json={"organization_id": org_id, "name": "Estruturas de Dados", "code": "EDA-01"}, headers=auth(admin_token))
++assert r.status_code == 201, r.text
++disc_1_id = r.json()["id"]
++
++r = client.post("/v1/disciplines", json={"organization_id": org_id, "name": "Banco de Dados", "code": "BD-01"}, headers=auth(admin_token))
++assert r.status_code == 201, r.text
++disc_2_id = r.json()["id"]
++
++log("estrutura: 1 org, 2 cursos (1 principal + 1 para o cenário), 2 disciplinas", True,
++    f"org={org_id} course_1={course_1_id} course_2={course_2_id} disc_1={disc_1_id} disc_2={disc_2_id}")
++
++# associação curricular: disciplina 1 aparece em AMBOS os cursos -> "disciplina em mais de um curso"
++r = client.post("/v1/course-disciplines", json={"course_id": course_1_id, "discipline_id": disc_1_id}, headers=auth(admin_token))
++assert r.status_code == 201, r.text
++cd_1_id = r.json()["id"]
++
++r = client.post("/v1/course-disciplines", json={"course_id": course_2_id, "discipline_id": disc_1_id}, headers=auth(admin_token))
++assert r.status_code == 201, r.text
++cd_1_in_course_2_id = r.json()["id"]
++
++r = client.post("/v1/course-disciplines", json={"course_id": course_1_id, "discipline_id": disc_2_id}, headers=auth(admin_token))
++assert r.status_code == 201, r.text
++cd_2_id = r.json()["id"]
++
++log("cenário: disciplina em mais de um curso", True,
++    f"disciplina {disc_1_id} associada a course_1={course_1_id} (cd={cd_1_id}) e course_2={course_2_id} (cd={cd_1_in_course_2_id})")
++
++# ---------------------------------------------------------------------------
++# 3. 2 turmas (denominador principal usa apenas course_1/cd_1 e cd_2)
++# ---------------------------------------------------------------------------
++r = client.post("/v1/class-groups", json={"course_discipline_id": cd_1_id, "period": "2026-2", "code": "T01"}, headers=auth(admin_token))
++assert r.status_code == 201, r.text
++class_1_id = r.json()["id"]
++
++r = client.post("/v1/class-groups", json={"course_discipline_id": cd_2_id, "period": "2026-2", "code": "T02"}, headers=auth(admin_token))
++assert r.status_code == 201, r.text
++class_2_id = r.json()["id"]
++
++log("estrutura: 2 turmas", True, f"class_1={class_1_id} class_2={class_2_id}")
++
++# ---------------------------------------------------------------------------
++# 4. Vínculos professor-turma com permissões DISTINTAS:
++#    - prof_a: RESPONSIBLE na turma 1, sem vínculo na turma 2
++#    - prof_b: COLLABORATOR na turma 1 (permissão distinta de prof_a), RESPONSIBLE expirado na turma 2
++# ---------------------------------------------------------------------------
++session = SessionLocal()
++from app.models import ProfessorClassLink
++
++link_a_t1 = ProfessorClassLink(professor_id=prof_a.id, class_group_id=class_1_id, role=ProfessorRole.RESPONSIBLE, active=True)
++link_b_t1 = ProfessorClassLink(professor_id=prof_b.id, class_group_id=class_1_id, role=ProfessorRole.COLLABORATOR, active=True)
++# vínculo EXPIRADO de prof_b na turma 2 (ends_at no passado)
++link_b_t2_expired = ProfessorClassLink(
++    professor_id=prof_b.id, class_group_id=class_2_id, role=ProfessorRole.RESPONSIBLE,
++    active=True, starts_at=datetime.utcnow() - timedelta(days=60), ends_at=datetime.utcnow() - timedelta(days=1),
++)
++session.add_all([link_a_t1, link_b_t1, link_b_t2_expired])
++session.commit()
++session.close()
++
++log("cenário: professores com permissões distintas", True,
++    "prof_a=RESPONSIBLE turma1 (sem vínculo turma2); prof_b=COLLABORATOR turma1 + RESPONSIBLE EXPIRADO turma2")
++
++# ---------------------------------------------------------------------------
++# 5. 10 alunos por turma (20 no total), incluindo 1 aluno em AMBAS as turmas
++# ---------------------------------------------------------------------------
++student_ids_t1 = []
++student_ids_t2 = []
++
++# aluno compartilhado entre as duas turmas -> cenário "aluno em mais de uma turma"
++r = client.post("/v1/students", json={"organization_id": org_id, "name": "Aluno Compartilhado Multi-Turma", "external_id": "MAT-MULTI-0001"}, headers=auth(admin_token))
++assert r.status_code == 201, r.text
++shared_student_id = r.json()["id"]
++
++for i in range(9):
++    r = client.post("/v1/students", json={"organization_id": org_id, "name": f"Aluno T1 {i+1}", "external_id": f"MAT-T1-{i+1:04d}"}, headers=auth(admin_token))
++    assert r.status_code == 201, r.text
++    student_ids_t1.append(r.json()["id"])
++student_ids_t1.append(shared_student_id)  # completa 10 na turma 1
++
++for i in range(9):
++    r = client.post("/v1/students", json={"organization_id": org_id, "name": f"Aluno T2 {i+1}", "external_id": f"MAT-T2-{i+1:04d}"}, headers=auth(admin_token))
++    assert r.status_code == 201, r.text
++    student_ids_t2.append(r.json()["id"])
++student_ids_t2.append(shared_student_id)  # completa 10 na turma 2 (mesmo aluno)
++
++assert len(student_ids_t1) == 10 and len(student_ids_t2) == 10
++assert shared_student_id in student_ids_t1 and shared_student_id in student_ids_t2
++
++log("estrutura: 10 alunos matriculados por turma (20 registros de matrícula, 19 alunos únicos)", True,
++    f"aluno compartilhado={shared_student_id} presente em ambas as turmas")
++
++for sid in student_ids_t1:
++    r = client.post("/v1/enrollments", json={"class_group_id": class_1_id, "student_id": sid, "status": "ACTIVE"}, headers=auth(admin_token))
++    assert r.status_code == 201, f"enrollment t1 failed for {sid}: {r.text}"
++
++for sid in student_ids_t2:
++    r = client.post("/v1/enrollments", json={"class_group_id": class_2_id, "student_id": sid, "status": "ACTIVE"}, headers=auth(admin_token))
++    assert r.status_code == 201, f"enrollment t2 failed for {sid}: {r.text}"
++
++log("cenário: aluno em mais de uma turma", True,
++    f"aluno {shared_student_id} matriculado ACTIVE em class_1={class_1_id} e class_2={class_2_id}")
++
++print("\n=== SEED CONCLUÍDO — prosseguindo para validações de autorização ===\n")
++
++import json
++with open("/tmp/av_s03_ac10_seed_ids.json", "w") as f:
++    json.dump({
++        "org_id": org_id, "course_1_id": course_1_id, "course_2_id": course_2_id,
++        "disc_1_id": disc_1_id, "disc_2_id": disc_2_id,
++        "cd_1_id": cd_1_id, "cd_1_in_course_2_id": cd_1_in_course_2_id, "cd_2_id": cd_2_id,
++        "class_1_id": class_1_id, "class_2_id": class_2_id,
++        "shared_student_id": shared_student_id,
++        "student_ids_t1": student_ids_t1, "student_ids_t2": student_ids_t2,
++        "admin_token": admin_token, "prof_a_token": prof_a_token, "prof_b_token": prof_b_token,
++    }, f)
++
++with open("/tmp/av_s03_ac10_results.json", "w") as f:
++    json.dump(RESULTS, f, indent=2)
++
++print(f"IDs salvos em /tmp/av_s03_ac10_seed_ids.json")
++print(f"Resultados parciais salvos em /tmp/av_s03_ac10_results.json")
+diff --git a/docs/governance/evidence/AV-S03/AC-10_validacao_denominador.md b/docs/governance/evidence/AV-S03/AC-10_validacao_denominador.md
+new file mode 100644
+index 0000000..822231d
+--- /dev/null
++++ b/docs/governance/evidence/AV-S03/AC-10_validacao_denominador.md
+@@ -0,0 +1,101 @@
++# Validação AC-10 — denominador da AV-S03 executado em ambiente isolado
++
++Data: 2026-09-28
++Decisão base: `DEC-AV-007` (denominador reconfirmado por Rafael em 2026-09-28, restrito à
++validação funcional da AV-S03, sem estabelecer capacidade/desempenho/dimensionamento de
++produção, sem resolver `DEC-AV-007` para a trilha completa).
++
++## 1. Ambiente
++
++- PostgreSQL 16.15 isolado, instância dedicada (`initdb` própria, porta 55437, socket em `/tmp`,
++  fora de qualquer ambiente do projeto e de `avalia_dev`);
++- banco `avalia_ac10_validacao`, schema aplicado via `alembic upgrade head` (mesma cadeia de
++  migrações usada pela suíte homologada: `e1b02279b1a5` → `7b1d6d853f20` → `c4a8b2d91e37`);
++- execução via FastAPI `TestClient` sobre o app real (`app.main.app`), com `DATABASE_URL`
++  apontando para o Postgres isolado (não SQLite), login real via `/v1/auth/login` com JWT real
++  emitido pelo backend, e todas as operações via endpoints HTTP reais (não chamadas diretas de
++  função/ORM, exceto o seed inicial de usuários e vínculos, que usa a sessão diretamente por não
++  existir endpoint de cadastro de usuário/vínculo fora do fluxo administrativo already coberto
++  pela suíte homologada).
++- scripts de execução: `docs/governance/evidence/AV-S03/AC-10-scripts/ac10_seed.py` (estrutura +
++  dados) e `docs/governance/evidence/AV-S03/AC-10-scripts/ac10_scenarios.py` (avaliações + matriz
++  de autorização), preservados como evidência reexecutável. Ambos assumem `DATABASE_URL` apontando
++  para um PostgreSQL isolado dedicado (não incluído no repositório) e devem ser executados a partir
++  do diretório `core/` do projeto, com o virtualenv do Core ativado.
++
++## 2. Denominador seedado (conforme aprovação de 2026-09-28)
++
++| Item | Quantidade seedada | Observação |
++|---|---|---|
++| Organização | 1 | `Instituto AC-10` |
++| Curso | 1 principal + 1 adicional | o curso adicional existe apenas para provar o cenário "disciplina em mais de um curso" (exigido pelo texto vigente §4.2); o denominador principal de turmas usa o curso 1 |
++| Disciplina | 2 | uma delas (`Estruturas de Dados`) associada a AMBOS os cursos |
++| Turma | 2 | `T01` (curso 1 + disciplina 1) e `T02` (curso 1 + disciplina 2) |
++| Professor | 2 | `prof_a` e `prof_b`, com permissões DISTINTAS (ver seção 3) |
++| Alunos matriculados por turma | 10 por turma (20 matrículas, 19 alunos únicos) | 1 aluno matriculado em AMBAS as turmas, cobrindo "aluno em mais de uma turma" |
++| Avaliações por turma | 2 por turma (4 no total) | 2 na turma 1 (por `prof_a`), 2 na turma 2 (por `admin`, já que `prof_b` tem vínculo expirado lá) |
++
++## 3. Cenários adicionais exigidos pelo texto vigente da sprint (§4.2) e pela aprovação de 2026-09-28
++
++| Cenário exigido | Como foi coberto |
++|---|---|
++| aluno em mais de uma turma | 1 aluno (`Aluno Compartilhado Multi-Turma`) matriculado ACTIVE nas turmas T01 e T02 |
++| professores com permissões distintas | `prof_a` = RESPONSIBLE na T01, sem vínculo na T02; `prof_b` = COLLABORATOR na T01, RESPONSIBLE **expirado** na T02 |
++| disciplina em mais de um curso | disciplina `Estruturas de Dados` associada via `CourseDiscipline` tanto ao curso 1 quanto ao curso 2 |
++| vínculo expirado | vínculo de `prof_b` na T02 com `ends_at` no passado (60 dias atrás a -1 dia) |
++
++## 4. Resultado real da execução (16/16 cenários, evidência de código de status HTTP real)
++
++| # | Cenário | Resultado | Evidência |
++|---|---|---|---|
++| 1 | login real (admin, prof_a, prof_b) | PASS | 3x `POST /v1/auth/login` → 200, JWT emitido |
++| 2 | estrutura: 1 org, 2 cursos, 2 disciplinas | PASS | IDs reais retornados por `POST /v1/organizations`, `/v1/courses`, `/v1/disciplines` |
++| 3 | disciplina em mais de um curso | PASS | 2 `CourseDiscipline` criadas para a mesma disciplina em cursos diferentes |
++| 4 | estrutura: 2 turmas | PASS | `POST /v1/class-groups` x2, unicidade `(course_discipline_id, period, code)` respeitada |
++| 5 | professores com permissões distintas | PASS | vínculos criados: RESPONSIBLE/COLLABORATOR/RESPONSIBLE-expirado |
++| 6 | 10 alunos matriculados por turma | PASS | 20 `POST /v1/enrollments` retornaram 201 |
++| 7 | aluno em mais de uma turma | PASS | aluno único matriculado ACTIVE nas duas turmas |
++| 8 | 2 avaliações na turma 1 (prof_a RESPONSIBLE) | PASS | `POST /v1/assessments` x2 → 201 |
++| 9 | vínculo EXPIRADO não concede acesso a operação NOVA | PASS | `prof_b` tentou criar avaliação na T02 → **403** |
++| 10 | admin mantém acesso global (sem vínculo) | PASS | admin criou avaliação na T02 → **201** |
++| 11 | 2 avaliações na turma 2 (via admin) | PASS | `POST /v1/assessments` x2 → 201 |
++| 12 | COLLABORATOR não lê avaliação alheia da turma vinculada | PASS | `prof_b` tentou ler avaliação de `prof_a` → **403** (ownership estrito, comportamento homologado em BL-AV-2-03; não é regressão — é o comportamento já aprovado na matriz seção 5.1: "própria ou acesso explicitamente concedido pela política de papel") |
++| 13 | COLLABORATOR não herda edição/mutação de avaliação alheia | PASS | `prof_b` tentou publicar avaliação de `prof_a` → **403** |
++| 14 | professor sem vínculo não acessa avaliação de turma alheia | PASS | `prof_a` tentou ler avaliação da T02 (sem vínculo lá) → **403** |
++| 15 | aluno compartilhado visível ao professor da turma correspondente | PASS | `GET /v1/students` por `prof_a` retornou 10 alunos, incluindo o compartilhado |
++| 16 | admin vê todos os alunos (escopo global) | PASS | `GET /v1/students` por admin retornou 19 alunos únicos (9+9+1 compartilhado) |
++
++## 5. Nota de transparência sobre a execução
++
++Na primeira execução do cenário 12, a expectativa inicial do script era `200` (colaborador
++conseguiria ler a avaliação). O resultado real foi `403`. Investigação imediata (leitura de
++`core/app/main.py::_get_owned_assessment`) confirmou que a implementação homologada usa ownership
++estrito (`owner_id == user.id`) para leitura de avaliação, sem exceção de papel — o que é
++consistente com a matriz de autorização aprovada na sprint (seção 5.1: "Avaliação com turma —
++ler: própria ou acesso explicitamente concedido pela política de papel", e nenhuma política de
++papel concede essa leitura a colaboradores nesta implementação). A expectativa do script foi
++corrigida para refletir o comportamento correto e homologado; não houve alteração de código de
++produção para "fazer passar o teste" — o comportamento observado já era o correto.
++
++## 6. Regressão confirmada
++
++`python -m pytest app/tests -q` (suíte completa homologada, 68 testes): **68 passed, 0 failed**,
++antes e depois da execução dos scripts de validação de AC-10 — os scripts operam em banco Postgres
++isolado próprio (`avalia_ac10_validacao`), sem qualquer interferência na suíte SQLite in-memory da
++suíte homologada.
++
++## 7. Veredito
++
++**AC-10: ATENDIDO.** O denominador aprovado por Rafael em 2026-09-28 foi seedado integralmente em
++ambiente isolado (PostgreSQL dedicado, fora de `avalia_dev`), incluindo os 4 cenários adicionais
++exigidos pelo texto vigente da sprint (§4.2). A matriz de autorização foi exercitada via HTTP real
++contra esse denominador, com 16/16 cenários passando, e a suíte homologada de `BL-AV-2-03`
++permaneceu 68/68 sem regressão. Nenhum resultado desta validação é generalizado além do
++denominador aprovado (não há alegação de capacidade, desempenho ou comportamento sob volume
++diferente do seedado).
++
++## 8. Limpeza do ambiente
++
++A instância PostgreSQL isolada usada nesta validação foi parada e seus arquivos de dados removidos
++ao final da execução (`pg_ctl stop` + remoção do diretório de dados temporário), preservando
++apenas este relatório e os scripts de seed/cenários como evidência reexecutável.
+diff --git a/docs/governance/snapshots/snapshot_EXEC-2026-09-28-01_BL-AV-2-03-testes.md b/docs/governance/snapshots/snapshot_EXEC-2026-09-28-01_BL-AV-2-03-testes.md
+new file mode 100644
+index 0000000..470ea30
+--- /dev/null
++++ b/docs/governance/snapshots/snapshot_EXEC-2026-09-28-01_BL-AV-2-03-testes.md
+@@ -0,0 +1,59 @@
++---
++id: "EXEC-2026-09-28-01"
++tipo: execucao
++sprint: "AV-S03"
++gerado_em: "2026-09-28T15:23:36-03:00"
++executor: "Codex"
++status: parcial
++commit_referencia: "66c95201daf893fa7b2852e0d94b20314f8d8f34"
++---
++
++# Snapshot EXEC-2026-09-28-01 — testes de autorização de BL-AV-2-03
++
++> Registro histórico. Não promover automaticamente a baseline.
++
++## 1. Abertura
++
++- objetivo: criar os testes de integração HTTP pendentes de BL-AV-2-03;
++- escopo autorizado: `core/app/tests/test_academic_authorization.py`; implementação somente se necessária aos testes;
++- fora de escopo: `avalia_dev`, commit, push, tag, deploy e ações remotas;
++- branch/upstream/commit: `local/av-s03-recuperacao`, `origin/main`, `66c95201daf893fa7b2852e0d94b20314f8d8f34`, divergência `0/0` na abertura;
++- working tree inicial: mudanças locais preexistentes da AV-S03 em configuração, aplicação, modelos, schemas, contrato, migração, router e testes estruturais;
++- lacuna: não havia documento de sprint AV-S03 no worktree; esta execução limitou-se à solicitação explícita de Rafael, sem presumir homologação.
++
++## 2. Entregas
++
++| Item | Estado | Entrega | Evidência |
++|---|---|---|---|
++| BL-AV-2-03 | implementado e validado localmente | 8 testes `TestClient` para os cenários de autorização solicitados | `core/app/tests/test_academic_authorization.py`; validações abaixo |
++
++## 3. Arquivos impactados nesta fatia
++
++| Caminho | Natureza | Item |
++|---|---|---|
++| `core/app/tests/test_academic_authorization.py` | criado | BL-AV-2-03 |
++| `docs/governance/snapshots/snapshot_EXEC-2026-09-28-01_BL-AV-2-03-testes.md` | criado | registro obrigatório |
++| `docs/governance/snapshots/latest_execution.md` | alterado | registro obrigatório |
++| `docs/governance/executive_technical_dashboard.md` | alterado | registro obrigatório |
++
++## 4. Validações executadas
++
++| Data/fuso | Item | Comando | Ambiente | Tipo | Resultado real |
++|---|---|---|---|---|---|
++| 2026-09-28 -03 | BL-AV-2-03 | `ruff check app/tests/test_academic_authorization.py` | venv local do Core | automatizada | `All checks passed!` |
++| 2026-09-28 -03 | BL-AV-2-03 | `python -m pytest app/tests/test_academic_authorization.py -q` | FastAPI `TestClient`; SQLite temporário | integração HTTP automatizada | **8 passed, 0 failed**, 12 warnings |
++| 2026-09-28 -03 | regressão Core | `ruff check app/` | venv local do Core | automatizada | `All checks passed!` |
++| 2026-09-28 -03 | regressão Core | `python -m pytest app/tests -q` | FastAPI `TestClient`; SQLite temporário | automatizada | **56 passed, 0 failed**, 12 warnings, 31.87 s |
++
++## 5. Estado final
++
++- `academic.py` e `main.py`: não alterados nesta fatia;
++- `avalia_dev`: não acessado nem alterado;
++- commit/push/deploy/tag/ação remota: não realizados;
++- status: fatia de testes concluída e validada localmente; AV-S03 não declarada concluída ou homologada;
++- homologação por Rafael: pendente;
++- baseline: não promovido; permanece sem baseline validado sob a governança.
++
++## 6. Próxima ação
++
++Rafael revisar a entrega e decidir sobre a continuidade/regularização documental da AV-S03.
+diff --git a/docs/governance/snapshots/snapshot_EXEC-2026-09-28-02_BL-AV-2-03-revisao-antigravity.md b/docs/governance/snapshots/snapshot_EXEC-2026-09-28-02_BL-AV-2-03-revisao-antigravity.md
+new file mode 100644
+index 0000000..a05508d
+--- /dev/null
++++ b/docs/governance/snapshots/snapshot_EXEC-2026-09-28-02_BL-AV-2-03-revisao-antigravity.md
+@@ -0,0 +1,62 @@
++---
++id: "EXEC-2026-09-28-02"
++tipo: execucao
++sprint: "AV-S03"
++gerado_em: "2026-09-28T15:51:55-03:00"
++executor: "Codex"
++status: parcial
++commit_referencia: "66c95201daf893fa7b2852e0d94b20314f8d8f34"
++---
++
++# Snapshot EXEC-2026-09-28-02 — correções da revisão Antigravity em BL-AV-2-03
++
++> Registro histórico. Não promover automaticamente a baseline.
++
++## 1. Abertura
++
++- objetivo: corrigir os achados bloqueantes 1, 2, 2b e 3 da revisão cruzada independente e adversarial informada por Rafael, e decidir o tratamento seguro do achado 2c;
++- escopo autorizado: autorização acadêmica em `core/app/routers/academic.py` e `core/app/main.py`, testes `TestClient` em `core/app/tests/test_academic_authorization.py` e registros obrigatórios;
++- fora de escopo: `avalia_dev`, stage, commit, push, tag, deploy e qualquer ação remota;
++- branch/upstream/commit: `local/av-s03-recuperacao`, `origin/main`, `66c95201daf893fa7b2852e0d94b20314f8d8f34`;
++- working tree inicial: mudanças locais preexistentes da AV-S03 em configuração, aplicação, modelos, schemas, contrato, migração, router, testes e registros da execução anterior;
++- lacuna documental: `docs/governance/sprints/sprint_AV-S03_estrutura_academica.md` não existe neste worktree. A busca nas fontes locais não encontrou decisão explícita da seção 5.1 sobre avaliação legada sem turma.
++
++## 2. Entregas por achado
++
++| Achado | Estado | Tratamento |
++|---|---|---|
++| 1 | implementado e validado localmente | consultas de leitura/mutação passaram a filtrar por escopo antes de decidir existência; recurso ausente e recurso fora do escopo retornam o mesmo `404`; acesso global de administrador foi preservado |
++| 2 | implementado e validado localmente | `POST /v1/answers`, `POST /v1/answers/{id}/corrections` e `POST /v1/corrections/{id}/reviews` agora chamam `require_assessment_mutation` |
++| 2b | implementado e validado localmente | reatribuição exige autorização de mutação sobre a turma atual, quando houver, antes de validar a nova turma |
++| 2c | comportamento seguro confirmado; sem alteração de código | na ausência da decisão explícita solicitada, manteve-se bypass somente para avaliações sem turma; avaliações com `class_group_id` exigem vínculo ativo mesmo com `academic_module_enabled=false` |
++| 3 | implementado e validado localmente | testes `TestClient` cobrem colaborador (403), duas rotas sem autenticação (401), anti-oráculo em turma e matrícula (404/404), três escritas com vínculo expirado (403) e reatribuição com vínculo atual expirado (403) |
++
++## 3. Arquivos impactados nesta fatia
++
++| Caminho | Natureza | Item |
++|---|---|---|
++| `core/app/routers/academic.py` | alterado | BL-AV-2-03; achados 1 e 2b |
++| `core/app/main.py` | alterado | BL-AV-2-03; achado 2 |
++| `core/app/tests/test_academic_authorization.py` | alterado | BL-AV-2-03; achado 3 |
++| `docs/governance/snapshots/snapshot_EXEC-2026-09-28-02_BL-AV-2-03-revisao-antigravity.md` | criado | registro obrigatório |
++| `docs/governance/snapshots/latest_execution.md` | alterado | registro obrigatório |
++| `docs/governance/executive_technical_dashboard.md` | alterado | registro obrigatório |
++
++## 4. Validações executadas
++
++| Data/fuso | Item | Comando | Ambiente | Tipo | Resultado real |
++|---|---|---|---|---|---|
++| 2026-09-28 -03 | BL-AV-2-03 | `ruff check app/` | venv local do Core | automatizada | `All checks passed!` |
++| 2026-09-28 -03 | BL-AV-2-03 | `python -m pytest app/tests/test_academic_authorization.py -q` | FastAPI `TestClient`; SQLite temporário | integração HTTP automatizada | **13 passed, 0 failed**, 12 warnings, 4.83 s |
++| 2026-09-28 -03 | regressão Core | `python -m pytest app/tests -q` | FastAPI `TestClient`; SQLite temporário | automatizada | **61 passed, 0 failed**, 12 warnings, 34.01 s |
++| 2026-09-28 -03 | integridade do diff | `git diff --check` | worktree local | automatizada | sem erros |
++
++## 5. Estado final e limites
++
++- `avalia_dev`: não acessado nem alterado;
++- stage/commit/push/tag/deploy/ação remota: não realizados;
++- README, requisitos/PRD e roadmap: revisados quanto ao escopo desta correção; sem alteração necessária;
++- status: achados solicitados implementados e validados localmente; AV-S03 permanece local, parcial e não homologada;
++- revisão independente: o achado de origem foi atribuído por Rafael ao Antigravity; esta execução não realizou nova revisão independente;
++- baseline: não promovido; permanece sem baseline validado sob a governança.
++
+diff --git a/docs/governance/snapshots/snapshot_EXEC-2026-09-28-03_BL-AV-2-03-segunda-revisao-antigravity.md b/docs/governance/snapshots/snapshot_EXEC-2026-09-28-03_BL-AV-2-03-segunda-revisao-antigravity.md
+new file mode 100644
+index 0000000..08bd0eb
+--- /dev/null
++++ b/docs/governance/snapshots/snapshot_EXEC-2026-09-28-03_BL-AV-2-03-segunda-revisao-antigravity.md
+@@ -0,0 +1,58 @@
++---
++id: "EXEC-2026-09-28-03"
++tipo: execucao
++sprint: "AV-S03"
++gerado_em: "2026-09-28T16:07:16-03:00"
++executor: "Codex"
++status: parcial
++commit_referencia: "66c95201daf893fa7b2852e0d94b20314f8d8f34"
++---
++
++# Snapshot EXEC-2026-09-28-03 — correções da segunda revisão Antigravity em BL-AV-2-03
++
++> Registro histórico. Não promover automaticamente a baseline.
++
++## 1. Abertura
++
++- objetivo: corrigir os achados bloqueantes residuais A e B e a lacuna de cobertura C informados por Rafael após a segunda revisão cruzada independente e adversarial atribuída ao Antigravity;
++- escopo autorizado: `core/app/routers/academic.py`, testes em `core/app/tests/test_academic_authorization.py` e registros obrigatórios desta fatia;
++- fora de escopo: `avalia_dev`, stage, commit, push, tag, deploy e qualquer ação remota;
++- branch/upstream/commit: `local/av-s03-recuperacao`, `origin/main`, `66c95201daf893fa7b2852e0d94b20314f8d8f34`;
++- working tree inicial: mudanças locais preexistentes da AV-S03 em configuração, aplicação, modelos, schemas, contrato, migração, router, testes e registros anteriores;
++- rastreabilidade: BL-AV-2-03; o documento `docs/governance/sprints/sprint_AV-S03_estrutura_academica.md` continua ausente deste worktree.
++
++## 2. Entregas por achado
++
++| Achado | Estado | Tratamento |
++|---|---|---|
++| A | implementado e validado localmente | `create_enrollment` passou a exigir primeiro o vínculo ativo `RESPONSIBLE`, antes de consultar `Student`; teste envia ID existente e inexistente como `COLLABORATOR` e confirma resposta idêntica (`403` e mesmo corpo) |
++| B | implementado e validado localmente | `get_link` filtra `ProfessorClassLink.professor_id == user.id` antes de resolver o ID para professor; ID alheio e ausente colapsam no mesmo `404` e mesmo corpo; acessos do professor dono e do administrador continuam `200` |
++| C | implementado e validado localmente | testes parametrizados isolam `settings.academic_module_enabled` com `monkeypatch`: avaliação sem turma retorna `201` com flag desligada e `422` ligada; criação com turma e vínculo ativo retorna `201` nos dois valores; mutação de avaliação já vinculada sem vínculo ativo retorna `403` nos dois valores |
++
++## 3. Arquivos impactados nesta fatia
++
++| Caminho | Natureza | Item |
++|---|---|---|
++| `core/app/routers/academic.py` | alterado | BL-AV-2-03; achados A e B |
++| `core/app/tests/test_academic_authorization.py` | alterado | BL-AV-2-03; achados A, B e C |
++| `docs/governance/snapshots/snapshot_EXEC-2026-09-28-03_BL-AV-2-03-segunda-revisao-antigravity.md` | criado | registro obrigatório |
++| `docs/governance/snapshots/latest_execution.md` | alterado | registro obrigatório |
++| `docs/governance/executive_technical_dashboard.md` | alterado | registro obrigatório |
++
++## 4. Validações executadas
++
++| Data/fuso | Item | Comando | Ambiente | Tipo | Resultado real |
++|---|---|---|---|---|---|
++| 2026-09-28 -03 | BL-AV-2-03 | `ruff check app/` | venv local do Core | automatizada | `All checks passed!` |
++| 2026-09-28 -03 | BL-AV-2-03 | `python -m pytest app/tests/test_academic_authorization.py -q` | FastAPI `TestClient`; SQLite temporário | integração HTTP automatizada | **20 passed, 0 failed**, 12 warnings, 8.53 s |
++| 2026-09-28 -03 | regressão Core | `ruff check app/ && python -m pytest app/tests -q` | venv local; FastAPI `TestClient`; SQLite temporário | automatizada | Ruff limpo; **68 passed, 0 failed**, 12 warnings, 36.49 s |
++| 2026-09-28 -03 | integridade do diff | `git diff --check` | worktree local | automatizada | sem erros |
++
++## 5. Estado final e limites
++
++- `avalia_dev`: não acessado nem alterado; testes usaram bancos SQLite temporários;
++- stage/commit/push/tag/deploy/ação remota: não realizados;
++- README, requisitos/PRD e roadmap: revisados quanto ao escopo desta correção; sem alteração necessária;
++- status: achados A, B e C implementados e validados localmente; AV-S03 permanece local, parcial e não homologada;
++- revisão independente: os achados de origem foram atribuídos por Rafael ao Antigravity; esta execução não realizou nova revisão independente;
++- baseline: não promovido; permanece sem baseline validado sob a governança.
+diff --git a/docs/governance/snapshots/snapshot_EXEC-2026-09-28-04_BL-AV-2-03-terceira-revisao-antigravity.md b/docs/governance/snapshots/snapshot_EXEC-2026-09-28-04_BL-AV-2-03-terceira-revisao-antigravity.md
+new file mode 100644
+index 0000000..c5f70bc
+--- /dev/null
++++ b/docs/governance/snapshots/snapshot_EXEC-2026-09-28-04_BL-AV-2-03-terceira-revisao-antigravity.md
+@@ -0,0 +1,64 @@
++---
++id: "EXEC-2026-09-28-04"
++tipo: execucao
++sprint: "AV-S03"
++gerado_em: "2026-09-28T16:19:02-03:00"
++executor: "Codex"
++status: validado
++commit_referencia: "66c95201daf893fa7b2852e0d94b20314f8d8f34"
++---
++
++# Snapshot EXEC-2026-09-28-04 — terceira revisão Antigravity e encerramento local de BL-AV-2-03
++
++> Registro histórico. Não promover automaticamente a baseline.
++
++## 1. Abertura
++
++- objetivo: registrar a terceira rodada de revisão cruzada independente e adversarial atribuída por Rafael ao Antigravity e encerrar localmente BL-AV-2-03 após o veredito final **APROVADO SEM RESSALVAS**;
++- escopo autorizado: somente documentação deste encerramento e uma reexecução final de Ruff e da suíte completa do Core;
++- fora de escopo: alteração de código, `avalia_dev`, stage, commit, push, tag, deploy e qualquer ação remota;
++- branch/upstream/commit: `local/av-s03-recuperacao`, `origin/main`, `66c95201daf893fa7b2852e0d94b20314f8d8f34`;
++- working tree inicial: mudanças locais preexistentes da AV-S03 em configuração, aplicação, modelos, schemas, contrato, migração, router, testes e registros das execuções anteriores;
++- rastreabilidade: BL-AV-2-03; o documento `docs/governance/sprints/sprint_AV-S03_estrutura_academica.md` continua ausente deste worktree.
++
++## 2. Resultado da terceira revisão cruzada
++
++| Escopo revisto | Evidência informada por Rafael | Veredito independente |
++|---|---|---|
++| diff que corrigiu os achados A, B e C: ordem de autorização em `create_enrollment`/`Student`, `GET professor-class-links` e cobertura de `academic_module_enabled` | achados verificados sem novas alterações durante a revisão | **APROVADO SEM RESSALVAS** |
++| regressão sobre as rodadas 1 e 2 | todos os achados das três rodadas corrigidos sem regressão | **APROVADO SEM RESSALVAS** |
++| suíte focal | **20 passed, 0 failed** | verde |
++| determinismo da suíte completa | duas execuções consecutivas com **68 passed, 0 failed** em ambas | verde e determinística no ambiente revisto |
++
++A terceira revisão foi somente leitura e não alterou arquivos. As contagens acima são evidência comunicada por Rafael sobre a execução independente do Antigravity; a confirmação local executada pelo Codex nesta fatia está separada na seção 4.
++
++## 3. Arquivos impactados nesta fatia
++
++| Caminho | Natureza | Item |
++|---|---|---|
++| `docs/governance/snapshots/snapshot_EXEC-2026-09-28-04_BL-AV-2-03-terceira-revisao-antigravity.md` | criado | registro obrigatório e encerramento local de BL-AV-2-03 |
++| `docs/governance/snapshots/latest_execution.md` | alterado | ponteiro da última execução |
++| `docs/governance/executive_technical_dashboard.md` | alterado | estado executivo e técnico |
++
++Nenhum arquivo `.py` ou outro arquivo de código foi alterado nesta fatia documental.
++
++## 4. Validação final executada pelo Codex
++
++| Data/fuso | Item | Comando | Ambiente | Tipo | Resultado real |
++|---|---|---|---|---|---|
++| 2026-09-28 -03 | BL-AV-2-03 e regressão Core | `cd core && source .venv/bin/activate && ruff check app/ && python -m pytest app/tests -q` | venv local; FastAPI `TestClient`; SQLite temporário | automatizada | Ruff `All checks passed!`; **68 passed, 0 failed**, 12 warnings, 36.60 s |
++
++## 5. Estado final e limites
++
++- BL-AV-2-03 (autorização por vínculo professor–turma): **tecnicamente concluído e aprovado sem ressalvas** pela revisão cruzada independente após três rodadas de correção;
++- integração: a implementação segue **LOCAL**, no working tree de `local/av-s03-recuperacao`, não integrada ao repositório principal e sem stage ou commit;
++- homologação: a homologação formal por Rafael continua pendente; aprovação técnica independente não substitui a homologação do responsável pelo produto;
++- AV-S03: este encerramento se restringe a BL-AV-2-03 e não declara a sprint completa concluída ou homologada;
++- `avalia_dev`: não acessado nem alterado; os testes usaram bancos SQLite temporários;
++- Git/remoto: nenhuma ação de stage, commit, push, tag, deploy ou outra ação remota foi realizada;
++- README, requisitos/PRD e roadmap: revisados quanto ao escopo deste registro; sem alteração necessária;
++- baseline: não promovido; permanece sem baseline validado sob a governança.
++
++## 6. Próxima decisão
++
++Rafael revisar o encerramento local e decidir explicitamente sobre a homologação de BL-AV-2-03 e sobre qualquer futura integração. Nenhuma dessas decisões é presumida por este snapshot.
+diff --git a/docs/governance/snapshots/snapshot_EXEC-2026-09-28-05_homologacao-bl-av-2-03-execucao-av-s03.md b/docs/governance/snapshots/snapshot_EXEC-2026-09-28-05_homologacao-bl-av-2-03-execucao-av-s03.md
+new file mode 100644
+index 0000000..395d117
+--- /dev/null
++++ b/docs/governance/snapshots/snapshot_EXEC-2026-09-28-05_homologacao-bl-av-2-03-execucao-av-s03.md
+@@ -0,0 +1,141 @@
++---
++id: "EXEC-2026-09-28-05"
++tipo: execucao
++sprint: "AV-S03"
++gerado_em: "2026-09-28T16:45:00-03:00"
++executor: "Hermes (com Antigravity para BL-AV-2-04)"
++status: parcial
++commit_referencia: "66c95201daf893fa7b2852e0d94b20314f8d8f34"
++---
++
++# Snapshot EXEC-2026-09-28-05 — homologação de BL-AV-2-03, execução local dos demais itens da AV-S03
++
++> Registro histórico. Não promover automaticamente a baseline.
++
++## 1. Abertura
++
++- objetivo: (1) registrar a homologação formal de `BL-AV-2-03` por Rafael; (2) continuar a execução
++  local já autorizada da AV-S03, conferindo `BL-AV-2-01/02/04/05` contra os artefatos atuais,
++  completando pendências no escopo já autorizado, reexecutando verificações onde havia lacuna ou
++  alteração relevante;
++- escopo autorizado: implementação mínima de `BL-AV-2-04` (frontend); revalidação de migração em
++  PostgreSQL isolado; validação visual em navegador real; consolidação documental; construção de
++  pacote recuperável consolidado da AV-S03;
++- fora de escopo, mantido: `avalia_dev`, stage, commit, push, tag, deploy, promoção de baseline,
++  início de nova sprint;
++- branch/upstream/commit: `local/av-s03-recuperacao`, `origin/main`, `66c95201daf893fa7b2852e0d94b20314f8d8f34`;
++- worktree: `avalia-plataform-worktrees/av-s03-work` (reconstrução; o worktree original de
++  2026-09-24 foi perdido, ver `snapshot_EXEC-2026-09-28-01_pacote_revisao_av-s03.md` §3).
++
++## 2. Homologação de BL-AV-2-03
++
++Rafael homologou `BL-AV-2-03` na versão final identificada pelos checksums do pacote em
++`docs/governance/evidence/AV-S03-recuperacao/BL-AV-2-03-pacote/` (`checksums_FINAL_20260928_162232`),
++com base no parecer independente e adversarial da terceira rodada de revisão cruzada (Antigravity,
++somente leitura): **APROVADO SEM RESSALVAS**. Registrado formalmente em `DEC-AV-026`
++(`docs/governance/registers/decisions.md`).
++
++**Distinções explícitas da homologação, preservadas nesta execução:**
++1. item tecnicamente aprovado e homologado — `BL-AV-2-03` apenas;
++2. código permanece local, sem stage/commit/push/merge — homologação técnica não é integração;
++3. `AV-S03` como sprint permanece aberta, sujeita ao fechamento dos demais critérios de aceite.
++
++`BL-AV-2-03` não foi reaberto nesta execução — nenhuma alteração de código relevante ou nova
++evidência de defeito o justificaria.
++
++## 3. Itens revalidados/concluídos nesta execução
++
++| Item | Ação nesta execução | Evidência |
++|---|---|---|
++| `BL-AV-2-01` (modelo) | conferido contra `core/app/models.py` atual; sem alteração necessária | inspeção direta |
++| `BL-AV-2-02` (migração) | revalidado em PostgreSQL 16 isolado (porta 55435, banco `avalia_bl_av_2_03_revalidacao`, descartado ao final): `alembic upgrade head` limpo; downgrade limpo em banco vazio; downgrade com dados dependentes reais (organização/curso/disciplina/associação/turma inseridos) **abortou com `RuntimeError` antes de qualquer DROP**, dados confirmados intactos por `SELECT` direto | comandos executados ao vivo por Hermes, não apenas relatados |
++| `BL-AV-2-04` (UI mínima) | implementado por Antigravity (delegação conforme tabela de delegação da sprint, §8); revisado e confirmado ao vivo por Hermes: `npm run lint` limpo, `npm run build` 0 erros, suíte Core 68/68 sem regressão | `frontend/src/pages/AcademicPage.tsx` (novo), `AssessmentEditorPage.tsx`, `services/api.ts`, `types.ts`, `App.tsx`, `Layout.tsx`, `styles/theme.css` (alterados) |
++| `BL-AV-2-05` (validação do marco) | AC-01 a AC-12 revisados um a um contra evidência real desta rodada (ver `sprint_AV-S03_estrutura_academica.md` §9 atualizada); 8 de 12 critérios com evidência completa, 2 pendentes de revisão documental (AC-07/09), 1 sem CI remota por estar fora de escopo (AC-08 parcial), 1 não fechado formalmente (AC-10) | seção 9 da sprint, atualizada nesta execução |
++
++## 4. Validação visual em navegador real (AC-06)
++
++Ambiente: backend `uvicorn` real (porta 8010) + PostgreSQL 16 isolado (porta 55435, banco
++`avalia_visual_av_s03`, populado por seed fictício) + frontend `vite` real (porta 5183) + Chrome
++real via CDP (fallback documentado por bloqueio do browser tool padrão em `localhost`/IPs privados,
++mesmo padrão já usado em 2026-09-24).
++
++Fluxo validado ponta a ponta, com evidência de rede capturada (não presumida):
++1. login real (professor e admin, JWT real emitido pelo backend);
++2. criação de Organização → Curso → Disciplina → associação curricular → Turma → Aluno via API real
++   (admin) e confirmação visual na UI;
++3. vínculo professor↔turma (`RESPONSIBLE`) via API real;
++4. professor visualiza exatamente sua turma vinculada na UI (escopo de autorização refletido
++   corretamente na interface);
++5. matrícula do aluno na turma (via admin — ver achado operacional abaixo);
++6. criação de avaliação nova pelo professor com seletor de turma na UI: payload de rede capturado via
++   CDP confirma `class_group_id` correto enviado em `POST /v1/assessments` (`201 Created`); rubrica
++   publicada (`POST /v1/questions/{id}/rubric`, `201 Created`); persistência confirmada por consulta
++   direta ao banco (`GET /v1/assessments` retorna o `class_group_id` salvo).
++
++**Confirmação de regressão:** o bug de 2026-09-24 (turma selecionada no formulário não era enviada
++no `POST /assessments` inicial, conforme `executive_technical_dashboard.md` linha 56 histórica) **não
++está presente na implementação reconstruída** — confirmado por captura de rede real, não por leitura
++de código.
++
++Evidência (18 capturas de tela): `docs/governance/evidence/AV-S03-recuperacao/BL-AV-2-04-visual/`.
++
++## 5. Achado operacional registrado (não bloqueante, não reabre BL-AV-2-03)
++
++Ao tentar matricular um aluno via UI como professor `RESPONSIBLE`, o dropdown de "Aluno" no
++formulário de Matrícula está vazio para um aluno que nunca esteve em nenhuma turma do professor.
++Causa raiz confirmada por chamada direta à API: `GET /v1/students` retorna `[]` para o professor
++nesse cenário (a função `_student_scope` em `academic.py` só retorna alunos já matriculados em
++turmas ativas do professor) e `[aluno]` para o admin com o mesmo dado. **Isso é o comportamento
++correto conforme a matriz de autorização aprovada** (seção 5 da sprint, linha "Dados globais do
++aluno — leitura mínima"), não um defeito de autorização. Na prática, gera uma dependência
++operacional: a primeira matrícula de um aluno novo em qualquer turma precisa ser feita por um admin
++(ou o backend precisa de uma rota de busca por identificador exato, fora do escopo desta execução).
++Registrado na sprint (§9) para decisão de Rafael; nenhuma alteração de autorização foi feita.
++
++## 6. Pacote consolidado e verificação de completude
++
++Dois pacotes recuperáveis foram produzidos, ambos com checksums SHA-256 verificados:
++
++1. `docs/governance/evidence/AV-S03-recuperacao/BL-AV-2-03-pacote/` — pacote específico da
++   homologação de `BL-AV-2-03` (3 pareceres completos do Antigravity, snapshots das 3 rodadas,
++   tarball do código no estado homologado).
++2. `docs/governance/evidence/AV-S03-recuperacao/AV-S03-pacote-consolidado/` — pacote consolidado de
++   toda a AV-S03 no estado atual (22 arquivos rastreados pelo `git status`, incluindo `BL-AV-2-04`).
++
++**Verificação de completude real** (não apenas checksum agregado): o tarball consolidado foi extraído
++em diretório temporário e cada um dos 22 arquivos foi comparado byte-a-byte (`diff`) contra o arquivo
++correspondente no worktree real. Resultado: **22/22 arquivos idênticos** — nenhuma divergência, nenhum
++arquivo ausente. Checksums SHA-256 de todos os artefatos do pacote confirmados com `shasum -c`.
++
++## 7. Validações executadas (resumo)
++
++| Item | Comando | Resultado real |
++|---|---|---|
++| Core (regressão completa) | `cd core && ruff check app/ && pytest app/tests -q` | Ruff limpo; **68 passed, 0 failed**, 12 warnings |
++| Frontend | `cd frontend && npm run lint && npm run build` | 0 erros, 0 avisos; build 0 erros |
++| Migração PostgreSQL isolado | `alembic upgrade head` / `downgrade -1` (limpo e com dados dependentes) | upgrade OK; downgrade limpo OK; downgrade com dados dependentes abortou corretamente sem DROP |
++| Validação visual | Chrome real via CDP, fluxo completo | login, CRUD acadêmico, vínculo, matrícula, avaliação vinculada — todos confirmados; payload de rede capturado |
++| Completude do pacote consolidado | `diff` byte-a-byte de 22/22 arquivos extraídos vs worktree | 22/22 idênticos |
++
++## 8. Estado final e limites
++
++- `BL-AV-2-03`: homologado por Rafael (`DEC-AV-026`), local, não integrado;
++- `BL-AV-2-01/02/04`: implementados e revalidados tecnicamente nesta execução, sem homologação
++  formal própria — aguardam decisão de Rafael sobre o fechamento do marco `BL-AV-2-05`;
++- `BL-AV-2-05` (marco da sprint): parcialmente executado; AC-07/09/10 pendentes; AC-08 parcial (sem
++  CI remota, sprint segue local);
++- `AV-S03` como sprint: **permanece aberta**; esta execução não declara a sprint concluída ou
++  homologada;
++- `avalia_dev`: não acessado nem alterado; todos os testes/validações usaram bancos SQLite
++  temporários ou PostgreSQL isolado (portas 55434/55435, descartáveis, fora de qualquer ambiente do
++  projeto);
++- Git/remoto: nenhuma ação de stage, commit, push, tag, deploy ou outra ação remota foi realizada;
++- baseline: não promovido; nova sprint: não iniciada.
++
++## 9. Próxima decisão
++
++Rafael revisar a proposta de commits/PRs (ver `executive_technical_dashboard.md` e comunicação
++direta desta execução) e decidir: (1) se autoriza consolidar `BL-AV-2-01/02/04` num commit/PR
++próprio agora ou aguarda o fechamento completo de `BL-AV-2-05`; (2) tratamento de AC-07/09/10
++pendentes; (3) relação com o PR #2 já aberto (branch `docs/av-s02-encerramento-planos-operacionais`,
++puramente documental, sem código da AV-S03).
+diff --git a/docs/governance/snapshots/snapshot_EXEC-2026-09-28-06_BL-AV-2-04-revisao-codex.md b/docs/governance/snapshots/snapshot_EXEC-2026-09-28-06_BL-AV-2-04-revisao-codex.md
+new file mode 100644
+index 0000000..1214bba
+--- /dev/null
++++ b/docs/governance/snapshots/snapshot_EXEC-2026-09-28-06_BL-AV-2-04-revisao-codex.md
+@@ -0,0 +1,92 @@
++---
++id: "EXEC-2026-09-28-06"
++tipo: execucao
++sprint: "AV-S03"
++gerado_em: "2026-09-28T21:26:00-03:00"
++executor: "Codex (revisão), Hermes (consolidação)"
++status: parcial
++commit_referencia: "66c95201daf893fa7b2852e0d94b20314f8d8f34"
++---
++
++# Snapshot EXEC-2026-09-28-06 — revisão cruzada independente do Codex em BL-AV-2-04 (UI)
++
++> Registro histórico. Não promover automaticamente a baseline.
++
++## 1. Abertura
++
++- objetivo: revisão cruzada independente e somente leitura da UI de `BL-AV-2-04` (implementada pelo
++  Antigravity), como contraponto ao autor original, seguindo o mesmo padrão adversarial já aplicado a
++  `BL-AV-2-03`;
++- escopo autorizado: leitura de `frontend/src/pages/AcademicPage.tsx`, `AssessmentEditorPage.tsx`,
++  `services/api.ts`, `types.ts`; execução de `npm run lint` e `npm run build` (sem alteração de
++  arquivos);
++- fora de escopo: qualquer alteração de código, `avalia_dev`, stage, commit, push, tag, deploy;
++- branch/upstream/commit: `local/av-s03-recuperacao`, `origin/main`, `66c95201daf893fa7b2852e0d94b20314f8d8f34`;
++- executor: Codex, via `codex exec --sandbox workspace-write` (permissão de escrita concedida ao
++  sandbox, mas nenhuma escrita foi realizada — confirmado por `git status` idêntico antes/depois: 24
++  caminhos, sem alteração).
++
++## 2. Veredito do Codex
++
++**AJUSTES NECESSÁRIOS**
++
++### Achados bloqueantes
++
++1. **Falhas de carregamento silenciosamente convertidas em listas vazias.** Em
++   `AcademicPage.tsx:87`, as 7 requisições de carregamento usam `.catch(() => [])`. Erros 403/404/422
++   e falhas de rede nunca chegam ao tratamento de erro visível; a tela termina o loading e mostra
++   "nenhum encontrado", confundindo indisponibilidade/falta de autorização com ausência real de dados.
++   O mesmo padrão ocorre em `AssessmentEditorPage.tsx:19` (falha de `listClassGroups()` é
++   integralmente engolida, seletor de turma fica vazio sem explicação).
++
++2. **UI trata turma como opcional, mas o backend a exige no modo acadêmico.**
++   `AssessmentEditorPage.tsx:94` e a opção da linha 101 rotulam o campo "opcional"; `complete`/
++   `canPublish` (linhas 41–42) não exigem turma; o payload omite o campo quando vazio (linha 66).
++   Porém `core/app/main.py:146` retorna 422 quando `academic_module_enabled=true` e não há
++   `class_group_id`. A UI permite ao usuário tentar uma submissão que o backend sabidamente rejeitará.
++
++### Ressalva adicional (não bloqueante)
++
++- Tratamento de erro compartilhado não preserva a mensagem padrão do FastAPI (`{detail: "..."}`).
++  Em `api.ts:58`, o campo `detail` textual não é extraído como mensagem; um 422 como "Turma é
++  obrigatória..." vira mensagem genérica sempre que o erro não é engolido pelos achados acima.
++
++### Verificações positivas confirmadas
++
++- `class_group_id` é realmente enviado no `POST /v1/assessments` (montagem em
++  `AssessmentEditorPage.tsx:64`, chamada na linha 71) — não é apenas estado local do componente.
++- Contratos de tipos em `api.ts`/`types.ts` correspondem aos schemas do backend; nenhum uso de `any`
++  ocultando shape incorreto foi encontrado.
++- Nenhuma ampliação de escopo de dados pelo frontend: dropdowns exibem exatamente as coleções já
++  filtradas pela API; nenhuma tela expõe dado fora do escopo de autorização do papel.
++- Separação Student↔Enrollment respeitada na UI: a tela de matrícula manipula turma/aluno/status,
++  sem permitir edição dos dados globais do aluno.
++- Estados de loading (`Spinner`) e arrays iniciais vazios evitam acesso a `undefined` capaz de
++  quebrar as abas.
++
++## 3. Validação real executada pelo Codex
++
++```
++npm run lint  → eslint src: sucesso, sem erros
++npm run build → tsc -b && vite build: 33 modules transformed, built in 64ms, código 0
++```
++
++`git status` antes/depois idêntico (24 caminhos modificados/não rastreados) — confirma que a revisão
++foi efetivamente somente leitura.
++
++## 4. Estado final e limites
++
++- `BL-AV-2-04`: **NÃO aprovado** nesta rodada; 2 achados bloqueantes pendentes de correção antes de
++  qualquer homologação;
++- este snapshot não reabre nem altera o status de `BL-AV-2-03` (autorização), que permanece homologado
++  separadamente;
++- nenhuma alteração de código foi feita; `avalia_dev` não foi acessado; nenhuma ação Git/remota
++  ocorreu;
++- próxima ação: delegar correção dos 2 achados bloqueantes e da ressalva ao Antigravity (autor
++  original), seguindo o mesmo padrão de rodadas de correção usado em `BL-AV-2-03`, com revalidação
++  independente ao final.
++
++## 5. Próxima decisão
++
++Hermes prossegue com a correção delegada (mecânica, sem decisão de produto) e nova revisão
++independente. Nenhuma homologação de `BL-AV-2-04` é presumida por este snapshot.
+diff --git a/docs/governance/snapshots/snapshot_EXEC-2026-09-28-07_BL-AV-2-04-correcao-revalidacao.md b/docs/governance/snapshots/snapshot_EXEC-2026-09-28-07_BL-AV-2-04-correcao-revalidacao.md
+new file mode 100644
+index 0000000..d4f0676
+--- /dev/null
++++ b/docs/governance/snapshots/snapshot_EXEC-2026-09-28-07_BL-AV-2-04-correcao-revalidacao.md
+@@ -0,0 +1,89 @@
++---
++id: "EXEC-2026-09-28-07"
++tipo: execucao
++sprint: "AV-S03"
++gerado_em: "2026-09-28T21:40:00-03:00"
++executor: "Antigravity (correção), Codex (revalidação), Hermes (verificação independente + correção do default divergente)"
++status: parcial
++commit_referencia: "66c95201daf893fa7b2852e0d94b20314f8d8f34"
++---
++
++# Snapshot EXEC-2026-09-28-07 — correção e revalidação dos achados de BL-AV-2-04
++
++> Registro histórico. Não promover automaticamente a baseline.
++
++## 1. Abertura
++
++- objetivo: corrigir os 2 achados bloqueantes e 1 ressalva encontrados pelo Codex na revisão
++  independente de `BL-AV-2-04` (snapshot EXEC-2026-09-28-06), revalidar de forma independente, e
++  corrigir uma divergência de configuração descoberta durante a revalidação;
++- escopo autorizado: `frontend/src/pages/AcademicPage.tsx`, `AssessmentEditorPage.tsx`,
++  `services/api.ts`, `frontend/.env.example`; leitura/execução de lint, build e suíte do Core;
++- fora de escopo: `core/` (backend), testes/autorização já homologados de `BL-AV-2-03`, `avalia_dev`,
++  stage, commit, push, tag, deploy;
++- branch/upstream/commit: `local/av-s03-recuperacao`, `origin/main`, `66c95201daf893fa7b2852e0d94b20314f8d8f34`.
++
++## 2. Correções aplicadas (Antigravity) e verificadas independentemente (Hermes)
++
++| Achado | Correção alegada | Verificação independente (Hermes, leitura direta do diff) |
++|---|---|---|
++| 1 (bloqueante): erros de carregamento engolidos | `AcademicPage.tsx: loadData()` reescrito com `Promise.allSettled`, falhas individuais acumuladas e reportadas via `setError` | confirmado por leitura do diff real (`git diff`), não apenas pelo relato do agente |
++| 1b: `listClassGroups()` engolido em `AssessmentEditorPage.tsx` | `.catch` agora chama `setError` | confirmado por leitura do diff |
++| 2 (bloqueante): turma opcional na UI mas obrigatória no backend | `isAcademicModuleEnabled()` adicionada; usada em `complete`/`canPublish`/bloqueio de `persist()`; rótulo e `required` do `<select>` ajustados | confirmado por leitura do diff |
++| ressalva: mensagem `detail` do FastAPI não extraída | `request()` em `api.ts` agora tenta `message`, `detail.message`, `detail` como string, e primeiro `msg` de array de validação Pydantic | confirmado por leitura do diff |
++
++## 3. Achado adicional encontrado na revalidação (Codex) e corrigido (Hermes)
++
++O Codex, na revalidação independente, identificou que `isAcademicModuleEnabled()` assumia `true`
++como default quando `VITE_ACADEMIC_MODULE_ENABLED` não está configurada, enquanto o backend
++(`core/app/config.py:18`) usa `ACADEMIC_MODULE_ENABLED` com default `"false"`. Isso cria dessincronia
++real (não hipotética): em ambiente sem nenhuma das duas variáveis configuradas, a UI assumiria o
++módulo ativo enquanto o backend o trata como inativo, causando comportamento de validação
++incoerente entre UI e servidor.
++
++**Correção aplicada por Hermes:** o default de `isAcademicModuleEnabled()` foi alterado de `true`
++para `false`, espelhando exatamente o default do backend, com comentário explicando a necessidade de
++configurar `VITE_ACADEMIC_MODULE_ENABLED=true` no frontend sempre que
++`ACADEMIC_MODULE_ENABLED=true` estiver configurado no backend. `frontend/.env.example` já documenta
++`VITE_ACADEMIC_MODULE_ENABLED=true` como valor de referência para ambientes com o módulo ativo,
++preservado sem alteração (é opt-in explícito, não o default de código).
++
++Esta não é uma solução definitiva de sincronização (o ideal seria o frontend consultar o valor real
++do backend em vez de duplicar a configuração via env vars separadas) — permanece como débito técnico
++registrado, não bloqueante, pois o backend continua sendo a autoridade final e rejeita corretamente
++qualquer submissão incompatível com 422.
++
++## 4. Validações executadas (verificação direta por Hermes, após a correção do default)
++
++```
++cd frontend && npm run lint   → eslint src: sem erros
++cd frontend && npm run build  → tsc -b && vite build: 33 modules transformed, built in 43ms, código 0
++```
++
++Suíte do Core (68/68) já havia sido confirmada pelo Codex na revalidação anterior a esta correção
++pontual; a mudança de default não afeta o backend nem seus testes (arquivo puramente frontend).
++
++## 5. Veredito consolidado
++
++- Codex (revalidação, antes da correção do default): **APROVADO COM RESSALVAS** — 2 bloqueantes e a
++  ressalva original corrigidos; identificou a divergência de default como ressalva não bloqueante;
++- Hermes: corrigiu a ressalva do default imediatamente (mudança de uma linha, sem risco), elevando o
++  estado para: **sem bloqueantes e sem ressalvas conhecidas pendentes** nesta rodada.
++- Débito técnico registrado (não bloqueante): o frontend não consulta dinamicamente o backend para
++  saber se o módulo acadêmico está ativo; depende de duas variáveis de ambiente configuradas em
++  paralelo. Fonte única de verdade (endpoint de capacidades do backend) é uma melhoria futura, fora
++  do escopo desta correção pontual.
++
++## 6. Estado final e limites
++
++- `BL-AV-2-04`: correções verificadas e validadas tecnicamente; ainda sem homologação formal por
++  Rafael;
++- `BL-AV-2-03` permanece homologado, não reaberto por este trabalho;
++- nenhuma ação Git/remota realizada; `avalia_dev` não acessado;
++- este snapshot não promove baseline nem declara a sprint `AV-S03` concluída.
++
++## 7. Próxima decisão
++
++Rafael revisar o estado consolidado de `BL-AV-2-04` e decidir sobre homologação. AC-10 (denominador
++de teste, `DEC-AV-007`) continua pendente de decisão explícita de Rafael, sem alteração nesta
++execução.
+diff --git a/frontend/src/pages/AcademicPage.tsx b/frontend/src/pages/AcademicPage.tsx
+new file mode 100644
+index 0000000..46097e5
+--- /dev/null
++++ b/frontend/src/pages/AcademicPage.tsx
+@@ -0,0 +1,919 @@
++import { useEffect, useState, type FormEvent } from 'react'
++import { Alert } from '../components/Alert'
++import { Spinner } from '../components/Spinner'
++import { useAuth } from '../context/AuthContext'
++import {
++  createClassGroup,
++  createCourse,
++  createCourseDiscipline,
++  createDiscipline,
++  createEnrollment,
++  createOrganization,
++  createStudent,
++  listClassGroups,
++  listCourseDisciplines,
++  listCourses,
++  listDisciplines,
++  listEnrollments,
++  listOrganizations,
++  listStudents,
++} from '../services/api'
++import type {
++  ClassGroup,
++  Course,
++  CourseDiscipline,
++  Discipline,
++  Enrollment,
++  EnrollmentStatus,
++  Organization,
++  Student,
++} from '../types'
++
++type AcademicTab = 'classes' | 'students' | 'enrollments' | 'courses' | 'disciplines' | 'organizations'
++
++export function AcademicPage() {
++  const { user } = useAuth()
++  const isAdmin = user?.role === 'admin'
++  const isProfessor = user?.role === 'professor'
++
++  const [activeTab, setActiveTab] = useState<AcademicTab>('classes')
++  const [loading, setLoading] = useState(true)
++  const [busy, setBusy] = useState(false)
++  const [error, setError] = useState('')
++  const [success, setSuccess] = useState('')
++
++  // List data
++  const [organizations, setOrganizations] = useState<Organization[]>([])
++  const [courses, setCourses] = useState<Course[]>([])
++  const [disciplines, setDisciplines] = useState<Discipline[]>([])
++  const [courseDisciplines, setCourseDisciplines] = useState<CourseDiscipline[]>([])
++  const [classGroups, setClassGroups] = useState<ClassGroup[]>([])
++  const [students, setStudents] = useState<Student[]>([])
++  const [enrollments, setEnrollments] = useState<Enrollment[]>([])
++
++  // Form states - Organization
++  const [orgName, setOrgName] = useState('')
++
++  // Form states - Course
++  const [courseOrgId, setCourseOrgId] = useState('')
++  const [courseName, setCourseName] = useState('')
++  const [courseCode, setCourseCode] = useState('')
++
++  // Form states - Discipline
++  const [discOrgId, setDiscOrgId] = useState('')
++  const [discName, setDiscName] = useState('')
++  const [discCode, setDiscCode] = useState('')
++
++  // Form states - ClassGroup
++  const [classCourseId, setClassCourseId] = useState('')
++  const [classDisciplineId, setClassDisciplineId] = useState('')
++  const [classPeriod, setClassPeriod] = useState('')
++  const [classCode, setClassCode] = useState('')
++
++  // Form states - Student (Global)
++  const [studentOrgId, setStudentOrgId] = useState('')
++  const [studentName, setStudentName] = useState('')
++  const [studentExternalId, setStudentExternalId] = useState('')
++
++  // Form states - Enrollment (Class link)
++  const [enrollmentClassId, setEnrollmentClassId] = useState('')
++  const [enrollmentStudentId, setEnrollmentStudentId] = useState('')
++  const [enrollmentStatus, setEnrollmentStatus] = useState<EnrollmentStatus>('ACTIVE')
++
++  async function loadData() {
++    setLoading(true)
++    setError('')
++    const errors: string[] = []
++    try {
++      const [orgsRes, crsRes, discsRes, cdsRes, cgsRes, stdsRes, enrsRes] = await Promise.allSettled([
++        listOrganizations(),
++        listCourses(),
++        listDisciplines(),
++        listCourseDisciplines(),
++        listClassGroups(),
++        listStudents(),
++        listEnrollments(),
++      ])
++
++      if (orgsRes.status === 'fulfilled') {
++        setOrganizations(orgsRes.value)
++      } else {
++        const msg = orgsRes.reason instanceof Error ? orgsRes.reason.message : 'Erro ao carregar'
++        errors.push(`Organizações (${msg})`)
++      }
++
++      if (crsRes.status === 'fulfilled') {
++        setCourses(crsRes.value)
++      } else {
++        const msg = crsRes.reason instanceof Error ? crsRes.reason.message : 'Erro ao carregar'
++        errors.push(`Cursos (${msg})`)
++      }
++
++      if (discsRes.status === 'fulfilled') {
++        setDisciplines(discsRes.value)
++      } else {
++        const msg = discsRes.reason instanceof Error ? discsRes.reason.message : 'Erro ao carregar'
++        errors.push(`Disciplinas (${msg})`)
++      }
++
++      if (cdsRes.status === 'fulfilled') {
++        setCourseDisciplines(cdsRes.value)
++      } else {
++        const msg = cdsRes.reason instanceof Error ? cdsRes.reason.message : 'Erro ao carregar'
++        errors.push(`Vínculos Curso-Disciplina (${msg})`)
++      }
++
++      if (cgsRes.status === 'fulfilled') {
++        setClassGroups(cgsRes.value)
++      } else {
++        const msg = cgsRes.reason instanceof Error ? cgsRes.reason.message : 'Erro ao carregar'
++        errors.push(`Turmas (${msg})`)
++      }
++
++      if (stdsRes.status === 'fulfilled') {
++        setStudents(stdsRes.value)
++      } else {
++        const msg = stdsRes.reason instanceof Error ? stdsRes.reason.message : 'Erro ao carregar'
++        errors.push(`Alunos (${msg})`)
++      }
++
++      if (enrsRes.status === 'fulfilled') {
++        setEnrollments(enrsRes.value)
++      } else {
++        const msg = enrsRes.reason instanceof Error ? enrsRes.reason.message : 'Erro ao carregar'
++        errors.push(`Matrículas (${msg})`)
++      }
++
++      if (errors.length > 0) {
++        setError(`Falha ao carregar alguns recursos acadêmicos: ${errors.join('; ')}`)
++      }
++    } catch (e) {
++      setError(e instanceof Error ? e.message : 'Falha ao carregar dados acadêmicos.')
++    } finally {
++      setLoading(false)
++    }
++  }
++
++  useEffect(() => {
++    void loadData()
++  }, [])
++
++  // Lookup helpers
++  const getOrgName = (id: string) => organizations.find(o => o.id === id)?.name || id
++  const getCourseName = (id: string) => courses.find(c => c.id === id)?.name || id
++  const getDisciplineName = (id: string) => disciplines.find(d => d.id === id)?.name || id
++  const getCourseDisciplineLabel = (cdId: string) => {
++    const cd = courseDisciplines.find(c => c.id === cdId)
++    if (!cd) return cdId
++    return `${getCourseName(cd.course_id)} / ${getDisciplineName(cd.discipline_id)}`
++  }
++  const getStudentLabel = (id: string) => {
++    const s = students.find(item => item.id === id)
++    return s ? `${s.name} (${s.external_id})` : id
++  }
++  const getClassGroupLabel = (id: string) => {
++    const cg = classGroups.find(c => c.id === id)
++    if (!cg) return id
++    return `Turma ${cg.code} (${cg.period}) — ${getCourseDisciplineLabel(cg.course_discipline_id)}`
++  }
++
++  // Submit handlers
++  async function handleCreateOrganization(e: FormEvent) {
++    e.preventDefault()
++    setError('')
++    setSuccess('')
++    setBusy(true)
++    try {
++      const created = await createOrganization({ name: orgName.trim() })
++      setOrganizations(prev => [...prev, created])
++      setOrgName('')
++      setSuccess(`Organização "${created.name}" cadastrada com sucesso!`)
++    } catch (err) {
++      setError(err instanceof Error ? err.message : 'Não foi possível cadastrar a organização.')
++    } finally {
++      setBusy(false)
++    }
++  }
++
++  async function handleCreateCourse(e: FormEvent) {
++    e.preventDefault()
++    setError('')
++    setSuccess('')
++    setBusy(true)
++    try {
++      const created = await createCourse({
++        organization_id: courseOrgId,
++        name: courseName.trim(),
++        code: courseCode.trim(),
++      })
++      setCourses(prev => [...prev, created])
++      setCourseName('')
++      setCourseCode('')
++      setSuccess(`Curso "${created.name}" (${created.code}) cadastrado com sucesso!`)
++    } catch (err) {
++      setError(err instanceof Error ? err.message : 'Não foi possível cadastrar o curso.')
++    } finally {
++      setBusy(false)
++    }
++  }
++
++  async function handleCreateDiscipline(e: FormEvent) {
++    e.preventDefault()
++    setError('')
++    setSuccess('')
++    setBusy(true)
++    try {
++      const created = await createDiscipline({
++        organization_id: discOrgId,
++        name: discName.trim(),
++        code: discCode.trim(),
++      })
++      setDisciplines(prev => [...prev, created])
++      setDiscName('')
++      setDiscCode('')
++      setSuccess(`Disciplina "${created.name}" (${created.code}) cadastrada com sucesso!`)
++    } catch (err) {
++      setError(err instanceof Error ? err.message : 'Não foi possível cadastrar a disciplina.')
++    } finally {
++      setBusy(false)
++    }
++  }
++
++  async function handleCreateClassGroup(e: FormEvent) {
++    e.preventDefault()
++    setError('')
++    setSuccess('')
++    setBusy(true)
++    try {
++      let assoc = courseDisciplines.find(
++        cd => cd.course_id === classCourseId && cd.discipline_id === classDisciplineId
++      )
++      if (!assoc) {
++        assoc = await createCourseDiscipline({
++          course_id: classCourseId,
++          discipline_id: classDisciplineId,
++        })
++        setCourseDisciplines(prev => [...prev, assoc!])
++      }
++      const created = await createClassGroup({
++        course_discipline_id: assoc.id,
++        period: classPeriod.trim(),
++        code: classCode.trim(),
++      })
++      setClassGroups(prev => [...prev, created])
++      setClassPeriod('')
++      setClassCode('')
++      setSuccess(`Turma "${created.code}" (${created.period}) cadastrada com sucesso!`)
++    } catch (err) {
++      setError(err instanceof Error ? err.message : 'Não foi possível cadastrar a turma.')
++    } finally {
++      setBusy(false)
++    }
++  }
++
++  async function handleCreateStudent(e: FormEvent) {
++    e.preventDefault()
++    setError('')
++    setSuccess('')
++    setBusy(true)
++    try {
++      const created = await createStudent({
++        organization_id: studentOrgId,
++        name: studentName.trim(),
++        external_id: studentExternalId.trim(),
++      })
++      setStudents(prev => [...prev, created])
++      setStudentName('')
++      setStudentExternalId('')
++      setSuccess(`Aluno(a) "${created.name}" (${created.external_id}) cadastrado(a) globalmente com sucesso!`)
++    } catch (err) {
++      setError(err instanceof Error ? err.message : 'Não foi possível cadastrar o aluno.')
++    } finally {
++      setBusy(false)
++    }
++  }
++
++  async function handleCreateEnrollment(e: FormEvent) {
++    e.preventDefault()
++    setError('')
++    setSuccess('')
++    setBusy(true)
++    try {
++      const created = await createEnrollment({
++        class_group_id: enrollmentClassId,
++        student_id: enrollmentStudentId,
++        status: enrollmentStatus,
++      })
++      setEnrollments(prev => [...prev, created])
++      setSuccess('Matrícula efetuada com sucesso!')
++    } catch (err) {
++      setError(err instanceof Error ? err.message : 'Não foi possível realizar a matrícula.')
++    } finally {
++      setBusy(false)
++    }
++  }
++
++  return (
++    <>
++      <div className="page-heading">
++        <div>
++          <p className="eyebrow">Gestão Acadêmica</p>
++          <h1>Estrutura Acadêmica e Turmas</h1>
++          <p>Gerencie turmas, dados cadastrais de alunos e matrículas no AvalIA.</p>
++        </div>
++        <div className="user-area">
++          <span className="status status--published">
++            {isAdmin ? 'Perfil: Administrador' : isProfessor ? 'Perfil: Professor' : 'Perfil: Usuário'}
++          </span>
++        </div>
++      </div>
++
++      {error && <Alert>{error}</Alert>}
++      {success && <Alert type="success">{success}</Alert>}
++
++      <div className="button-row" style={{ marginBottom: '1.5rem' }}>
++        <button
++          type="button"
++          className={`button ${activeTab === 'classes' ? 'button--primary' : 'button--secondary'}`}
++          onClick={() => { setActiveTab('classes'); setError(''); setSuccess('') }}
++        >
++          Turmas ({classGroups.length})
++        </button>
++        <button
++          type="button"
++          className={`button ${activeTab === 'students' ? 'button--primary' : 'button--secondary'}`}
++          onClick={() => { setActiveTab('students'); setError(''); setSuccess('') }}
++        >
++          Alunos — Dados Globais ({students.length})
++        </button>
++        <button
++          type="button"
++          className={`button ${activeTab === 'enrollments' ? 'button--primary' : 'button--secondary'}`}
++          onClick={() => { setActiveTab('enrollments'); setError(''); setSuccess('') }}
++        >
++          Matrículas ({enrollments.length})
++        </button>
++        <button
++          type="button"
++          className={`button ${activeTab === 'courses' ? 'button--primary' : 'button--secondary'}`}
++          onClick={() => { setActiveTab('courses'); setError(''); setSuccess('') }}
++        >
++          Cursos ({courses.length})
++        </button>
++        <button
++          type="button"
++          className={`button ${activeTab === 'disciplines' ? 'button--primary' : 'button--secondary'}`}
++          onClick={() => { setActiveTab('disciplines'); setError(''); setSuccess('') }}
++        >
++          Disciplinas ({disciplines.length})
++        </button>
++        <button
++          type="button"
++          className={`button ${activeTab === 'organizations' ? 'button--primary' : 'button--secondary'}`}
++          onClick={() => { setActiveTab('organizations'); setError(''); setSuccess('') }}
++        >
++          Organizações ({organizations.length})
++        </button>
++      </div>
++
++      {loading ? (
++        <Spinner label="Carregando dados acadêmicos…" />
++      ) : (
++        <>
++          {/* TAB 1: TURMAS */}
++          {activeTab === 'classes' && (
++            <div className="editor-layout">
++              {isAdmin && (
++                <section className="panel">
++                  <h2>Cadastrar Nova Turma</h2>
++                  <p>Uma turma reúne um curso e uma disciplina em um período letivo específico.</p>
++                  <form onSubmit={handleCreateClassGroup} className="form-stack">
++                    <label>
++                      Curso
++                      <select
++                        required
++                        value={classCourseId}
++                        onChange={e => setClassCourseId(e.target.value)}
++                      >
++                        <option value="">Selecione o curso...</option>
++                        {courses.map(c => (
++                          <option key={c.id} value={c.id}>
++                            {c.name} ({c.code})
++                          </option>
++                        ))}
++                      </select>
++                    </label>
++                    <label>
++                      Disciplina
++                      <select
++                        required
++                        value={classDisciplineId}
++                        onChange={e => setClassDisciplineId(e.target.value)}
++                      >
++                        <option value="">Selecione a disciplina...</option>
++                        {disciplines.map(d => (
++                          <option key={d.id} value={d.id}>
++                            {d.name} ({d.code})
++                          </option>
++                        ))}
++                      </select>
++                    </label>
++                    <label>
++                      Período Letivo
++                      <input
++                        required
++                        placeholder="Ex.: 2026-2"
++                        value={classPeriod}
++                        onChange={e => setClassPeriod(e.target.value)}
++                      />
++                    </label>
++                    <label>
++                      Código da Turma
++                      <input
++                        required
++                        placeholder="Ex.: T01"
++                        value={classCode}
++                        onChange={e => setClassCode(e.target.value)}
++                      />
++                    </label>
++                    <div>
++                      <button className="button button--primary" disabled={busy}>
++                        {busy ? 'Cadastrando…' : 'Cadastrar Turma'}
++                      </button>
++                    </div>
++                  </form>
++                </section>
++              )}
++
++              {isProfessor && (
++                <div className="alert alert--info">
++                  Como professor, você visualiza as turmas em que possui vínculo atribuído.
++                </div>
++              )}
++
++              <section className="panel">
++                <h2>Turmas Cadastradas ({classGroups.length})</h2>
++                {classGroups.length === 0 ? (
++                  <p>Nenhuma turma encontrada.</p>
++                ) : (
++                  <div className="table-responsive">
++                    <table className="data-table">
++                      <thead>
++                        <tr>
++                          <th>Código</th>
++                          <th>Período</th>
++                          <th>Curso / Disciplina</th>
++                          <th>ID</th>
++                        </tr>
++                      </thead>
++                      <tbody>
++                        {classGroups.map(cg => (
++                          <tr key={cg.id}>
++                            <td><strong>Turma {cg.code}</strong></td>
++                            <td>{cg.period}</td>
++                            <td>{getCourseDisciplineLabel(cg.course_discipline_id)}</td>
++                            <td><small>{cg.id}</small></td>
++                          </tr>
++                        ))}
++                      </tbody>
++                    </table>
++                  </div>
++                )}
++              </section>
++            </div>
++          )}
++
++          {/* TAB 2: ALUNOS (DADOS GLOBAIS) */}
++          {activeTab === 'students' && (
++            <div className="editor-layout">
++              <div className="alert alert--info">
++                <strong>Separação de Domínio (Student vs. Enrollment):</strong> O cadastro de Aluno
++                contém apenas os dados cadastrais globais da pessoa na instituição de ensino (nome e
++                identificador institucional). O aluno pode existir antes de ser matriculado. Para associá-lo
++                a uma turma, acesse a aba <strong>Matrículas</strong>.
++              </div>
++
++              {isAdmin && (
++                <section className="panel">
++                  <h2>Cadastrar Aluno (Registro Global)</h2>
++                  <p>Cadastre os dados institucionais do estudante. Não vincula diretamente a turmas.</p>
++                  <form onSubmit={handleCreateStudent} className="form-stack">
++                    <label>
++                      Organização
++                      <select
++                        required
++                        value={studentOrgId}
++                        onChange={e => setStudentOrgId(e.target.value)}
++                      >
++                        <option value="">Selecione a organização...</option>
++                        {organizations.map(o => (
++                          <option key={o.id} value={o.id}>
++                            {o.name}
++                          </option>
++                        ))}
++                      </select>
++                    </label>
++                    <label>
++                      Nome Completo
++                      <input
++                        required
++                        placeholder="Ex.: Lucas Mendes de Souza"
++                        value={studentName}
++                        onChange={e => setStudentName(e.target.value)}
++                      />
++                    </label>
++                    <label>
++                      Identificador / Matrícula Institucional Externa
++                      <input
++                        required
++                        placeholder="Ex.: MAT-2026-0042"
++                        value={studentExternalId}
++                        onChange={e => setStudentExternalId(e.target.value)}
++                      />
++                    </label>
++                    <div>
++                      <button className="button button--primary" disabled={busy}>
++                        {busy ? 'Cadastrando…' : 'Cadastrar Aluno Global'}
++                      </button>
++                    </div>
++                  </form>
++                </section>
++              )}
++
++              {isProfessor && (
++                <div className="alert alert--info">
++                  Professores visualizam os alunos matriculados nas suas turmas ativas. O cadastro de novos
++                  alunos institucionais é restrito a administradores.
++                </div>
++              )}
++
++              <section className="panel">
++                <h2>Alunos Cadastrados ({students.length})</h2>
++                {students.length === 0 ? (
++                  <p>Nenhum aluno encontrado.</p>
++                ) : (
++                  <div className="table-responsive">
++                    <table className="data-table">
++                      <thead>
++                        <tr>
++                          <th>Nome</th>
++                          <th>Identificador Externo</th>
++                          <th>Organização</th>
++                          <th>ID</th>
++                        </tr>
++                      </thead>
++                      <tbody>
++                        {students.map(s => (
++                          <tr key={s.id}>
++                            <td><strong>{s.name}</strong></td>
++                            <td><code>{s.external_id}</code></td>
++                            <td>{getOrgName(s.organization_id)}</td>
++                            <td><small>{s.id}</small></td>
++                          </tr>
++                        ))}
++                      </tbody>
++                    </table>
++                  </div>
++                )}
++              </section>
++            </div>
++          )}
++
++          {/* TAB 3: MATRÍCULAS (VÍNCULO TURMA-ALUNO) */}
++          {activeTab === 'enrollments' && (
++            <div className="editor-layout">
++              <div className="alert alert--info">
++                <strong>Matrícula em Turma (Enrollment):</strong> Vincula um aluno previamente cadastrado
++                a uma turma específica de um período letivo. Professores responsáveis podem matricular
++                alunos diretamente em suas turmas.
++              </div>
++
++              <section className="panel">
++                <h2>Realizar Matrícula</h2>
++                <p>Selecione a turma e o aluno pré-cadastrado para criar o vínculo de matrícula.</p>
++                <form onSubmit={handleCreateEnrollment} className="form-stack">
++                  <label>
++                    Turma
++                    <select
++                      required
++                      value={enrollmentClassId}
++                      onChange={e => setEnrollmentClassId(e.target.value)}
++                    >
++                      <option value="">Selecione a turma...</option>
++                      {classGroups.map(cg => (
++                        <option key={cg.id} value={cg.id}>
++                          {getClassGroupLabel(cg.id)}
++                        </option>
++                      ))}
++                    </select>
++                  </label>
++                  <label>
++                    Aluno
++                    <select
++                      required
++                      value={enrollmentStudentId}
++                      onChange={e => setEnrollmentStudentId(e.target.value)}
++                    >
++                      <option value="">Selecione o aluno...</option>
++                      {students.map(s => (
++                        <option key={s.id} value={s.id}>
++                          {s.name} ({s.external_id})
++                        </option>
++                      ))}
++                    </select>
++                  </label>
++                  <label>
++                    Status da Matrícula
++                    <select
++                      value={enrollmentStatus}
++                      onChange={e => setEnrollmentStatus(e.target.value as EnrollmentStatus)}
++                    >
++                      <option value="ACTIVE">Ativa (ACTIVE)</option>
++                      <option value="SUSPENDED">Trancada / Suspensa (SUSPENDED)</option>
++                      <option value="WITHDRAWN">Desistência / Cancelada (WITHDRAWN)</option>
++                      <option value="COMPLETED">Concluída (COMPLETED)</option>
++                    </select>
++                  </label>
++                  <div>
++                    <button className="button button--primary" disabled={busy}>
++                      {busy ? 'Matriculando…' : 'Matricular Aluno na Turma'}
++                    </button>
++                  </div>
++                </form>
++              </section>
++
++              <section className="panel">
++                <h2>Matrículas Registradas ({enrollments.length})</h2>
++                {enrollments.length === 0 ? (
++                  <p>Nenhuma matrícula registrada.</p>
++                ) : (
++                  <div className="table-responsive">
++                    <table className="data-table">
++                      <thead>
++                        <tr>
++                          <th>Aluno</th>
++                          <th>Turma</th>
++                          <th>Status</th>
++                          <th>Data Matrícula</th>
++                          <th>ID</th>
++                        </tr>
++                      </thead>
++                      <tbody>
++                        {enrollments.map(enr => (
++                          <tr key={enr.id}>
++                            <td><strong>{getStudentLabel(enr.student_id)}</strong></td>
++                            <td>{getClassGroupLabel(enr.class_group_id)}</td>
++                            <td>
++                              <span className={`badge ${enr.status === 'ACTIVE' ? 'status--published' : ''}`}>
++                                {enr.status}
++                              </span>
++                            </td>
++                            <td>{new Date(enr.enrolled_at).toLocaleDateString('pt-BR')}</td>
++                            <td><small>{enr.id}</small></td>
++                          </tr>
++                        ))}
++                      </tbody>
++                    </table>
++                  </div>
++                )}
++              </section>
++            </div>
++          )}
++
++          {/* TAB 4: CURSOS */}
++          {activeTab === 'courses' && (
++            <div className="editor-layout">
++              {isAdmin && (
++                <section className="panel">
++                  <h2>Cadastrar Curso</h2>
++                  <form onSubmit={handleCreateCourse} className="form-stack">
++                    <label>
++                      Organização
++                      <select
++                        required
++                        value={courseOrgId}
++                        onChange={e => setCourseOrgId(e.target.value)}
++                      >
++                        <option value="">Selecione a organização...</option>
++                        {organizations.map(o => (
++                          <option key={o.id} value={o.id}>
++                            {o.name}
++                          </option>
++                        ))}
++                      </select>
++                    </label>
++                    <label>
++                      Nome do Curso
++                      <input
++                        required
++                        placeholder="Ex.: Engenharia de Software"
++                        value={courseName}
++                        onChange={e => setCourseName(e.target.value)}
++                      />
++                    </label>
++                    <label>
++                      Código do Curso
++                      <input
++                        required
++                        placeholder="Ex.: ENG-SOFT"
++                        value={courseCode}
++                        onChange={e => setCourseCode(e.target.value)}
++                      />
++                    </label>
++                    <div>
++                      <button className="button button--primary" disabled={busy}>
++                        {busy ? 'Cadastrando…' : 'Cadastrar Curso'}
++                      </button>
++                    </div>
++                  </form>
++                </section>
++              )}
++
++              {isProfessor && (
++                <div className="alert alert--info">
++                  Professores têm acesso de consulta aos cursos associados às suas turmas.
++                </div>
++              )}
++
++              <section className="panel">
++                <h2>Cursos Cadastrados ({courses.length})</h2>
++                {courses.length === 0 ? (
++                  <p>Nenhum curso encontrado.</p>
++                ) : (
++                  <div className="table-responsive">
++                    <table className="data-table">
++                      <thead>
++                        <tr>
++                          <th>Nome</th>
++                          <th>Código</th>
++                          <th>Organização</th>
++                          <th>ID</th>
++                        </tr>
++                      </thead>
++                      <tbody>
++                        {courses.map(c => (
++                          <tr key={c.id}>
++                            <td><strong>{c.name}</strong></td>
++                            <td><code>{c.code}</code></td>
++                            <td>{getOrgName(c.organization_id)}</td>
++                            <td><small>{c.id}</small></td>
++                          </tr>
++                        ))}
++                      </tbody>
++                    </table>
++                  </div>
++                )}
++              </section>
++            </div>
++          )}
++
++          {/* TAB 5: DISCIPLINAS */}
++          {activeTab === 'disciplines' && (
++            <div className="editor-layout">
++              {isAdmin && (
++                <section className="panel">
++                  <h2>Cadastrar Disciplina</h2>
++                  <form onSubmit={handleCreateDiscipline} className="form-stack">
++                    <label>
++                      Organização
++                      <select
++                        required
++                        value={discOrgId}
++                        onChange={e => setDiscOrgId(e.target.value)}
++                      >
++                        <option value="">Selecione a organização...</option>
++                        {organizations.map(o => (
++                          <option key={o.id} value={o.id}>
++                            {o.name}
++                          </option>
++                        ))}
++                      </select>
++                    </label>
++                    <label>
++                      Nome da Disciplina
++                      <input
++                        required
++                        placeholder="Ex.: Estruturas de Dados e Algoritmos"
++                        value={discName}
++                        onChange={e => setDiscName(e.target.value)}
++                      />
++                    </label>
++                    <label>
++                      Código da Disciplina
++                      <input
++                        required
++                        placeholder="Ex.: EDA-01"
++                        value={discCode}
++                        onChange={e => setDiscCode(e.target.value)}
++                      />
++                    </label>
++                    <div>
++                      <button className="button button--primary" disabled={busy}>
++                        {busy ? 'Cadastrando…' : 'Cadastrar Disciplina'}
++                      </button>
++                    </div>
++                  </form>
++                </section>
++              )}
++
++              {isProfessor && (
++                <div className="alert alert--info">
++                  Professores têm acesso de consulta às disciplinas associadas às suas turmas.
++                </div>
++              )}
++
++              <section className="panel">
++                <h2>Disciplinas Cadastradas ({disciplines.length})</h2>
++                {disciplines.length === 0 ? (
++                  <p>Nenhuma disciplina encontrada.</p>
++                ) : (
++                  <div className="table-responsive">
++                    <table className="data-table">
++                      <thead>
++                        <tr>
++                          <th>Nome</th>
++                          <th>Código</th>
++                          <th>Organização</th>
++                          <th>ID</th>
++                        </tr>
++                      </thead>
++                      <tbody>
++                        {disciplines.map(d => (
++                          <tr key={d.id}>
++                            <td><strong>{d.name}</strong></td>
++                            <td><code>{d.code}</code></td>
++                            <td>{getOrgName(d.organization_id)}</td>
++                            <td><small>{d.id}</small></td>
++                          </tr>
++                        ))}
++                      </tbody>
++                    </table>
++                  </div>
++                )}
++              </section>
++            </div>
++          )}
++
++          {/* TAB 6: ORGANIZAÇÕES */}
++          {activeTab === 'organizations' && (
++            <div className="editor-layout">
++              {isAdmin && (
++                <section className="panel">
++                  <h2>Cadastrar Organização</h2>
++                  <form onSubmit={handleCreateOrganization} className="form-stack">
++                    <label>
++                      Nome da Organização / Instituição
++                      <input
++                        required
++                        placeholder="Ex.: Instituto de Tecnologia e Educação"
++                        value={orgName}
++                        onChange={e => setOrgName(e.target.value)}
++                      />
++                    </label>
++                    <div>
++                      <button className="button button--primary" disabled={busy}>
++                        {busy ? 'Cadastrando…' : 'Cadastrar Organização'}
++                      </button>
++                    </div>
++                  </form>
++                </section>
++              )}
++
++              {isProfessor && (
++                <div className="alert alert--info">
++                  Professores têm acesso de consulta à organização associada às suas turmas.
++                </div>
++              )}
++
++              <section className="panel">
++                <h2>Organizações Cadastradas ({organizations.length})</h2>
++                {organizations.length === 0 ? (
++                  <p>Nenhuma organização encontrada.</p>
++                ) : (
++                  <div className="table-responsive">
++                    <table className="data-table">
++                      <thead>
++                        <tr>
++                          <th>Nome da Organização</th>
++                          <th>ID</th>
++                        </tr>
++                      </thead>
++                      <tbody>
++                        {organizations.map(o => (
++                          <tr key={o.id}>
++                            <td><strong>{o.name}</strong></td>
++                            <td><small>{o.id}</small></td>
++                          </tr>
++                        ))}
++                      </tbody>
++                    </table>
++                  </div>
++                )}
++              </section>
++            </div>
++          )}
++        </>
++      )}
++    </>
++  )
++}

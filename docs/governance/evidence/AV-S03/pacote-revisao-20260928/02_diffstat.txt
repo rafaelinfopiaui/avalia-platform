@@ -1,0 +1,15 @@
+ core/app/config.py                               |   3 +
+ core/app/main.py                                 | 191 +++++++++++++------
+ core/app/models.py                               | 129 +++++++++++++
+ core/app/schemas.py                              |   6 +
+ docs/contracts/openapi.yaml                      | 233 +++++++++++++++++++++++
+ docs/governance/executive_technical_dashboard.md |  10 +-
+ docs/governance/snapshots/latest_execution.md    |  10 +-
+ frontend/.env.example                            |   1 +
+ frontend/src/App.tsx                             |   4 +-
+ frontend/src/components/Layout.tsx               |   5 +-
+ frontend/src/pages/AssessmentEditorPage.tsx      | 134 +++++++++++--
+ frontend/src/services/api.ts                     | 112 ++++++++++-
+ frontend/src/styles/theme.css                    |   2 +-
+ frontend/src/types.ts                            |  63 +++++-
+ 14 files changed, 809 insertions(+), 94 deletions(-)

@@ -1,0 +1,40 @@
+# Inventário completo — pacote de revisão AV-S03 (2026-09-28)
+
+Base: local/av-s03-recuperacao @ 66c95201daf893fa7b2852e0d94b20314f8d8f34 (== origin/main, 0 divergência)
+
+## Arquivos MODIFICADOS (rastreados, diff em 03_diff_arquivos_rastreados.patch)
+
+core/app/config.py  size=1728B  sha256=6eff23444e7c73c6adbc6f4b2d2042d23269bd4471523bed6f722a007071a7d1
+core/app/main.py  size=22344B  sha256=94f7f1e4398b9ba26497e61a70f67e87876e2f99661f75f44efc3a25a40f1fa1
+core/app/models.py  size=13661B  sha256=91accbf2f9d77309aa74f442c2f62506c9ca0dee53c9454bc24d4acca58894ff
+core/app/schemas.py  size=4240B  sha256=c074e448bc04b294375e9754d5aa240e57a611d63e12beee2b457ffd52544d7b
+docs/contracts/openapi.yaml  size=25374B  sha256=4cb51bb75c8ddebf5a1a3c18b044bd30e654a286bbd33d0ecb47ad67d18ceb5e
+docs/governance/executive_technical_dashboard.md  size=21397B  sha256=5737efdde2d0637db13f8d193293e77446d1774b5673b8cfb889ea94b4a927d3
+docs/governance/snapshots/latest_execution.md  size=2682B  sha256=96c1a8e698eef30906623bc301cd18728434f899cebc2c580d67717a60ba9936
+frontend/.env.example  size=72B  sha256=ce531e98b2c5ab2281f25759f568d2d14c7a59390110996d20cb39b6a68e56f7
+frontend/src/App.tsx  size=2222B  sha256=3e5d7bce1a8e471869fe829fd8e570bdc8ddbdbcfa8ee2ecb827ce5cad596e51
+frontend/src/components/Layout.tsx  size=840B  sha256=5f5d2f64434a3d56f0339b4a9e555abd19b35be36e087388484f8669e6e0e4b0
+frontend/src/pages/AssessmentEditorPage.tsx  size=10590B  sha256=75a630c740e56fe8ccdccacdf2ec3c0dbd8e6a3031ecd97a6f7f620d32eaa32c
+frontend/src/services/api.ts  size=10405B  sha256=1c024442d0530e5a5946d289646d1f808778851794c20a2a2bb4e5937f32c337
+frontend/src/styles/theme.css  size=8966B  sha256=17052c491e3d95cf2e39b3d56e8473f74a4779e8c8e59f0f0e9829890ae183b7
+frontend/src/types.ts  size=3114B  sha256=b101aec723cd154786569889c25a9d07a75356edc901f5bfebc5fa7506d7991b
+
+## Arquivos NOVOS (não rastreados, diff em 05_diff_arquivos_novos.patch, cópia bruta em arquivos_novos_raw/)
+
+core/alembic/versions/c4a8b2d91e37_add_academic_structure.py  size=6873B  sha256=450ebefa9851a7d3f91843bcff40b3456ecb8fae68fbb74a06ace1f5da06585a
+core/app/routers/__init__.py  size=19B  sha256=1f54ad6d81835514ba83e264dd451fd7b89b033d4af0851adbb35f3cc91a36b0
+core/app/routers/academic.py  size=17688B  sha256=c701091af05e6ffd990b45941480348c0d285c8f5fdeee81263aac4ecba6bd76
+core/app/tests/test_academic_authorization.py  size=16296B  sha256=bcf1be3f34c0a02f9c5341841cf41c823ccf640ced74a4d7a0ecce99e49ee1ed
+core/app/tests/test_academic_structure.py  size=4760B  sha256=39533ea476b2458fb30a6ee23f95c4cabc043f1f26faea6fba1faf39ba795665
+docs/governance/evidence/AV-S03/AC-07-AC-09_revisao_arquitetura.md  size=3791B  sha256=92d0feac8697709868a33f97d7be0774bbc2ca91dde472d350c20ecbbf209f48
+docs/governance/evidence/AV-S03/AC-10-scripts/ac10_scenarios.py  size=8561B  sha256=15436e22ec468bf0604b0f505679a1240e6970b75fd278412b3cd9810fb65f30
+docs/governance/evidence/AV-S03/AC-10-scripts/ac10_seed.py  size=12048B  sha256=6cebbea44e1a8649ecae2ff57ac1d38aa549896116ecb33faebc0d56ceec0103
+docs/governance/evidence/AV-S03/AC-10_validacao_denominador.md  size=7827B  sha256=d46312a459f8f6330feccb0983caf80452ca32f71d2ce98760db2fc3ee1642c5
+docs/governance/snapshots/snapshot_EXEC-2026-09-28-01_BL-AV-2-03-testes.md  size=3110B  sha256=6ed605842872dbd473f1ce4df63c6f949a4f9616df62276bff35264fb372d137
+docs/governance/snapshots/snapshot_EXEC-2026-09-28-02_BL-AV-2-03-revisao-antigravity.md  size=4494B  sha256=5097c48da04a096206041357a38c239e62fed3530438ace0f02e01a563b65944
+docs/governance/snapshots/snapshot_EXEC-2026-09-28-03_BL-AV-2-03-segunda-revisao-antigravity.md  size=4181B  sha256=6bbe381303ad1d299c3723f5d3ac2bf9a9a66d2380109242a63480ca45d46bde
+docs/governance/snapshots/snapshot_EXEC-2026-09-28-04_BL-AV-2-03-terceira-revisao-antigravity.md  size=4477B  sha256=f70e7e40cf300d702f2d66b22402f3c769fa5f1c7c95e08cbecff2133e136d9d
+docs/governance/snapshots/snapshot_EXEC-2026-09-28-05_homologacao-bl-av-2-03-execucao-av-s03.md  size=9925B  sha256=a6c20eb8ae42737bf0a3e60af29e94e889a444b86859bf795fe00b633fa4a34c
+docs/governance/snapshots/snapshot_EXEC-2026-09-28-06_BL-AV-2-04-revisao-codex.md  size=4731B  sha256=45c1916fa2eab64c654cd9a77ef3025bd44e352657e68e2251698ab310c02be6
+docs/governance/snapshots/snapshot_EXEC-2026-09-28-07_BL-AV-2-04-correcao-revalidacao.md  size=5610B  sha256=a38ab1af08a5a79d9e3ef7d77501d3bf9b069323b8e51748e60fe2ecfa5c33d6
+frontend/src/pages/AcademicPage.tsx  size=34774B  sha256=81ba195e831b14cae5709b55c4c7b8df5bb369cf68b501ae60a4db3c6ccbbfe7
