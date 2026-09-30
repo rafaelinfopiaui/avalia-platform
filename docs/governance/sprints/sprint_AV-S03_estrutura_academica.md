@@ -515,9 +515,38 @@ independentes.
 
 ## 17. Execução e review
 
-**Não iniciado.** Preencher somente após aprovação explícita de Rafael e abertura formal da sprint.
+Executada localmente em 2026-09-24 (worktree isolado, depois reconstruído após
+perda do worktree original — ver `snapshot_EXEC-2026-09-28-01_pacote_revisao_av-s03.md`
+§3) e revalidada em rodadas subsequentes. Revisão cruzada independente:
+Antigravity CLI (3 rodadas sobre `BL-AV-2-03`, terceira **APROVADO SEM
+RESSALVAS**) e Codex (confirmação de Ruff/testes). `BL-AV-2-04` corrigido após
+2ª rodada de revisão do Codex. Homologação técnica de `BL-AV-2-03` em
+`DEC-AV-026` (2026-09-28); homologação de `BL-AV-2-04` e da entrega funcional
+completa da AV-S03 em `DEC-AV-027` (2026-09-29). AC-05 fechado com evidência
+visual real em rodada adicional (`snapshot_EXEC-2026-09-29-03_ac05-reconciliacao-pr2.md`).
+Integração ao `main` autorizada e executada via PR #3 (merge commit `c391865`,
+CI 3/3 verde) e PR #4 (encerramento documental, merge commit `a5974b1`, CI 3/3
+verde). Estado final: **12 de 12 critérios de aceite executados e confirmados**
+(conforme banner do dashboard, seção 1), `DEBT-AV-012` aceito como débito
+residual. Migração operacional em `avalia_dev` permanece não aplicada
+(fora do escopo desta sprint).
+
+*(Nota de reconciliação, 2026-09-30, auditoria GOV-006: esta seção e a
+seção 18 abaixo estavam desatualizadas — ainda descreviam a sprint como
+"não iniciada"/"apenas planejada" apesar de o frontmatter já registrar
+`status: homologada_integracao_autorizada_2026-09-29_DEC-AV-027` e de a
+integração já estar concluída em `main`. Corrigido nesta auditoria com base
+em evidência já existente nos registros canônicos citados acima — nenhum
+critério foi reavaliado nem recalculado, apenas a seção de fechamento do
+próprio documento de sprint foi preenchida para refletir o que os registros
+canônicos já diziam.)*
 
 ## 18. Closure gate
 
-Não aplicável enquanto a sprint estiver apenas planejada. Ao final de execução futura, aplicar
-[`sprint_closure_gate.md`](../sprint_closure_gate.md).
+Fechamento formal aplicado — ver `sprint_closure_gate.md`. Critérios críticos
+(AC-01 a AC-08, AC-11, AC-12) atendidos com evidência; nenhuma falha crítica
+sem exceção registrada. `DEC-AV-026`/`DEC-AV-027` constituem a homologação de
+Rafael para os itens funcionais (`BL-AV-2-03`, `BL-AV-2-04`) e para a entrega
+completa da sprint, respectivamente. Integração a `main` autorizada e
+concretizada (PR #3, PR #4). Nenhuma migração operacional, deploy ou
+promoção de baseline foi incluída nesta homologação.

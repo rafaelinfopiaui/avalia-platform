@@ -1,0 +1,603 @@
+--- integrada-main-359-linhas
++++ local-checkout-principal-676-linhas-NAO-APROVADA
+@@ -47,11 +47,11 @@
+ ORDER BY created_at;
+ ```
+ 
+-| id | actor_id | action | created_at |
+-|---|---|---|---|
+-| `b12db6d4-3b44-42ca-aa9a-99748fc4b982` | `cabba145-18bc-40a1-9faa-489f4bfda018` | REVIEW_APPROVE | 2026-09-23 22:53:35.114334 |
+-| `4f737eab-3ba0-40af-8738-ae847377ba34` | `cabba145-18bc-40a1-9faa-489f4bfda018` | REVIEW_APPROVE | 2026-09-23 22:55:15.907615 |
+-| `cad4d910-8c91-4a7e-9714-266fac3f7ee6` | `cabba145-18bc-40a1-9faa-489f4bfda018` | REVIEW_APPROVE | 2026-09-23 22:58:47.636134 |
++| id | actor_id | action | before_json | after_json | created_at |
++|---|---|---|---|---|---|
++| `b12db6d4-3b44-42ca-aa9a-99748fc4b982` | `cabba145-18bc-40a1-9faa-489f4bfda018` | REVIEW_APPROVE | scores C1=1.00, C2=1.00 (objeto) | mesmos scores (array) | 2026-09-23 22:53:35.114334 |
++| `4f737eab-3ba0-40af-8738-ae847377ba34` | `cabba145-18bc-40a1-9faa-489f4bfda018` | REVIEW_APPROVE | idêntico ao acima, byte a byte | idêntico ao acima, byte a byte | 2026-09-23 22:55:15.907615 |
++| `cad4d910-8c91-4a7e-9714-266fac3f7ee6` | `cabba145-18bc-40a1-9faa-489f4bfda018` | REVIEW_APPROVE | idêntico ao acima, byte a byte | idêntico ao acima, byte a byte | 2026-09-23 22:58:47.636134 |
+ 
+ O procedimento de aprovação deve registrar também `before_json` e `after_json` desses 3 eventos no relatório pré-operação. Mesmo com a correlação forte acima, não alegamos FK inexistente: a associação continua lógica/temporal. Total afetado pela preservação: **3 linhas em `human_reviews` + 3 linhas em `audit_events`**, todas relativas ao mesmo job; apenas as 2 revisões equivalentes excedentes serão movidas, e nenhum evento de auditoria será tocado.
+ 
+@@ -71,10 +71,14 @@
+ 
+ ## 4. Preservação das demais revisões e referências de auditoria
+ 
+-Nenhuma linha é apagada (`DELETE`) em nenhum momento. Proposta:
++A estratégia é **copiar para uma tabela de arquivo e, na mesma transação, remover (`DELETE`) as
++2 linhas excedentes da tabela ativa** — não é ausência de `DELETE`; é preservação por cópia
++antes da remoção, nunca perda de dado. As duas operações (INSERT no arquivo + DELETE da tabela
++ativa) ocorrem dentro da mesma transação SQL, de modo que uma falha em qualquer etapa reverte
++ambas (ver seção 7.3).
+ 
+ - Criar tabela de arquivo `human_reviews_superseded`, com a mesma estrutura de `human_reviews` mais duas colunas: `superseded_reason` (texto, ex.: `"duplicate-equivalent-review-pre-BL-AV-1-10"`) e `superseded_at` (timestamp da operação de saneamento).
+-- Mover (não copiar e apagar — mover atomicamente dentro de uma transação: `INSERT INTO human_reviews_superseded SELECT ..., 'motivo', now() FROM human_reviews WHERE id IN (...)` seguido de `DELETE FROM human_reviews WHERE id IN (...)`, ambos na mesma transação) as 2 linhas não-vencedoras (`8a9c2ba6-...` e `9459489c-...`) para essa tabela de arquivo.
++- Copiar as 2 linhas não-vencedoras (`8a9c2ba6-...` e `9459489c-...`) para essa tabela, **comparar integralmente** a cópia contra o conteúdo original ainda presente em `human_reviews` (todas as colunas, não apenas contagem) e só então executar o `DELETE` dessas 2 linhas da tabela ativa — na mesma transação, com verificação executável entre as duas operações (ver seção 7.3).
+ - A linha vencedora (`31d31b5c-...`) permanece em `human_reviews`, com o mesmo `id` — nenhuma referência futura à sua chave primária é afetada.
+ - Os 3 `AuditEvent` em `audit_events` **não são tocados** — nenhuma linha de auditoria é movida, apagada ou alterada. `audit_events` já é, por desenho, um log de eventos (não uma fonte de verdade de estado atual), e mover/apagar entradas de auditoria destruiria o histórico de que 3 tentativas de aprovação ocorreram — informação relevante mesmo após o saneamento.
+ 
+@@ -115,13 +119,23 @@
+ 
+ Mitigação proposta (todos os itens obrigatórios, não opcionais):
+ 1. Executar a operação em janela de manutenção comunicada, com **todos os writers confirmadamente parados**: processo(s) Core/uvicorn, workers/background tasks, shells/scripts de escrita e qualquer outra instância conectada com capacidade de INSERT. Registrar `pg_stat_activity` antes da operação e abortar se houver writer não identificado.
+-2. Dentro da transação, adquirir `LOCK TABLE human_reviews IN SHARE ROW EXCLUSIVE MODE;`, que conflita com `INSERT`/`UPDATE`/`DELETE` concorrentes (ao contrário de `SELECT ... FOR UPDATE`, que bloqueia apenas as linhas já encontradas e **não** impediria um novo INSERT para o mesmo `job_id`).
++2. Dentro da transação, adquirir `LOCK TABLE human_reviews IN SHARE ROW EXCLUSIVE MODE;`, que conflita com `INSERT`/`UPDATE`/`DELETE` concorrentes (ao contrário de `SELECT ... FOR UPDATE`, que bloqueia apenas as linhas já encontradas e **não** impediria um novo INSERT para o mesmo `job_id`). **Este lock é válido apenas durante a transação em aberto — ele é liberado automaticamente no `COMMIT` (ou `ROLLBACK`).** Ele não protege o período entre o `COMMIT` do saneamento e a aplicação da migração: nesse intervalo, a única proteção contra concorrência é a manutenção dos writers parados (item 1), não o lock.
+ 3. Após adquirir o lock de tabela, repetir o diagnóstico completo de equivalência e as assertions nominais dos IDs/conteúdos esperados; só então mover as linhas.
+-4. Manter a aplicação e todos os writers parados desde antes do backup final até o `COMMIT`, pós-checks, aplicação da `UniqueConstraint` e verificação da constraint — não liberar escrita no intervalo entre saneamento e migração.
+-5. Após a constraint existir e os pós-checks passarem, liberar a aplicação para escrita. A proteção aplicativa integrada em `main` é uma camada adicional, mas não substitui o lock/maintenance window deste procedimento.
++4. Manter a aplicação e todos os writers parados desde antes do backup final até a aplicação da `UniqueConstraint` e a verificação da constraint (seção 8) — não liberar escrita entre o `COMMIT` do saneamento e o `COMMIT`/verificação da migração. Essa continuidade dos writers parados é a proteção real desse intervalo, não o `LOCK TABLE`, que já foi liberado.
++5. Após a constraint existir e os pós-checks passarem, liberar a aplicação para escrita. A proteção aplicativa integrada em `main` é uma camada adicional, mas não substitui a janela de manutenção deste procedimento.
+ 
+ ## 7. Comandos, verificações posteriores e plano de recuperação
+ 
++**Execução obrigatória com parada no primeiro erro:** todo o script deve ser executado via
++`psql -v ON_ERROR_STOP=1 -f av_s02_saneamento_human_reviews.sql`. A opção `ON_ERROR_STOP=1`
++interrompe a execução no primeiro comando que falhar, incluindo qualquer `RAISE EXCEPTION` das
++assertions abaixo. O script contém seu próprio `LOCK TABLE`/`COMMIT` explícitos (seção 7.3/7.4) —
++por isso **não** usar a flag `--single-transaction` do `psql` (que envolveria todo o script numa
++transação implícita e entraria em conflito com o `COMMIT` explícito do próprio script). Se
++qualquer `DO $$ ... RAISE EXCEPTION ... END $$;` disparar, a sessão psql aborta imediatamente com
++`ON_ERROR_STOP=1` e a transação em aberto sofre rollback automático ao encerrar a conexão sem
++`COMMIT` — nenhuma escrita parcial é confirmada.
++
+ ### 7.1 Script de diagnóstico (somente leitura, primeiro passo, sempre)
+ 
+ ```sql
+@@ -155,17 +169,13 @@
+ )
+ SELECT * FROM duplicate_groups ORDER BY job_id;
+ ```
++
+ Se qualquer uma das colunas `distinct_reviewers`, `distinct_decisions`, `distinct_totals`,
+ `distinct_scores` ou `distinct_justifications` for maior que 1 para algum `job_id`, esse grupo é
+-**conflitante** — a operação para e Rafael decide manualmente antes de qualquer escrita.
++**conflitante** — a operação para e Rafael decide manualmente antes de qualquer escrita. Essa
++verificação também é executada como assertion real dentro da transação (seção 7.3), não apenas
++como consulta manual.
+ 
+-**Assertions nominais obrigatórias imediatamente antes da escrita (já sob lock de tabela):**
+-- o único grupo duplicado continua sendo `4f56a10b-...`;
+-- contém exatamente os três IDs inventariados na seção 1;
+-- a linha ativa candidata `31d31b5c-...` mantém todos os campos esperados;
+-- as outras duas linhas são semanticamente equivalentes (`distinct_* = 1` em todas as dimensões).
+-Qualquer desvio aborta a transação.
+-
+ ### 7.2 Tabela de arquivo (DDL explícito, versionado e executado antes da migração de unicidade)
+ 
+ Não usar `CREATE TABLE ... LIKE INCLUDING ALL`: após a migração, isso poderia copiar por engano a
+@@ -175,48 +185,216 @@
+ 
+ **Sequência proposta, objetiva:** após aprovação deste plano, criar em branch/PR um script SQL
+ versionado separado (proposta de caminho: `core/scripts/av_s02_saneamento_human_reviews.sql`) que
+-contém, na ordem: `BEGIN`, lock de tabela, diagnóstico/assertions, DDL abaixo, INSERT/DELETE,
+-pós-checks e `COMMIT`. O script é revisado/testado no banco restaurado isolado antes de qualquer
+-uso em `avalia_dev`. Assim a criação da tabela acontece **na mesma transação e imediatamente antes
+-do INSERT**, sem depender da cadeia Alembic. A migração `7b1d6d853f20` só é executada depois do
+-`COMMIT` desse script, ainda com writers parados.
++contém, na ordem: verificação/criação da tabela de arquivo (bloco `DO $$` desta seção, fora do
++`BEGIN` explícito; o `psql` confirma esse comando porque opera em modo autocommit nesse ponto — DDL
++PostgreSQL continua transacional), depois a transação explícita `BEGIN` (seção 7.3) com lock de
++tabela, diagnóstico/assertions executáveis, INSERT, comparação integral (cópia vs. original),
++DELETE, pós-checks executáveis e `COMMIT` (seção 7.4). A migração `7b1d6d853f20` é um passo
++separado, executado depois, com `alembic upgrade head`, ainda com os writers parados.
+ 
+-DDL explícito, sem FK/unique que impeça preservar o histórico:
++DDL explícito, sem FK/unique que impeça preservar o histórico. A criação é condicional e validada
++por assertion executável, não por `IF NOT EXISTS` silencioso:
+ 
+ ```sql
+-CREATE TABLE human_reviews_superseded (
+-    id VARCHAR PRIMARY KEY,
+-    job_id VARCHAR NOT NULL,
+-    reviewer_id VARCHAR NOT NULL,
+-    decision reviewdecision NOT NULL,
+-    final_total NUMERIC(6,2) NOT NULL,
+-    final_scores_json TEXT NOT NULL,
+-    justification TEXT,
+-    created_at TIMESTAMP NOT NULL,
+-    superseded_reason TEXT NOT NULL,
+-    superseded_at TIMESTAMP NOT NULL DEFAULT now()
+-);
+-CREATE INDEX ix_human_reviews_superseded_job_id
+-    ON human_reviews_superseded(job_id);
++DO $$
++DECLARE
++    v_table_exists boolean;
++    v_schema_ok boolean;
++BEGIN
++    SELECT EXISTS (
++        SELECT 1 FROM pg_catalog.pg_tables
++        WHERE schemaname = 'public' AND tablename = 'human_reviews_superseded'
++    ) INTO v_table_exists;
++
++    IF NOT v_table_exists THEN
++        CREATE TABLE human_reviews_superseded (
++            id VARCHAR PRIMARY KEY,
++            job_id VARCHAR NOT NULL,
++            reviewer_id VARCHAR NOT NULL,
++            decision reviewdecision NOT NULL,
++            final_total NUMERIC(6,2) NOT NULL,
++            final_scores_json TEXT NOT NULL,
++            justification TEXT,
++            created_at TIMESTAMP NOT NULL,
++            superseded_reason TEXT NOT NULL,
++            superseded_at TIMESTAMP NOT NULL DEFAULT now()
++        );
++        CREATE INDEX ix_human_reviews_superseded_job_id
++            ON human_reviews_superseded(job_id);
++    ELSE
++        -- Tabela já existe: validar schema real, não seguir silenciosamente.
++        SELECT
++            (SELECT COUNT(*) = 10
++             FROM information_schema.columns
++             WHERE table_schema = 'public'
++               AND table_name = 'human_reviews_superseded')
++            AND NOT EXISTS (
++                SELECT 1
++                FROM (VALUES
++                    ('id', 'character varying', 'varchar', 'NO'),
++                    ('job_id', 'character varying', 'varchar', 'NO'),
++                    ('reviewer_id', 'character varying', 'varchar', 'NO'),
++                    ('decision', 'USER-DEFINED', 'reviewdecision', 'NO'),
++                    ('final_total', 'numeric', 'numeric', 'NO'),
++                    ('final_scores_json', 'text', 'text', 'NO'),
++                    ('justification', 'text', 'text', 'YES'),
++                    ('created_at', 'timestamp without time zone', 'timestamp', 'NO'),
++                    ('superseded_reason', 'text', 'text', 'NO'),
++                    ('superseded_at', 'timestamp without time zone', 'timestamp', 'NO')
++                ) AS expected(column_name, data_type, udt_name, is_nullable)
++                LEFT JOIN information_schema.columns actual
++                  ON actual.table_schema = 'public'
++                 AND actual.table_name = 'human_reviews_superseded'
++                 AND actual.column_name = expected.column_name
++                 AND actual.data_type = expected.data_type
++                 AND actual.udt_name = expected.udt_name
++                 AND actual.is_nullable = expected.is_nullable
++                WHERE actual.column_name IS NULL
++            )
++            AND EXISTS (
++                SELECT 1
++                FROM information_schema.columns
++                WHERE table_schema = 'public'
++                  AND table_name = 'human_reviews_superseded'
++                  AND column_name = 'final_total'
++                  AND numeric_precision = 6
++                  AND numeric_scale = 2
++            )
++            AND EXISTS (
++                SELECT 1
++                FROM information_schema.columns
++                WHERE table_schema = 'public'
++                  AND table_name = 'human_reviews_superseded'
++                  AND column_name = 'superseded_at'
++                  AND column_default = 'now()'
++            )
++            AND EXISTS (
++                SELECT 1
++                FROM pg_constraint c
++                JOIN pg_class t ON t.oid = c.conrelid
++                JOIN pg_namespace n ON n.oid = t.relnamespace
++                JOIN pg_attribute a ON a.attrelid = t.oid AND a.attname = 'id'
++                WHERE n.nspname = 'public'
++                  AND t.relname = 'human_reviews_superseded'
++                  AND c.contype = 'p'
++                  AND c.conkey = ARRAY[a.attnum]::smallint[]
++            )
++            AND NOT EXISTS (
++                SELECT 1
++                FROM pg_index i
++                JOIN pg_class t ON t.oid = i.indrelid
++                JOIN pg_namespace n ON n.oid = t.relnamespace
++                JOIN pg_attribute a ON a.attrelid = t.oid AND a.attname = 'job_id'
++                WHERE n.nspname = 'public'
++                  AND t.relname = 'human_reviews_superseded'
++                  AND i.indisunique
++                  AND i.indnkeyatts = 1
++                  AND i.indexprs IS NULL
++                  AND i.indpred IS NULL
++                  AND i.indkey::text = a.attnum::text
++            )
++            AND EXISTS (
++                SELECT 1
++                FROM pg_index i
++                JOIN pg_class t ON t.oid = i.indrelid
++                JOIN pg_class idx ON idx.oid = i.indexrelid
++                JOIN pg_am am ON am.oid = idx.relam
++                JOIN pg_namespace n ON n.oid = t.relnamespace
++                JOIN pg_attribute a ON a.attrelid = t.oid AND a.attname = 'job_id'
++                WHERE n.nspname = 'public'
++                  AND t.relname = 'human_reviews_superseded'
++                  AND idx.relname = 'ix_human_reviews_superseded_job_id'
++                  AND am.amname = 'btree'
++                  AND NOT i.indisunique
++                  AND i.indisvalid
++                  AND i.indisready
++                  AND i.indnkeyatts = 1
++                  AND i.indexprs IS NULL
++                  AND i.indpred IS NULL
++                  AND i.indkey::text = a.attnum::text
++            )
++        INTO v_schema_ok;
++
++        IF NOT v_schema_ok THEN
++            RAISE EXCEPTION 'human_reviews_superseded já existe com schema incompatível (colunas/tipos/nulabilidade/default/PK/índice ou unicidade em job_id divergentes) — abortando antes de qualquer escrita';
++        END IF;
++    END IF;
++END $$;
+ ```
+ 
+-Se a tabela já existir, o script **não** deve seguir silenciosamente: consultar `information_schema`
+-e `pg_catalog` e comparar colunas, tipos, PK, índices e ausência de unicidade em `job_id`; qualquer
+-divergência executa `ROLLBACK` antes de mover dados. O arquivo SQL versionado e sua revisão no PR
+-fornecem a rastreabilidade; não há schema drift ad-hoc fora do controle de versão.
++### 7.3 Saneamento (por grupo equivalente confirmado), com assertions executáveis
+ 
+-### 7.3 Saneamento transacional (por grupo equivalente confirmado)
++Abre uma transação explícita, que só é confirmada ao final da seção 7.4 (após todos os
++pós-checks). O `LOCK TABLE` abaixo dura exatamente entre este `BEGIN` e o `COMMIT` da seção 7.4.
+ 
+ ```sql
+ BEGIN;
+ 
+--- Impede INSERT/UPDATE/DELETE concorrentes durante diagnóstico+saneamento+migração.
++-- Impede INSERT/UPDATE/DELETE concorrentes ATÉ O COMMIT desta transação
++-- (o lock é liberado no COMMIT — ver seção 6, item 2).
+ LOCK TABLE human_reviews IN SHARE ROW EXCLUSIVE MODE;
+ 
+--- Repetir agora, sob lock, o diagnóstico completo e as assertions da seção 7.1.
+--- Qualquer divergência -> ROLLBACK imediato.
++-- Assertion executável: reconfirma, sob lock, que o único grupo duplicado
++-- continua sendo exatamente o esperado, com os 3 IDs inventariados.
++DO $$
++DECLARE
++    v_count int;
++    v_ids text[];
++    v_distinct_reviewers int;
++    v_distinct_decisions int;
++    v_distinct_totals int;
++    v_distinct_scores int;
++    v_distinct_justifications int;
++BEGIN
++    SELECT COUNT(*), array_agg(id::text ORDER BY id::text)
++    INTO v_count, v_ids
++    FROM human_reviews
++    WHERE job_id = '4f56a10b-3a44-4df5-9047-adef7546a3c0';
+ 
+--- Move as 2 linhas não-vencedoras para o arquivo, com colunas explícitas.
++    IF v_count != 3 THEN
++        RAISE EXCEPTION 'Esperado 3 linhas para job 4f56a10b-..., encontrado %; abortando', v_count;
++    END IF;
++
++    IF v_ids != ARRAY[
++        '31d31b5c-05c7-4206-b2ff-43b2eda14026',
++        '8a9c2ba6-fca4-4f47-9b2a-12f7a3e7345c',
++        '9459489c-dd8e-4f33-936a-bc76cb7d5f0b'
++    ]::text[] THEN
++        RAISE EXCEPTION 'IDs encontrados (%) não correspondem ao inventário esperado; abortando', v_ids;
++    END IF;
++
++    WITH normalized AS (
++        SELECT reviewer_id, decision, final_total,
++               COALESCE(justification, '') AS justification_norm,
++               COALESCE((
++                   SELECT jsonb_agg(
++                       jsonb_build_object(
++                           'criterion_id', elem->>'criterion_id',
++                           'score', to_char((elem->>'score')::numeric, 'FM999999990.00')
++                       ) ORDER BY elem->>'criterion_id'
++                   )
++                   FROM jsonb_array_elements(final_scores_json::jsonb) AS elem
++               ), '[]'::jsonb) AS scores_norm
++        FROM human_reviews
++        WHERE job_id = '4f56a10b-3a44-4df5-9047-adef7546a3c0'
++    )
++    SELECT COUNT(DISTINCT reviewer_id), COUNT(DISTINCT decision),
++           COUNT(DISTINCT final_total), COUNT(DISTINCT scores_norm),
++           COUNT(DISTINCT justification_norm)
++    INTO v_distinct_reviewers, v_distinct_decisions, v_distinct_totals,
++         v_distinct_scores, v_distinct_justifications
++    FROM normalized;
++
++    IF v_distinct_reviewers != 1 OR v_distinct_decisions != 1
++       OR v_distinct_totals != 1 OR v_distinct_scores != 1
++       OR v_distinct_justifications != 1 THEN
++        RAISE EXCEPTION 'Grupo deixou de ser equivalente sob lock (reviewer %, decision %, total %, scores %, justification %); abortando — decisão manual necessária',
++            v_distinct_reviewers, v_distinct_decisions, v_distinct_totals,
++            v_distinct_scores, v_distinct_justifications;
++    END IF;
++END $$;
++
++-- Copia as 2 linhas não-vencedoras para o arquivo, com colunas explícitas.
+ INSERT INTO human_reviews_superseded (
+     id, job_id, reviewer_id, decision, final_total, final_scores_json,
+     justification, created_at, superseded_reason, superseded_at
+@@ -229,63 +407,135 @@
+ WHERE id IN (
+     '8a9c2ba6-fca4-4f47-9b2a-12f7a3e7345c',
+     '9459489c-dd8e-4f33-936a-bc76cb7d5f0b'
+-)
+-RETURNING id;
+--- Assertion obrigatória: exatamente estes 2 IDs retornados. Caso contrário: ROLLBACK.
++);
+ 
++-- Assertion executável: compara INTEGRALMENTE (todas as colunas de dado, não
++-- apenas contagem) a cópia recém-inserida contra o original AINDA presente
++-- em human_reviews, ANTES de remover da tabela ativa.
++DO $$
++DECLARE
++    v_mismatches int;
++BEGIN
++    SELECT COUNT(*) INTO v_mismatches
++    FROM human_reviews hr
++    JOIN human_reviews_superseded s ON s.id = hr.id
++    WHERE hr.id IN ('8a9c2ba6-fca4-4f47-9b2a-12f7a3e7345c', '9459489c-dd8e-4f33-936a-bc76cb7d5f0b')
++      AND (
++          hr.job_id IS DISTINCT FROM s.job_id OR
++          hr.reviewer_id IS DISTINCT FROM s.reviewer_id OR
++          hr.decision IS DISTINCT FROM s.decision OR
++          hr.final_total IS DISTINCT FROM s.final_total OR
++          hr.final_scores_json IS DISTINCT FROM s.final_scores_json OR
++          hr.justification IS DISTINCT FROM s.justification OR
++          hr.created_at IS DISTINCT FROM s.created_at
++      );
++
++    IF v_mismatches != 0 THEN
++        RAISE EXCEPTION 'Cópia arquivada difere do original em % linha(s); abortando antes do DELETE', v_mismatches;
++    END IF;
++
++    IF (SELECT COUNT(*) FROM human_reviews_superseded
++        WHERE id IN ('8a9c2ba6-fca4-4f47-9b2a-12f7a3e7345c', '9459489c-dd8e-4f33-936a-bc76cb7d5f0b')) != 2 THEN
++        RAISE EXCEPTION 'Cópia no arquivo não contém exatamente as 2 linhas esperadas; abortando';
++    END IF;
++END $$;
++
++-- Só agora, com a cópia confirmada IDÊNTICA ao original, remove da tabela ativa.
+ DELETE FROM human_reviews
+ WHERE id IN (
+     '8a9c2ba6-fca4-4f47-9b2a-12f7a3e7345c',
+     '9459489c-dd8e-4f33-936a-bc76cb7d5f0b'
+-)
+-RETURNING id;
+--- Assertion obrigatória: exatamente os mesmos 2 IDs retornados. Caso contrário: ROLLBACK.
++);
+ 
+--- Rodar os pós-checks 7.4(a-d) AINDA DENTRO desta transação.
+--- Só COMMIT se todos retornarem os valores esperados.
+-COMMIT;
++DO $$
++DECLARE
++    v_remaining int;
++BEGIN
++    SELECT COUNT(*) INTO v_remaining
++    FROM human_reviews
++    WHERE id IN ('8a9c2ba6-fca4-4f47-9b2a-12f7a3e7345c', '9459489c-dd8e-4f33-936a-bc76cb7d5f0b');
++
++    IF v_remaining != 0 THEN
++        RAISE EXCEPTION 'DELETE não removeu as 2 linhas esperadas da tabela ativa; abortando';
++    END IF;
++END $$;
+ ```
++(sem `COMMIT` aqui — a transação aberta pelo `BEGIN` desta seção continua aberta; o `COMMIT` fica
++ao final da seção 7.4, depois dos pós-checks)
+ 
+-A migração `7b1d6d853f20` deve ser aplicada enquanto a aplicação/writers permanecem parados,
+-imediatamente após este `COMMIT`; se ela falhar, não liberar writers — seguir o plano de
+-recuperação da seção 7.5.
++### 7.4 Verificações pós-saneamento executáveis (dentro da mesma transação, antes do `COMMIT`)
+ 
+-### 7.4 Verificações pós-saneamento (antes de considerar a operação concluída)
+-
+ ```sql
+--- (a) Nenhum grupo duplicado deve restar
+-SELECT job_id, COUNT(*) FROM human_reviews GROUP BY job_id HAVING COUNT(*) > 1;
+--- esperado: 0 linhas
++DO $$
++DECLARE
++    v_dup_count int;
++    v_winner_count int;
++    v_archived_count int;
++    v_audit_count int;
++BEGIN
++    -- (a) Nenhum grupo duplicado deve restar
++    SELECT COUNT(*) INTO v_dup_count FROM (
++        SELECT job_id FROM human_reviews GROUP BY job_id HAVING COUNT(*) > 1
++    ) t;
++    IF v_dup_count != 0 THEN
++        RAISE EXCEPTION 'Pós-check (a) falhou: ainda há % grupo(s) duplicado(s)', v_dup_count;
++    END IF;
+ 
+--- (b) A linha vencedora ainda existe, com o conteúdo original
+-SELECT * FROM human_reviews WHERE id = '31d31b5c-05c7-4206-b2ff-43b2eda14026';
+--- esperado: 1 linha, dados idênticos aos do inventário original (seção 1)
++    -- (b) A linha vencedora ainda existe com TODOS os campos relevantes intactos
++    SELECT COUNT(*) INTO v_winner_count
++    FROM human_reviews
++    WHERE id = '31d31b5c-05c7-4206-b2ff-43b2eda14026'
++      AND job_id = '4f56a10b-3a44-4df5-9047-adef7546a3c0'
++      AND reviewer_id = 'cabba145-18bc-40a1-9faa-489f4bfda018'
++      AND decision = 'APPROVE'
++      AND final_total = 2.00
++      AND final_scores_json::jsonb = '[{"criterion_id":"53548671-87e7-4784-a7f3-27ce80b66355","score":"1.00"},{"criterion_id":"f99920d8-2368-491c-b82e-f976b6e598c0","score":"1.00"}]'::jsonb
++      AND COALESCE(justification, '') = ''
++      AND created_at = TIMESTAMP '2026-09-23 22:53:35.110755';
++    IF v_winner_count != 1 THEN
++        RAISE EXCEPTION 'Pós-check (b) falhou: linha vencedora ausente ou algum campo foi alterado';
++    END IF;
+ 
+--- (c) As 2 linhas movidas estão preservadas no arquivo, com o motivo registrado
+-SELECT id, job_id, superseded_reason, superseded_at FROM human_reviews_superseded
+-WHERE job_id = '4f56a10b-3a44-4df5-9047-adef7546a3c0';
+--- esperado: 2 linhas (8a9c2ba6-... e 9459489c-...)
++    -- (c) As 2 linhas movidas estão preservadas no arquivo, com o motivo registrado
++    SELECT COUNT(*) INTO v_archived_count
++    FROM human_reviews_superseded
++    WHERE job_id = '4f56a10b-3a44-4df5-9047-adef7546a3c0'
++      AND superseded_reason = 'duplicate-equivalent-review-pre-BL-AV-1-10';
++    IF v_archived_count != 2 THEN
++        RAISE EXCEPTION 'Pós-check (c) falhou: esperado 2 linhas arquivadas, encontrado %', v_archived_count;
++    END IF;
+ 
+--- (d) Nenhum AuditEvent foi tocado: validar nominalmente os 3 IDs e conteúdos-chave,
+--- não apenas uma contagem ampla por resource_id.
+-SELECT id, actor_id, action, resource_type, resource_id,
+-       before_json, after_json, created_at
+-FROM audit_events
+-WHERE id IN (
+-    'b12db6d4-3b44-42ca-aa9a-99748fc4b982',
+-    '4f737eab-3ba0-40af-8738-ae847377ba34',
+-    'cad4d910-8c91-4a7e-9714-266fac3f7ee6'
+-)
+-ORDER BY created_at;
+--- esperado: exatamente esses 3 IDs, mesmo actor_id, REVIEW_APPROVE,
+--- resource_type=CorrectionJob, resource_id=4f56a10b-..., e before_json/after_json
+--- idênticos ao relatório pré-operação da seção 1.
++    -- (d) Nenhum AuditEvent foi tocado: validação nominal dos 3 IDs
++    SELECT COUNT(*) INTO v_audit_count
++    FROM audit_events
++    WHERE id IN (
++        'b12db6d4-3b44-42ca-aa9a-99748fc4b982',
++        '4f737eab-3ba0-40af-8738-ae847377ba34',
++        'cad4d910-8c91-4a7e-9714-266fac3f7ee6'
++    )
++    AND resource_type = 'CorrectionJob' AND action = 'REVIEW_APPROVE'
++    AND resource_id = '4f56a10b-3a44-4df5-9047-adef7546a3c0';
++    IF v_audit_count != 3 THEN
++        RAISE EXCEPTION 'Pós-check (d) falhou: eventos de auditoria alterados ou ausentes (encontrado %)', v_audit_count;
++    END IF;
++END $$;
+ 
+--- (e) Contexto da aplicação continua funcional para este job
+--- (verificação via API real: GET /v1/correction-jobs/4f56a10b-3a44-4df5-9047-adef7546a3c0/context
+---  deve continuar retornando human_review com os dados da linha vencedora)
++-- Todos os pós-checks passaram sem RAISE EXCEPTION: confirma a transação.
++-- Este COMMIT libera o LOCK TABLE adquirido no início da seção 7.3.
++COMMIT;
+ ```
+ 
++A migração `7b1d6d853f20` deve ser aplicada em seguida (passo separado, `alembic upgrade head`),
++enquanto os writers permanecem parados — o `LOCK TABLE` já foi liberado pelo `COMMIT` acima; a
++proteção contra concorrência nesse intervalo é a continuidade dos writers parados (seção 6,
++item 4), não o lock. Se a migração falhar, não liberar writers — seguir o plano de recuperação da
++seção 7.5.
++
++Verificação (e) — contexto da aplicação — é executada separadamente, fora da transação SQL, via
++chamada HTTP real após o `COMMIT` e a aplicação da migração: `GET
++/v1/correction-jobs/4f56a10b-3a44-4df5-9047-adef7546a3c0/context` deve continuar retornando
++`human_review` com os dados da linha vencedora.
++
+ ### 7.5 Plano de recuperação
+ 
+ **Cenário A — falha antes do `COMMIT`:** executar `ROLLBACK`; como mover e remover estão na mesma
+@@ -308,17 +558,84 @@
+ WHERE id IN (
+     '8a9c2ba6-fca4-4f47-9b2a-12f7a3e7345c',
+     '9459489c-dd8e-4f33-936a-bc76cb7d5f0b'
+-)
+-RETURNING id;
+--- esperado: 2 IDs exatos
++);
+ 
+-DELETE FROM human_reviews_superseded
+-WHERE id IN (
+-    '8a9c2ba6-fca4-4f47-9b2a-12f7a3e7345c',
+-    '9459489c-dd8e-4f33-936a-bc76cb7d5f0b'
+-)
+-RETURNING id;
+--- esperado: os mesmos 2 IDs
++DO $$
++DECLARE
++    v_active_count integer;
++    v_archive_count integer;
++    v_mismatch_count integer;
++BEGIN
++    SELECT COUNT(*) INTO v_active_count
++    FROM human_reviews
++    WHERE id IN (
++        '8a9c2ba6-fca4-4f47-9b2a-12f7a3e7345c',
++        '9459489c-dd8e-4f33-936a-bc76cb7d5f0b'
++    );
++
++    SELECT COUNT(*) INTO v_archive_count
++    FROM human_reviews_superseded
++    WHERE id IN (
++        '8a9c2ba6-fca4-4f47-9b2a-12f7a3e7345c',
++        '9459489c-dd8e-4f33-936a-bc76cb7d5f0b'
++    );
++
++    SELECT COUNT(*) INTO v_mismatch_count
++    FROM human_reviews active
++    JOIN human_reviews_superseded archived USING (id)
++    WHERE active.id IN (
++        '8a9c2ba6-fca4-4f47-9b2a-12f7a3e7345c',
++        '9459489c-dd8e-4f33-936a-bc76cb7d5f0b'
++    )
++      AND (
++          active.job_id IS DISTINCT FROM archived.job_id
++          OR active.reviewer_id IS DISTINCT FROM archived.reviewer_id
++          OR active.decision IS DISTINCT FROM archived.decision
++          OR active.final_total IS DISTINCT FROM archived.final_total
++          OR active.final_scores_json IS DISTINCT FROM archived.final_scores_json
++          OR active.justification IS DISTINCT FROM archived.justification
++          OR active.created_at IS DISTINCT FROM archived.created_at
++      );
++
++    IF v_active_count <> 2 OR v_archive_count <> 2 OR v_mismatch_count <> 0 THEN
++        RAISE EXCEPTION 'Rollback compensatório incompleto antes de limpar o arquivo (ativas %, arquivadas %, divergentes %); abortando',
++            v_active_count, v_archive_count, v_mismatch_count;
++    END IF;
++END $$;
++
++DO $$
++DECLARE
++    v_deleted integer;
++    v_active_count integer;
++    v_archive_count integer;
++BEGIN
++    DELETE FROM human_reviews_superseded
++    WHERE id IN (
++        '8a9c2ba6-fca4-4f47-9b2a-12f7a3e7345c',
++        '9459489c-dd8e-4f33-936a-bc76cb7d5f0b'
++    );
++    GET DIAGNOSTICS v_deleted = ROW_COUNT;
++
++    SELECT COUNT(*) INTO v_active_count
++    FROM human_reviews
++    WHERE id IN (
++        '8a9c2ba6-fca4-4f47-9b2a-12f7a3e7345c',
++        '9459489c-dd8e-4f33-936a-bc76cb7d5f0b'
++    );
++
++    SELECT COUNT(*) INTO v_archive_count
++    FROM human_reviews_superseded
++    WHERE id IN (
++        '8a9c2ba6-fca4-4f47-9b2a-12f7a3e7345c',
++        '9459489c-dd8e-4f33-936a-bc76cb7d5f0b'
++    );
++
++    IF v_deleted <> 2 OR v_active_count <> 2 OR v_archive_count <> 0 THEN
++        RAISE EXCEPTION 'Rollback compensatório falhou ao limpar o arquivo (removidas %, ativas %, arquivadas %); abortando',
++            v_deleted, v_active_count, v_archive_count;
++    END IF;
++END $$;
++
+ COMMIT;
+ ```
+ 
