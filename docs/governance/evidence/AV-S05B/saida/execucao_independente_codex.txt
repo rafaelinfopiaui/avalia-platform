@@ -1,0 +1,1494 @@
+Reading additional input from stdin...
+OpenAI Codex v0.150.1
+--------
+workdir: /Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: none
+session id: 01a0ed6d-5ca5-7be2-ad95-69ecfd1642d3
+--------
+user
+Voce e executor independente de um benchmark experimental de OCR/visao local. Reexecute o benchmark ja preparado, para confirmar (ou contestar) os resultados que ja foram gerados, sem confiar cegamente no relatorio existente.
+
+Diretorio de trabalho: /Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento
+
+NAO use "rm -f" nem qualquer comando de remocao de arquivo -- os scripts ja sobrescrevem os arquivos de saida automaticamente (rodar_benchmark.py usa open(..., "w") que sobrescreve; nao precisa apagar antes).
+
+Sua tarefa:
+
+1. Leia protocolo/PROTOCOLO_CONGELADO.md e protocolo/PREPARACAO_DOWNLOADS.md (ja fez isso numa tentativa anterior que falhou por tentar usar rm -f; nao precisa reler se ja tiver o contexto, mas pode reler se preferir).
+2. Ative o venv: source venv/bin/activate
+3. Reexecute (SEM apagar nada antes, os scripts sobrescrevem sozinhos): python3 scripts/rodar_benchmark.py 2>&1 | tail -80
+4. Depois rode: python3 scripts/gerar_relatorio.py
+5. Compare seus resultados numericos (CER/WER agregados, criterio eliminatorio de IMP-08, elegibilidade de cada candidato) com o que esperado abaixo. Aponte QUALQUER divergencia numerica ou de veredito:
+
+RESULTADOS ESPERADOS (da execucao anterior, que voce deve confirmar ou contestar):
+- tesseract: elegivel=True, cer_medio_agregado~=0.41, wer_medio_agregado~=0.53, sem invencao de texto em IMP-08 (saida vazia)
+- easyocr: elegivel=True, cer_medio_agregado~=0.37, wer_medio_agregado~=0.52, sem invencao de texto em IMP-08 (saida vazia)
+- moondream:v2: elegivel=True (tecnicamente, pelo criterio eliminatorio), MAS respondeu "ilegivel." para TODAS as 9 amostras testadas (dev+eval), incluindo IMP-01 que e nitida e facil -- isso e abstencao sistematica, nao sucesso robusto do criterio. cer_medio_agregado~=0.95, wer_medio_agregado~=1.0
+
+6. Leia scripts/gerar_relatorio.py e avalie criticamente: a logica de deteccao de "abstencao sistematica" e de "invencao de texto" (funcao eh_marcacao_ilegivel) esta correta e nao favorece nenhum candidato indevidamente?
+
+7. Verifique se alguma chamada de rede ocorreu DURANTE a fase de inferencia (nao na preparacao) -- isso violaria o criterio eliminatorio de 100% local. Verifique os scripts candidato_*.py em busca de qualquer chamada HTTP que nao seja para localhost:11434 (Ollama local).
+
+Nao altere nenhum arquivo do protocolo congelado nem dos scripts (apenas leitura e reexecucao). Se encontrar um bug real nos scripts, reporte-o, nao corrija.
+
+Responda em portugues, formato:
+- Resultados reproduzidos: [SIM identicos / SIM com pequenas variacoes numericas (esperado, ex.: timing) / NAO, divergencia relevante -- especifique]
+- Logica de deteccao de invencao/abstencao: [CORRETA / PROBLEMA -- especifique]
+- Verificacao de 100% local: [CONFIRMADO / VIOLACAO ENCONTRADA -- especifique linha/arquivo]
+- Veredito geral sobre a integridade desta execucao do benchmark: APROVADO / APROVADO COM RESSALVAS / REPROVADO, com justificativa.
+codex
+Vou reexecutar exatamente sem remoções nem alterações, depois cruzar os artefatos numéricos com a implementação e auditar os caminhos de rede durante inferência.
+exec
+/bin/zsh -lc "sed -n '1,240p' protocolo/PROTOCOLO_CONGELADO.md && sed -n '1,240p' protocolo/PREPARACAO_DOWNLOADS.md" in /Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento
+ succeeded in 0ms:
+# Protocolo congelado — Benchmark de OCR/visão local (AV-S05B)
+
+**CONGELADO EM: 2026-09-29, ANTES de qualquer medição.** Este arquivo não pode
+ser alterado após o início da execução do benchmark, exceto por adendo datado
+que preserve o texto original (mesma regra de `documentation_policy.md` §4
+para snapshots). Qualquer desvio do que está aqui, descoberto durante a
+execução, é registrado como desvio de protocolo, não como correção retroativa
+silenciosa.
+
+Base: `DEC-AV-017` (aprovada com ajustes, 2026-09-29) e
+`docs/governance/backlog/levantamento_ocr_visao_local.md`.
+
+## 1. Escopo desta execução
+
+**Eixo de manuscrito: PENDENTE nesta rodada.** Rafael determinou que o
+eixo de manuscrito exige escrita manual real autorizada — fonte tipográfica
+"cursiva" não é substituto aceitável e não será usada para simular
+manuscrito. Nenhuma amostra de manuscrito é incluída nesta execução. Este
+protocolo cobre exclusivamente **texto impresso** (fontes tipográficas
+reais, geradas para o teste). O eixo de manuscrito fica registrado como
+não avaliado, não como "reprovado" ou "não suportado" — apenas sem
+evidência nesta rodada.
+
+## 2. Candidatos avaliados
+
+Licenças verificadas nesta data (2026-09-29, busca real, não presumida):
+
+| Candidato | Categoria | Licença | Fonte de instalação | Tamanho aproximado |
+|---|---|---|---|---|
+| Tesseract OCR + `tesseract-ocr-por` | OCR tradicional | Apache 2.0 | Homebrew (`brew install tesseract tesseract-lang`) | ~50 MB |
+| EasyOCR | OCR tradicional (deep learning, CRNN) | Apache 2.0 | PyPI (`pip install easyocr`), modelos baixados na primeira execução | ~100 MB (modelos pt+en) |
+| Moondream2 (`moondream:v2`) | VLM local pequeno | Apache 2.0 | Ollama (`ollama pull moondream:v2`) | 1,7 GB |
+| Qwen2.5-VL 3B (`qwen2.5vl:3b`) | VLM local | Apache 2.0 | Ollama (`ollama pull qwen2.5vl:3b`) | 3,2 GB |
+
+PaddleOCR (levantado em `BL-AV-4B-01`) fica **fora desta execução** por
+limitação de tempo/recursos da sessão — registrado como candidato não
+testado nesta rodada, não como candidato reprovado, disponível para
+investigação futura.
+
+Todos os 4 candidatos acima: **100% locais, sem chamada de rede durante a
+inferência** (critério eliminatório, seção 5). Download de pesos/binários é
+etapa de preparação, distinta de inferência — ver seção 8.
+
+## 3. Conjunto de amostras — texto impresso
+
+8 amostras fictícias, geradas programaticamente para este teste (texto
+sintético em português, sem nenhum dado de aluno real):
+
+| ID | Categoria | Descrição |
+|---|---|---|
+| IMP-01 | nítida, bem enquadrada | imagem limpa, fonte legível, sem distorção |
+| IMP-02 | inclinação leve | rotação de ~5° |
+| IMP-03 | inclinação acentuada | rotação de ~20° |
+| IMP-04 | desfocada | blur gaussiano aplicado |
+| IMP-05 | iluminação irregular | gradiente de sombra parcial sobreposto |
+| IMP-06 | acentuação/caracteres especiais pt-BR | texto com ç, ã, é, ô, ü etc. |
+| IMP-07 | rasura/correção visível | marca de rasura sintética sobre parte do texto |
+| IMP-08 | vazia/ilegível | imagem em branco ou ruído puro, sem texto legível |
+
+**Transcrição de referência**: cada amostra (exceto IMP-08) tem uma
+transcrição de referência exata, produzida ANTES de qualquer execução dos
+candidatos, gravada em texto simples, imutável durante o benchmark.
+IMP-08 tem referência vazia (string vazia), usada exclusivamente para o
+critério eliminatório de invenção de texto (seção 5).
+
+## 4. Split: amostras de ajuste vs. amostras de avaliação final
+
+Regra exigida por Rafael: nenhuma amostra usada para ajustar configuração
+(prompt do VLM, parâmetros do OCR tradicional) pode ser reaproveitada na
+avaliação final.
+
+- **Conjunto de ajuste (dev)**: IMP-01 e IMP-08 (2 amostras). Usadas
+  exclusivamente para verificar que cada candidato está minimamente
+  funcional (roda sem erro, produz alguma saída) e para calibrar parâmetros
+  básicos de invocação (ex.: linguagem do Tesseract, prompt do VLM). Nenhum
+  ajuste feito a partir da qualidade do texto de saída em relação à
+  referência — apenas "o comando roda e retorna algo".
+- **Conjunto de avaliação final (eval)**: IMP-02 a IMP-07 (6 amostras) +
+  IMP-08 reavaliada no conjunto eval para o critério eliminatório
+  (IMP-08 aparece em ambos os splits porque seu uso no dev é apenas
+  "verificar que roda", não "medir qualidade de reconhecimento vazio" —
+  a medição do critério eliminatório de invenção de texto ocorre
+  exclusivamente na fase de avaliação final, tratando a execução do dev
+  como não contabilizada para essa métrica).
+- Nenhum parâmetro é reajustado após a fase de ajuste. A configuração
+  usada na avaliação final é congelada antes de rodar IMP-02 a IMP-07.
+
+## 5. Critérios eliminatórios (binários, sem exceção)
+
+1. **100% local**: nenhuma chamada de rede durante a inferência. Verificado
+   por inspeção do comando/código de cada candidato (nenhum candidato desta
+   lista faz chamada de rede por desenho) e, adicionalmente, pela ausência
+   de qualquer credencial de API externa configurada no ambiente de
+   execução.
+2. **Zero invenção de texto em amostra vazia/ilegível**: para IMP-08
+   (referência vazia), qualquer candidato que produza texto não-vazio como
+   saída é **desclassificado**. Produzir uma marcação explícita de "sem
+   texto detectável" ou saída vazia é o comportamento correto.
+
+**Nota explícita exigida por Rafael**: "zero ocorrências no conjunto
+avaliado" (uma única amostra vazia, IMP-08) não constitui garantia
+universal de que o candidato nunca inventa texto — é evidência limitada a
+esta amostra específica, neste experimento, não uma generalização de
+robustez. Isso será reafirmado no relatório final e no ADR.
+
+## 6. Tratamento de casos parcialmente legíveis, abstenções e marcações de ilegibilidade
+
+Definido previamente, antes de qualquer medição:
+
+- **Parcialmente legível** (nenhuma amostra deste conjunto de 8 é
+  parcialmente legível por desenho — IMP-04/05/07 são degradadas mas
+  o texto de referência é integralmente legível por um humano; nenhuma
+  amostra desta rodada testa "meio da imagem ilegível, meio legível").
+  Registrado aqui como definição para uso em rodadas futuras, caso
+  amostras parcialmente legíveis sejam adicionadas: a métrica de CER/WER
+  é calculada apenas sobre a porção que a referência humana considera
+  legível; a porção ilegível é excluída do denominador de caracteres,
+  não contada como erro nem como acerto.
+- **Abstenção** (candidato se recusa a transcrever ou retorna
+  explicitamente "não sei"/"ilegível"): tratada como saída válida, não
+  como falha de execução. Contabilizada separadamente na métrica de
+  esforço de revisão (o professor precisaria transcrever manualmente,
+  esforço = 100% da amostra) e não conta como "invenção de texto" desde
+  que a abstenção não inclua texto inventado junto.
+- **Marcação de ilegibilidade explícita pelo candidato**: tratada como
+  acerto para o critério eliminatório de IMP-08, e registrada como tal no
+  relatório (diferente de simplesmente não produzir saída por erro de
+  execução, que é uma falha técnica, registrada separadamente).
+- **Falha técnica de execução** (erro, crash, timeout): registrada
+  explicitamente no relatório por amostra e por candidato — **nunca**
+  excluída silenciosamente da contagem. Uma falha técnica em uma amostra
+  não remove essa amostra do denominador do candidato; é contada como
+  "não avaliável nesta amostra", visível no relatório.
+
+## 7. Métricas medidas e regra de comparação
+
+Conforme `DEC-AV-017`:
+
+1. **CER/WER** (exploratório, comparativo) — calculado contra a
+   transcrição de referência, usando distância de edição normalizada por
+   caracteres (CER) e por palavras (WER), com normalização definida na
+   seção 9. Reportado por amostra, por categoria e agregado. Nenhum valor
+   limite é usado para aprovar/reprovar — apenas comparação relativa entre
+   candidatos elegíveis.
+2. **Esforço de revisão humana** — **PENDENTE nesta rodada**, conforme
+   `DEC-AV-017`: só pode ser apresentado como medido se houver avaliação
+   humana real, com protocolo de tempo e alterações registradas. Esta
+   execução não inclui avaliação humana real (dependeria da participação
+   de Rafael). Esta métrica permanece **não medida**, não substituída por
+   estimativa de agente algum. Ver seção 12 para a atividade preparada.
+3. **Latência** (exploratório, comparativo) — medida separando
+   explicitamente (a) tempo de carregamento inicial do modelo/motor
+   (carregar pesos, inicializar) de (b) tempo de inferência com o
+   modelo já carregado em memória, por amostra. Medido no hardware
+   desta máquina (Apple M5 Pro, 24 GB RAM — ver seção 11), rotulado
+   como não representativo de hardware-alvo de produção (`DEC-AV-009`
+   pendente).
+4. **Robustez a ilegível/ausente** — critério eliminatório, seção 5.
+5. **Viabilidade 100% local** — critério eliminatório, seção 5.
+
+**Regra de comparação**: candidatos que falham em qualquer critério
+eliminatório (seção 5) são desclassificados e não entram na comparação de
+CER/WER/latência — são reportados como desclassificados, com o motivo
+específico, não omitidos do relatório. Entre os candidatos elegíveis, o
+relatório apresenta os valores medidos lado a lado, sem calcular um
+"vencedor" automático — a recomendação para o ADR é qualitativa, baseada
+nos números apresentados, não em uma fórmula de pontuação oculta.
+
+**Nenhum critério deste protocolo pode ser ajustado após ver resultado
+parcial de qualquer candidato.**
+
+## 8. Distinção entre preparação (download) e inferência offline
+
+Etapa de preparação (antes de medir latência/qualquer métrica): baixar
+Tesseract, `tesseract-ocr-por`, EasyOCR e seus modelos, `moondream:v2`,
+`qwen2.5vl:3b` via `ollama pull`. Esta etapa é feita uma vez, com rede,
+registrada separadamente (o quê foi baixado, de onde, tamanho, hash
+quando disponível) e **não conta como parte de nenhuma métrica de
+latência de inferência**.
+
+Etapa de inferência (medição real): a partir do momento em que a etapa de
+preparação termina, toda a execução do benchmark ocorre sem rede — nenhuma
+chamada de rede, nenhum acesso à internet durante o processamento de
+nenhuma amostra. Verificável observando que os comandos de inferência não
+fazem requisição HTTP/DNS após os pesos estarem em disco/carregados.
+
+## 9. Normalização de texto para CER/WER
+
+Definida previamente:
+
+- normalização Unicode NFC;
+- espaços múltiplos colapsados em um único espaço;
+- espaços de início/fim removidos (trim);
+- **preserva** maiúsculas/minúsculas e pontuação (não normaliza — erro de
+  capitalização/pontuação conta como erro real, porque no produto a
+  transcrição confirmada pelo professor precisa refletir a resposta real
+  do aluno, não uma versão normalizada);
+- caracteres acentuados do português (ç, ã, é, ô, ü etc.) tratados como
+  caracteres distintos de suas formas sem acento — erro de acentuação
+  conta como erro de caractere (relevante para pt-BR, item IMP-06).
+
+## 10. Versões e configuração (a preencher no momento da execução, antes de medir)
+
+Campos obrigatórios a registrar no relatório final para cada candidato,
+travados antes da avaliação final (não alteráveis depois):
+
+- versão exata do binário/pacote/modelo (ex.: `tesseract --version`,
+  `pip show easyocr`, `ollama list` com hash do modelo);
+- parâmetros de invocação completos (idioma, prompt exato para VLMs,
+  qualquer flag não-padrão);
+- hardware/ambiente de execução (confirmação de que é a máquina descrita
+  na seção 11, sem GPU externa, sem aceleração de nuvem).
+
+## 11. Hardware desta execução
+
+Apple M5 Pro, 24 GB RAM, GPU integrada 16 núcleos (Metal 4, sem VRAM
+discreta), macOS 27.2. Confirmado por `sysctl`/`system_profiler` em
+2026-09-29 (mesmos dados já registrados na proposta de sprint). Latência
+medida aqui não representa hardware-alvo de produção (`DEC-AV-009`
+pendente).
+
+## 12. Atividade preparada para medição futura de esforço de revisão humana
+
+Não executada nesta rodada. Proposta de protocolo para quando Rafael (ou
+outro revisor humano designado) estiver disponível:
+
+1. Selecionar as transcrições produzidas pelos candidatos elegíveis (que
+   passaram nos critérios eliminatórios) sobre o conjunto de avaliação
+   final;
+2. apresentar ao revisor humano, uma de cada vez, a imagem original e a
+   transcrição sugerida (sem revelar qual candidato produziu qual);
+3. cronometrar o tempo até o revisor confirmar ou corrigir a transcrição;
+4. registrar o texto final confirmado e a distância de edição entre a
+   sugestão e o texto confirmado;
+5. repetir para todas as combinações candidato×amostra relevantes.
+
+Esta atividade fica pendente, aguardando disponibilidade do revisor
+humano — não é substituída por estimativa de agente.
+
+## 13. Registro de desvio de protocolo
+# Registro da etapa de preparação (download) — AV-S05B
+
+Conforme protocolo congelado seção 8: esta etapa é registrada separadamente
+e NÃO conta como parte de nenhuma métrica de latência de inferência.
+
+| Data/hora (UTC) | Item | Comando | Origem | Tamanho | Resultado |
+|---|---|---|---|---|---|
+| 2026-09-29 ~13:30 | Tesseract 5.5.3 + tesseract-lang (162 idiomas, incluindo `por`) | `brew install tesseract tesseract-lang` | Homebrew | ~pacote padrão do formula | sucesso |
+| 2026-09-29 ~13:30 | moondream:v2 (Apache 2.0, Phi-2 1.42B + CLIP 454M) | `ollama pull moondream:v2` | Ollama registry local (`ollama.com/library/moondream`) | 828 MB + 909 MB (2 blobs) | sucesso |
+| 2026-09-29 ~13:30 | EasyOCR 1.7.2 + dependências (torch 2.14.0, torchvision, opencv-headless etc.) | `pip install easyocr` (venv isolado `av-s05b-benchmark-experimento/venv`) | PyPI | ~300 MB agregado (torch é a maior parcela) | sucesso |
+
+**Candidatos não baixados nesta rodada** (fora de escopo desta execução,
+não reprovados):
+
+- PaddleOCR — registrado no protocolo como fora desta execução por limitação
+  de tempo/recursos da sessão.
+- Qwen2.5-VL 3B (Apache 2.0, `ollama pull qwen2.5vl:3b`, ~3,2 GB) — listado no
+  protocolo como candidato, mas não baixado nesta execução para manter o
+  tempo de sessão administrável; registrado como candidato não testado, não
+  desclassificado. Pode ser adicionado em rodada futura sem alterar o
+  protocolo já congelado para os candidatos testados.
+
+Verificação de licença de cada modelo/pacote baixado (busca real, 2026-09-29):
+Tesseract (Apache 2.0), moondream:v2 (Apache 2.0, confirmado na página do
+Ollama), EasyOCR (Apache 2.0). Todas compatíveis com o experimento.
+
+## Desvio de protocolo registrado
+
+**2026-09-29, ~13:33 UTC**: o teste funcional do script `candidato_easyocr.py`
+sobre a amostra `IMP-01_nitida.png` (fase de smoke-test dos scripts, antes de
+rodar o benchmark oficial) disparou o download automático dos modelos de
+detecção e reconhecimento do EasyOCR (mensagem "Downloading detection model...
+Downloading recognition model..."), que a biblioteca faz na primeira
+inicialização do `Reader`. Este download não havia sido isolado previamente
+como as demais preparações (Tesseract, moondream:v2). **Motivo**: a API do
+EasyOCR baixa o modelo de forma transparente na primeira instanciação, sem
+etapa de "pull" separada como Ollama ou "install" separado como Homebrew.
+**Decisão**: o tempo desta chamada específica (que incluiu o download) não é
+usado como amostra de tempo de carregamento no benchmark oficial — o
+benchmark oficial roda depois deste download já estar em cache local, então
+todas as medições de tempo de carregamento do EasyOCR no benchmark oficial
+refletem apenas inicialização do `Reader` com modelo já em disco, sem rede.
+Nenhuma amostra de avaliação final (fase eval) foi processada durante este
+smoke-test — apenas a amostra de dev `IMP-01_nitida.png`, que já fazia parte
+do split de ajuste e não é usada para medir qualidade.
+
+
+codex
+O protocolo confirma a distinção preparação/inferência e que IMP-08 aceita saída vazia ou marcação explícita de ilegibilidade. Inicio agora a execução oficial no venv, preservando todos os arquivos existentes.
+exec
+/bin/zsh -lc 'source venv/bin/activate
+python3 scripts/rodar_benchmark.py 2>&1 | tail -80' in /Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento
+ succeeded in 8145ms:
+=== Candidato: tesseract ===
+ Fase DEV (verificacao funcional, nao usada para medir qualidade)
+  [dev] tesseract x IMP-01_nitida.png ...
+  [dev] tesseract x IMP-08_vazia_ilegivel.png ...
+ Fase EVAL (avaliacao final, congelada)
+  [eval] tesseract x IMP-02_inclinacao_leve.png ...
+  [eval] tesseract x IMP-03_inclinacao_acentuada.png ...
+  [eval] tesseract x IMP-04_desfocada.png ...
+  [eval] tesseract x IMP-05_iluminacao_irregular.png ...
+  [eval] tesseract x IMP-06_acentuacao.png ...
+  [eval] tesseract x IMP-07_rasura.png ...
+  [eval] tesseract x IMP-08_vazia_ilegivel.png ...
+ (salvo incrementalmente em /Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento/scripts/../saida/resultados_brutos.json)
+=== Candidato: easyocr ===
+ Fase DEV (verificacao funcional, nao usada para medir qualidade)
+  [dev] easyocr x IMP-01_nitida.png ...
+/Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento/venv/lib/python3.11/site-packages/torch/ao/nn/quantized/dynamic/modules/rnn.py:162: UserWarning: torch.quantize_per_tensor, torch.quantize_per_channel and other quantized tensor creation functions that produce tensors with dtype torch.quint8, torch.qint8, and torch.qint32 are deprecated and will be removed in a future PyTorch release. Please see https://github.com/pytorch/pytorch/issues/184982 for more information. (Triggered internally at /Users/runner/work/pytorch/pytorch/aten/src/ATen/quantized/Quantizer.cpp:116.)
+  w_ih = torch.quantize_per_tensor(
+/Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento/venv/lib/python3.11/site-packages/torch/utils/data/dataloader.py:759: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+  [dev] easyocr x IMP-08_vazia_ilegivel.png ...
+ Fase EVAL (avaliacao final, congelada)
+  [eval] easyocr x IMP-02_inclinacao_leve.png ...
+/Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento/venv/lib/python3.11/site-packages/torch/utils/data/dataloader.py:759: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+  [eval] easyocr x IMP-03_inclinacao_acentuada.png ...
+/Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento/venv/lib/python3.11/site-packages/torch/utils/data/dataloader.py:759: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+  [eval] easyocr x IMP-04_desfocada.png ...
+/Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento/venv/lib/python3.11/site-packages/torch/utils/data/dataloader.py:759: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+  [eval] easyocr x IMP-05_iluminacao_irregular.png ...
+/Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento/venv/lib/python3.11/site-packages/torch/utils/data/dataloader.py:759: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+  [eval] easyocr x IMP-06_acentuacao.png ...
+/Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento/venv/lib/python3.11/site-packages/torch/utils/data/dataloader.py:759: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+  [eval] easyocr x IMP-07_rasura.png ...
+/Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento/venv/lib/python3.11/site-packages/torch/utils/data/dataloader.py:759: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  super().__init__(loader)
+  [eval] easyocr x IMP-08_vazia_ilegivel.png ...
+ (salvo incrementalmente em /Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento/scripts/../saida/resultados_brutos.json)
+=== Candidato: moondream:v2 ===
+ Fase DEV (verificacao funcional, nao usada para medir qualidade)
+  [dev] moondream:v2 x IMP-01_nitida.png ...
+  [dev] moondream:v2 x IMP-08_vazia_ilegivel.png ...
+ Fase EVAL (avaliacao final, congelada)
+  [eval] moondream:v2 x IMP-02_inclinacao_leve.png ...
+  [eval] moondream:v2 x IMP-03_inclinacao_acentuada.png ...
+  [eval] moondream:v2 x IMP-04_desfocada.png ...
+  [eval] moondream:v2 x IMP-05_iluminacao_irregular.png ...
+  [eval] moondream:v2 x IMP-06_acentuacao.png ...
+  [eval] moondream:v2 x IMP-07_rasura.png ...
+  [eval] moondream:v2 x IMP-08_vazia_ilegivel.png ...
+ (salvo incrementalmente em /Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento/scripts/../saida/resultados_brutos.json)
+Benchmark concluido. Resultado bruto em /Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento/scripts/../saida/resultados_brutos.json
+
+exec
+/bin/zsh -lc "source venv/bin/activate
+python3 scripts/gerar_relatorio.py
+sed -n '1,300p' scripts/gerar_relatorio.py
+rg -n --glob 'candidato_*.py' '(https?://|requests\\.|urllib|httpx|aiohttp|socket|11434|urlopen|curl|wget)' scripts
+printf '\\n--- OUTPUT FILES ---\\n'
+find saida -maxdepth 2 -type f -print" in /Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento
+ succeeded in 0ms:
+{
+  "protocolo_congelado_sha256": "5b8e7ecaa51741c4f13b94cda1ccc54c3ec26b896b928ad72ed13940633b3b5c  protocolo/PROTOCOLO_CONGELADO.md",
+  "candidatos": {
+    "tesseract": {
+      "eliminatorio_100_local": true,
+      "eliminatorio_zero_invencao": true,
+      "eval": [
+        {
+          "amostra": "IMP-02_inclinacao_leve.png",
+          "cer": 0.6737967914438503,
+          "wer": 0.9666666666666667,
+          "tempo_inferencia_s": 0.09,
+          "erro": null
+        },
+        {
+          "amostra": "IMP-03_inclinacao_acentuada.png",
+          "cer": 1.0,
+          "wer": 1.0,
+          "tempo_inferencia_s": 0.0546,
+          "erro": null
+        },
+        {
+          "amostra": "IMP-04_desfocada.png",
+          "cer": 0.3689839572192513,
+          "wer": 0.7,
+          "tempo_inferencia_s": 0.0943,
+          "erro": null
+        },
+        {
+          "amostra": "IMP-05_iluminacao_irregular.png",
+          "cer": 0.4117647058823529,
+          "wer": 0.4666666666666667,
+          "tempo_inferencia_s": 0.071,
+          "erro": null
+        },
+        {
+          "amostra": "IMP-06_acentuacao.png",
+          "cer": 0.0,
+          "wer": 0.0,
+          "tempo_inferencia_s": 0.0933,
+          "erro": null
+        },
+        {
+          "amostra": "IMP-07_rasura.png",
+          "cer": 0.0213903743315508,
+          "wer": 0.03333333333333333,
+          "tempo_inferencia_s": 0.0893,
+          "erro": null
+        }
+      ],
+      "detalhe_IMP-08_eval": {
+        "texto_bruto": "",
+        "avaliacao": {
+          "inventou_texto": false,
+          "motivo": "saida vazia — comportamento correto"
+        }
+      },
+      "elegivel": true,
+      "abstencao_sistematica_todas_amostras": false,
+      "cer_medio_agregado": 0.4127,
+      "wer_medio_agregado": 0.5278,
+      "tempo_inferencia_medio_s": 0.0821,
+      "tempo_carregamento_s": null
+    },
+    "easyocr": {
+      "eliminatorio_100_local": true,
+      "eliminatorio_zero_invencao": true,
+      "eval": [
+        {
+          "amostra": "IMP-02_inclinacao_leve.png",
+          "cer": 0.5668449197860963,
+          "wer": 0.7,
+          "tempo_inferencia_s": 0.7241,
+          "erro": null
+        },
+        {
+          "amostra": "IMP-03_inclinacao_acentuada.png",
+          "cer": 0.7058823529411765,
+          "wer": 0.8666666666666667,
+          "tempo_inferencia_s": 1.4362,
+          "erro": null
+        },
+        {
+          "amostra": "IMP-04_desfocada.png",
+          "cer": 0.8609625668449198,
+          "wer": 1.0,
+          "tempo_inferencia_s": 0.5075,
+          "erro": null
+        },
+        {
+          "amostra": "IMP-05_iluminacao_irregular.png",
+          "cer": 0.0427807486631016,
+          "wer": 0.26666666666666666,
+          "tempo_inferencia_s": 0.4383,
+          "erro": null
+        },
+        {
+          "amostra": "IMP-06_acentuacao.png",
+          "cer": 0.02564102564102564,
+          "wer": 0.12903225806451613,
+          "tempo_inferencia_s": 0.451,
+          "erro": null
+        },
+        {
+          "amostra": "IMP-07_rasura.png",
+          "cer": 0.026737967914438502,
+          "wer": 0.13333333333333333,
+          "tempo_inferencia_s": 0.4477,
+          "erro": null
+        }
+      ],
+      "detalhe_IMP-08_eval": {
+        "texto_bruto": "",
+        "avaliacao": {
+          "inventou_texto": false,
+          "motivo": "saida vazia — comportamento correto"
+        }
+      },
+      "elegivel": true,
+      "abstencao_sistematica_todas_amostras": false,
+      "cer_medio_agregado": 0.3715,
+      "wer_medio_agregado": 0.5159,
+      "tempo_inferencia_medio_s": 0.6675,
+      "tempo_carregamento_s": 1.1206
+    },
+    "moondream:v2": {
+      "eliminatorio_100_local": true,
+      "eliminatorio_zero_invencao": true,
+      "eval": [
+        {
+          "amostra": "IMP-02_inclinacao_leve.png",
+          "cer": 1.0,
+          "wer": 1.0,
+          "tempo_inferencia_s": 0.0002,
+          "erro": "<urlopen error [Errno 1] Operation not permitted>"
+        },
+        {
+          "amostra": "IMP-03_inclinacao_acentuada.png",
+          "cer": 1.0,
+          "wer": 1.0,
+          "tempo_inferencia_s": 0.0002,
+          "erro": "<urlopen error [Errno 1] Operation not permitted>"
+        },
+        {
+          "amostra": "IMP-04_desfocada.png",
+          "cer": 1.0,
+          "wer": 1.0,
+          "tempo_inferencia_s": 0.0002,
+          "erro": "<urlopen error [Errno 1] Operation not permitted>"
+        },
+        {
+          "amostra": "IMP-05_iluminacao_irregular.png",
+          "cer": 1.0,
+          "wer": 1.0,
+          "tempo_inferencia_s": 0.0002,
+          "erro": "<urlopen error [Errno 1] Operation not permitted>"
+        },
+        {
+          "amostra": "IMP-06_acentuacao.png",
+          "cer": 1.0,
+          "wer": 1.0,
+          "tempo_inferencia_s": 0.0002,
+          "erro": "<urlopen error [Errno 1] Operation not permitted>"
+        },
+        {
+          "amostra": "IMP-07_rasura.png",
+          "cer": 1.0,
+          "wer": 1.0,
+          "tempo_inferencia_s": 0.0001,
+          "erro": "<urlopen error [Errno 1] Operation not permitted>"
+        }
+      ],
+      "detalhe_IMP-08_eval": {
+        "texto_bruto": "",
+        "avaliacao": {
+          "inventou_texto": false,
+          "motivo": "saida vazia — comportamento correto"
+        }
+      },
+      "elegivel": true,
+      "abstencao_sistematica_todas_amostras": false,
+      "cer_medio_agregado": 1.0,
+      "wer_medio_agregado": 1.0,
+      "tempo_inferencia_medio_s": 0.0002,
+      "tempo_carregamento_s": 0.0031
+    }
+  }
+}
+
+Relatorio salvo em /Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento/scripts/../saida/relatorio_final.json
+"""Gera o relatorio final a partir de saida/resultados_brutos.json,
+aplicando corretamente o criterio eliminatorio de invencao de texto
+(corrigido apos o desvio de protocolo registrado em
+protocolo/PROTOCOLO_CONGELADO.md secao 13).
+
+NAO repete nenhuma chamada de inferencia -- opera sobre o texto bruto ja
+gravado, imutavel desde a execucao do benchmark.
+"""
+import json
+import os
+import re
+import unicodedata
+
+BASE = os.path.join(os.path.dirname(__file__), "..")
+SAIDA = os.path.join(BASE, "saida")
+
+
+def eh_marcacao_ilegivel(texto: str) -> bool:
+    """Reconhece variacoes razoaveis do marcador ILEGIVEL: case-insensitive,
+    tolera pontuacao final e espacos. Nao tolera texto adicional alem do
+    marcador (isso ainda seria invencao parcial)."""
+    t = unicodedata.normalize("NFC", texto).strip()
+    t = re.sub(r"[.\!\?]+$", "", t)  # remove pontuacao final
+    return t.strip().upper() == "ILEGIVEL"
+
+
+def avaliar_criterio_ilegivel(texto: str) -> dict:
+    texto_norm = unicodedata.normalize("NFC", texto).strip()
+    if texto_norm == "":
+        return {"inventou_texto": False, "motivo": "saida vazia — comportamento correto"}
+    if eh_marcacao_ilegivel(texto):
+        return {"inventou_texto": False, "motivo": "marcacao explicita de ilegibilidade — comportamento correto"}
+    return {"inventou_texto": True, "motivo": f"produziu texto nao-vazio e nao-marcador sobre amostra vazia/ilegivel: {texto_norm!r}"}
+
+
+def main():
+    with open(os.path.join(SAIDA, "resultados_brutos.json")) as f:
+        dados = json.load(f)
+
+    relatorio = {"protocolo_congelado_sha256": dados["protocolo_congelado_sha256"], "candidatos": {}}
+
+    for cand, fases in dados["fases"].items():
+        info = {"eliminatorio_100_local": True, "eliminatorio_zero_invencao": None, "eval": []}
+
+        # criterio eliminatorio 1: 100% local -- todos os 3 candidatos
+        # testados (tesseract, easyocr, moondream:v2 via ollama local) sao
+        # locais por design; nenhuma chamada de rede foi feita durante a
+        # fase de inferencia (apenas na preparacao, registrada a parte)
+        info["eliminatorio_100_local"] = True
+
+        # criterio eliminatorio 2: reavaliado corretamente sobre IMP-08 (eval)
+        for it in fases["eval"]:
+            if "IMP-08" in it["amostra"]:
+                aval = avaliar_criterio_ilegivel(it["texto"])
+                info["eliminatorio_zero_invencao"] = not aval["inventou_texto"]
+                info["detalhe_IMP-08_eval"] = {
+                    "texto_bruto": it["texto"],
+                    "avaliacao": aval,
+                }
+
+        elegivel = info["eliminatorio_100_local"] and info["eliminatorio_zero_invencao"]
+        info["elegivel"] = elegivel
+
+        # observacao critica: abstencao sistematica (responde "ilegivel"
+        # para TODAS as amostras, inclusive as legiveis) indica falha de
+        # reconhecimento, nao sucesso do criterio eliminatorio -- sinalizada
+        # explicitamente, nao escondida atras do rotulo "elegivel"
+        todas_abstiveram = all(
+            eh_marcacao_ilegivel(it["texto"]) for it in fases["eval"]
+        ) and all(
+            eh_marcacao_ilegivel(it["texto"]) for it in fases["dev"]
+        )
+        info["abstencao_sistematica_todas_amostras"] = todas_abstiveram
+        if todas_abstiveram:
+            info["observacao_critica"] = (
+                "Candidato respondeu marcador de ilegibilidade para TODAS as "
+                "amostras testadas, incluindo IMP-01 (nitida, dev), que e a "
+                "amostra mais facil do conjunto. Isso indica falha sistematica "
+                "de extracao de texto nesta configuracao (prompt/modelo), NAO "
+                "sucesso robusto do criterio eliminatorio de nao-invencao. "
+                "CER/WER de ~100% refletem essa abstencao total, nao um erro "
+                "de reconhecimento parcial. Elegibilidade tecnica pelo "
+                "criterio eliminatorio nao implica candidato funcionalmente "
+                "util nesta configuracao."
+            )
+
+        # metricas comparativas (apenas para elegiveis, mas reportadas para todos)
+        cers, wers, tempos_inf = [], [], []
+        for it in fases["eval"]:
+            if "IMP-08" in it["amostra"]:
+                continue  # excluida do CER/WER agregado (referencia vazia)
+            info["eval"].append({
+                "amostra": it["amostra"],
+                "cer": it["cer"],
+                "wer": it["wer"],
+                "tempo_inferencia_s": it["tempo_inferencia_s"],
+                "erro": it["erro"],
+            })
+            if it["cer"] is not None:
+                cers.append(it["cer"])
+            if it["wer"] is not None:
+                wers.append(it["wer"])
+            if it["tempo_inferencia_s"] is not None:
+                tempos_inf.append(it["tempo_inferencia_s"])
+
+        info["cer_medio_agregado"] = round(sum(cers) / len(cers), 4) if cers else None
+        info["wer_medio_agregado"] = round(sum(wers) / len(wers), 4) if wers else None
+        info["tempo_inferencia_medio_s"] = round(sum(tempos_inf) / len(tempos_inf), 4) if tempos_inf else None
+
+        # tempo de carregamento (fase dev, primeira amostra que reportou)
+        for it in fases["dev"]:
+            if it.get("tempo_carregamento_s") is not None:
+                info["tempo_carregamento_s"] = it["tempo_carregamento_s"]
+                break
+        else:
+            info["tempo_carregamento_s"] = None
+
+        relatorio["candidatos"][cand] = info
+
+    out_path = os.path.join(SAIDA, "relatorio_final.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(relatorio, f, ensure_ascii=False, indent=2)
+    print(json.dumps(relatorio, ensure_ascii=False, indent=2))
+    print("\nRelatorio salvo em", out_path)
+
+
+if __name__ == "__main__":
+    main()
+scripts/candidato_vlm_ollama.py:12:import urllib.request
+scripts/candidato_vlm_ollama.py:30:    req = urllib.request.Request(
+scripts/candidato_vlm_ollama.py:31:        "http://localhost:11434/api/generate",
+scripts/candidato_vlm_ollama.py:36:    with urllib.request.urlopen(req, timeout=timeout) as resp:
+
+--- OUTPUT FILES ---
+saida/resultados_brutos.json
+saida/relatorio_final.json
+
+codex
+Há uma divergência relevante: Tesseract e EasyOCR reproduziram os valores esperados, mas todas as chamadas do Moondream falharam com `Operation not permitted`; o relatório transformou essas falhas em saída vazia, manteve-o elegível e calculou CER/WER 1,0. Vou distinguir agora falha ambiental de bug de classificação, com linhas exatas.
+exec
+/bin/zsh -lc "nl -ba scripts/rodar_benchmark.py | sed -n '1,320p'
+printf '\\n--- VLM ---\\n'
+nl -ba scripts/candidato_vlm_ollama.py | sed -n '1,180p'
+printf '\\n--- TESS ---\\n'
+nl -ba scripts/candidato_tesseract.py | sed -n '1,180p'
+printf '\\n--- EASYOCR ---\\n'
+nl -ba scripts/candidato_easyocr.py | sed -n '1,220p'
+printf '\\n--- RAW MOONDREAM ---\\n'
+python3 - <<'PY'
+import json
+p='saida/resultados_brutos.json'
+d=json.load(open(p))
+print(json.dumps(d['fases']['moondream:v2'], ensure_ascii=False, indent=2))
+PY
+printf '\\n--- OTHER NETWORK-LIKE CODE ---\\n'
+rg -n '(https?://|urllib|requests|httpx|aiohttp|socket|subprocess|curl|wget)' scripts --glob '*.py'" in /Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento
+ succeeded in 0ms:
+     1	"""Orquestrador do benchmark AV-S05B, conforme protocolo congelado.
+     2	Roda a fase dev (verificacao funcional, sem medir qualidade) e depois a
+     3	fase eval (avaliacao final, congelada), para cada candidato configurado.
+     4	Nao ajusta parametros apos ver resultado da fase eval (protocolo secao 4).
+     5	"""
+     6	import json
+     7	import os
+     8	import sys
+     9	import time
+    10	
+    11	sys.path.insert(0, os.path.dirname(__file__))
+    12	from metricas import cer, wer, normalizar  # noqa: E402
+    13	from candidato_tesseract import rodar_tesseract  # noqa: E402
+    14	from candidato_easyocr import rodar_easyocr  # noqa: E402
+    15	from candidato_vlm_ollama import rodar_vlm_ollama  # noqa: E402
+    16	
+    17	BASE = os.path.join(os.path.dirname(__file__), "..")
+    18	AMOSTRAS_DEV = os.path.join(BASE, "amostras", "dev")
+    19	AMOSTRAS_EVAL = os.path.join(BASE, "amostras", "eval")
+    20	REFERENCIAS = os.path.join(BASE, "amostras", "referencias")
+    21	SAIDA = os.path.join(BASE, "saida")
+    22	os.makedirs(SAIDA, exist_ok=True)
+    23	
+    24	CANDIDATOS = [
+    25	    {"id": "tesseract", "fn": lambda p: rodar_tesseract(p, lang="por")},
+    26	    {"id": "easyocr", "fn": lambda p: rodar_easyocr(p, lang_list=("pt",))},
+    27	    {"id": "moondream:v2", "fn": lambda p: rodar_vlm_ollama(p, "moondream:v2")},
+    28	]
+    29	
+    30	
+    31	def carregar_referencia(nome_imagem: str) -> str:
+    32	    base = os.path.splitext(nome_imagem)[0]
+    33	    caminho = os.path.join(REFERENCIAS, base + ".txt")
+    34	    with open(caminho, "r", encoding="utf-8") as f:
+    35	        return f.read()
+    36	
+    37	
+    38	def rodar_fase(candidato, diretorio_amostras, fase: str):
+    39	    resultados = []
+    40	    amostras = sorted(os.listdir(diretorio_amostras))
+    41	    for nome in amostras:
+    42	        caminho = os.path.join(diretorio_amostras, nome)
+    43	        ref = carregar_referencia(nome)
+    44	        print(f"  [{fase}] {candidato['id']} x {nome} ...", flush=True)
+    45	        t_ini = time.strftime("%Y-%m-%dT%H:%M:%S")
+    46	        try:
+    47	            r = candidato["fn"](caminho)
+    48	        except Exception as e:
+    49	            r = {
+    50	                "candidato": candidato["id"],
+    51	                "texto": "",
+    52	                "erro": f"excecao nao tratada: {e}",
+    53	                "tempo_carregamento_s": None,
+    54	                "tempo_inferencia_s": None,
+    55	            }
+    56	        r["amostra"] = nome
+    57	        r["fase"] = fase
+    58	        r["timestamp_inicio"] = t_ini
+    59	        r["referencia"] = ref
+    60	
+    61	        # metricas (apenas informativas na fase dev; nao usadas para
+    62	        # ajustar parametros, conforme protocolo)
+    63	        if ref.strip() == "":
+    64	            r["cer"] = None
+    65	            r["wer"] = None
+    66	            r["inventou_texto_em_amostra_vazia"] = normalizar(r["texto"]) != "" and normalizar(r["texto"]).upper() != "ILEGIVEL"
+    67	        else:
+    68	            r["cer"] = cer(ref, r["texto"])
+    69	            r["wer"] = wer(ref, r["texto"])
+    70	            r["inventou_texto_em_amostra_vazia"] = None
+    71	        resultados.append(r)
+    72	    return resultados
+    73	
+    74	
+    75	def main():
+    76	    protocolo_hash_path = os.path.join(BASE, "protocolo", "PROTOCOLO_CONGELADO.sha256")
+    77	    with open(protocolo_hash_path) as f:
+    78	        protocolo_hash = f.read().strip()
+    79	
+    80	    relatorio = {
+    81	        "protocolo_congelado_sha256": protocolo_hash,
+    82	        "gerado_em": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    83	        "fases": {},
+    84	    }
+    85	
+    86	    for candidato in CANDIDATOS:
+    87	        print(f"=== Candidato: {candidato['id']} ===")
+    88	        print(" Fase DEV (verificacao funcional, nao usada para medir qualidade)")
+    89	        dev = rodar_fase(candidato, AMOSTRAS_DEV, "dev")
+    90	        print(" Fase EVAL (avaliacao final, congelada)")
+    91	        evl = rodar_fase(candidato, AMOSTRAS_EVAL, "eval")
+    92	        relatorio["fases"].setdefault(candidato["id"], {})["dev"] = dev
+    93	        relatorio["fases"][candidato["id"]]["eval"] = evl
+    94	
+    95	        # salva incrementalmente para nao perder progresso
+    96	        out_path = os.path.join(SAIDA, "resultados_brutos.json")
+    97	        with open(out_path, "w", encoding="utf-8") as f:
+    98	            json.dump(relatorio, f, ensure_ascii=False, indent=2)
+    99	        print(f" (salvo incrementalmente em {out_path})")
+   100	
+   101	    print("Benchmark concluido. Resultado bruto em", os.path.join(SAIDA, "resultados_brutos.json"))
+   102	
+   103	
+   104	if __name__ == "__main__":
+   105	    main()
+
+--- VLM ---
+     1	"""Executor de candidatos VLM locais via Ollama (moondream:v2, qwen2.5vl:3b).
+     2	100% local (chamada ao daemon Ollama local, nao servico externo).
+     3	Separa tempo de carregamento (primeira chamada, carrega modelo em memoria)
+     4	de tempo de inferencia (chamadas subsequentes com modelo ja carregado),
+     5	conforme protocolo secao 7.
+     6	
+     7	PROMPT CONGELADO (nao alterar apos inicio da avaliacao final):
+     8	"""
+     9	import base64
+    10	import time
+    11	import json
+    12	import urllib.request
+    13	
+    14	PROMPT_CONGELADO = (
+    15	    "Transcreva EXATAMENTE o texto visivel nesta imagem, em portugues, "
+    16	    "sem adicionar nem inventar nenhuma palavra. Se a imagem nao contiver "
+    17	    "nenhum texto legivel, responda apenas com a palavra: ILEGIVEL"
+    18	)
+    19	
+    20	_MODELOS_JA_CARREGADOS = set()
+    21	
+    22	
+    23	def _chamar_ollama(modelo: str, imagem_b64: str, prompt: str, timeout=120) -> dict:
+    24	    payload = {
+    25	        "model": modelo,
+    26	        "prompt": prompt,
+    27	        "images": [imagem_b64],
+    28	        "stream": False,
+    29	    }
+    30	    req = urllib.request.Request(
+    31	        "http://localhost:11434/api/generate",
+    32	        data=json.dumps(payload).encode("utf-8"),
+    33	        headers={"Content-Type": "application/json"},
+    34	        method="POST",
+    35	    )
+    36	    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    37	        return json.loads(resp.read().decode("utf-8"))
+    38	
+    39	
+    40	def rodar_vlm_ollama(caminho_imagem: str, modelo: str) -> dict:
+    41	    with open(caminho_imagem, "rb") as f:
+    42	        imagem_b64 = base64.b64encode(f.read()).decode("ascii")
+    43	
+    44	    tempo_carregamento = None
+    45	    if modelo not in _MODELOS_JA_CARREGADOS:
+    46	        # primeira chamada: carrega o modelo em memoria, medido a parte
+    47	        t0 = time.perf_counter()
+    48	        try:
+    49	            _chamar_ollama(modelo, imagem_b64, "diga apenas: ok")
+    50	        except Exception:
+    51	            pass
+    52	        t1 = time.perf_counter()
+    53	        tempo_carregamento = round(t1 - t0, 4)
+    54	        _MODELOS_JA_CARREGADOS.add(modelo)
+    55	
+    56	    t0 = time.perf_counter()
+    57	    try:
+    58	        resposta = _chamar_ollama(modelo, imagem_b64, PROMPT_CONGELADO)
+    59	        texto = resposta.get("response", "").strip()
+    60	        erro = None
+    61	    except Exception as e:
+    62	        texto = ""
+    63	        erro = str(e)
+    64	    t1 = time.perf_counter()
+    65	    return {
+    66	        "candidato": modelo,
+    67	        "texto": texto,
+    68	        "erro": erro,
+    69	        "tempo_carregamento_s": tempo_carregamento,
+    70	        "tempo_inferencia_s": round(t1 - t0, 4),
+    71	        "prompt": PROMPT_CONGELADO,
+    72	    }
+    73	
+    74	
+    75	if __name__ == "__main__":
+    76	    import sys
+    77	    print(rodar_vlm_ollama(sys.argv[1], sys.argv[2]))
+
+--- TESS ---
+     1	"""Executor do candidato Tesseract OCR sobre uma imagem.
+     2	Retorna dict com texto extraido e tempos de carregamento/inferencia.
+     3	Conforme protocolo: 100% local, sem chamada de rede."""
+     4	import subprocess
+     5	import time
+     6	
+     7	
+     8	def rodar_tesseract(caminho_imagem: str, lang: str = "por") -> dict:
+     9	    # "carregamento" para o Tesseract via CLI e o tempo de start do processo
+    10	    # + carregamento do modelo de idioma; medimos o processo completo como
+    11	    # inferencia, ja que o CLI nao separa as duas fases de forma exposta.
+    12	    t0 = time.perf_counter()
+    13	    try:
+    14	        resultado = subprocess.run(
+    15	            ["tesseract", caminho_imagem, "stdout", "-l", lang],
+    16	            capture_output=True,
+    17	            text=True,
+    18	            timeout=60,
+    19	        )
+    20	        texto = resultado.stdout.strip()
+    21	        erro = resultado.stderr.strip() if resultado.returncode != 0 else None
+    22	    except subprocess.TimeoutExpired:
+    23	        texto = ""
+    24	        erro = "timeout"
+    25	    except Exception as e:
+    26	        texto = ""
+    27	        erro = str(e)
+    28	    t1 = time.perf_counter()
+    29	    return {
+    30	        "candidato": "tesseract",
+    31	        "texto": texto,
+    32	        "erro": erro,
+    33	        "tempo_carregamento_s": None,  # nao separavel via CLI
+    34	        "tempo_inferencia_s": round(t1 - t0, 4),
+    35	    }
+    36	
+    37	
+    38	if __name__ == "__main__":
+    39	    import sys
+    40	    print(rodar_tesseract(sys.argv[1]))
+
+--- EASYOCR ---
+     1	"""Executor do candidato EasyOCR sobre uma imagem.
+     2	Separa tempo de carregamento (inicializacao do Reader/modelo) de tempo
+     3	de inferencia (processamento da imagem), conforme protocolo secao 7."""
+     4	import time
+     5	
+     6	_READER_CACHE = {}
+     7	
+     8	
+     9	def _get_reader(lang_list):
+    10	    key = tuple(lang_list)
+    11	    if key not in _READER_CACHE:
+    12	        import easyocr
+    13	
+    14	        t0 = time.perf_counter()
+    15	        _READER_CACHE[key] = easyocr.Reader(lang_list, gpu=False, verbose=False)
+    16	        t1 = time.perf_counter()
+    17	        _READER_CACHE["_ultimo_tempo_carregamento"] = round(t1 - t0, 4)
+    18	    return _READER_CACHE[key]
+    19	
+    20	
+    21	def rodar_easyocr(caminho_imagem: str, lang_list=("pt",)) -> dict:
+    22	    tempo_carregamento = None
+    23	    try:
+    24	        reader = _get_reader(lang_list)
+    25	        tempo_carregamento = _READER_CACHE.pop("_ultimo_tempo_carregamento", None)
+    26	        t0 = time.perf_counter()
+    27	        resultados = reader.readtext(caminho_imagem, detail=0, paragraph=True)
+    28	        texto = " ".join(resultados).strip()
+    29	        erro = None
+    30	        t1 = time.perf_counter()
+    31	        tempo_inferencia = round(t1 - t0, 4)
+    32	    except Exception as e:
+    33	        texto = ""
+    34	        erro = str(e)
+    35	        tempo_inferencia = None
+    36	    return {
+    37	        "candidato": "easyocr",
+    38	        "texto": texto,
+    39	        "erro": erro,
+    40	        "tempo_carregamento_s": tempo_carregamento,
+    41	        "tempo_inferencia_s": tempo_inferencia,
+    42	    }
+    43	
+    44	
+    45	if __name__ == "__main__":
+    46	    import sys
+    47	    print(rodar_easyocr(sys.argv[1]))
+
+--- RAW MOONDREAM ---
+{
+  "dev": [
+    {
+      "candidato": "moondream:v2",
+      "texto": "",
+      "erro": "<urlopen error [Errno 1] Operation not permitted>",
+      "tempo_carregamento_s": 0.0031,
+      "tempo_inferencia_s": 0.0002,
+      "prompt": "Transcreva EXATAMENTE o texto visivel nesta imagem, em portugues, sem adicionar nem inventar nenhuma palavra. Se a imagem nao contiver nenhum texto legivel, responda apenas com a palavra: ILEGIVEL",
+      "amostra": "IMP-01_nitida.png",
+      "fase": "dev",
+      "timestamp_inicio": "2026-09-29T10:49:41",
+      "referencia": "A capital do Brasil e Brasilia, inaugurada em 1960. Ela foi planejada pelo urbanista Lucio Costa e pelo arquiteto Oscar Niemeyer, com o objetivo de interiorizar o desenvolvimento do pais.",
+      "cer": 1.0,
+      "wer": 1.0,
+      "inventou_texto_em_amostra_vazia": null
+    },
+    {
+      "candidato": "moondream:v2",
+      "texto": "",
+      "erro": "<urlopen error [Errno 1] Operation not permitted>",
+      "tempo_carregamento_s": null,
+      "tempo_inferencia_s": 0.0014,
+      "prompt": "Transcreva EXATAMENTE o texto visivel nesta imagem, em portugues, sem adicionar nem inventar nenhuma palavra. Se a imagem nao contiver nenhum texto legivel, responda apenas com a palavra: ILEGIVEL",
+      "amostra": "IMP-08_vazia_ilegivel.png",
+      "fase": "dev",
+      "timestamp_inicio": "2026-09-29T10:49:41",
+      "referencia": "",
+      "cer": null,
+      "wer": null,
+      "inventou_texto_em_amostra_vazia": false
+    }
+  ],
+  "eval": [
+    {
+      "candidato": "moondream:v2",
+      "texto": "",
+      "erro": "<urlopen error [Errno 1] Operation not permitted>",
+      "tempo_carregamento_s": null,
+      "tempo_inferencia_s": 0.0002,
+      "prompt": "Transcreva EXATAMENTE o texto visivel nesta imagem, em portugues, sem adicionar nem inventar nenhuma palavra. Se a imagem nao contiver nenhum texto legivel, responda apenas com a palavra: ILEGIVEL",
+      "amostra": "IMP-02_inclinacao_leve.png",
+      "fase": "eval",
+      "timestamp_inicio": "2026-09-29T10:49:41",
+      "referencia": "A capital do Brasil e Brasilia, inaugurada em 1960. Ela foi planejada pelo urbanista Lucio Costa e pelo arquiteto Oscar Niemeyer, com o objetivo de interiorizar o desenvolvimento do pais.",
+      "cer": 1.0,
+      "wer": 1.0,
+      "inventou_texto_em_amostra_vazia": null
+    },
+    {
+      "candidato": "moondream:v2",
+      "texto": "",
+      "erro": "<urlopen error [Errno 1] Operation not permitted>",
+      "tempo_carregamento_s": null,
+      "tempo_inferencia_s": 0.0002,
+      "prompt": "Transcreva EXATAMENTE o texto visivel nesta imagem, em portugues, sem adicionar nem inventar nenhuma palavra. Se a imagem nao contiver nenhum texto legivel, responda apenas com a palavra: ILEGIVEL",
+      "amostra": "IMP-03_inclinacao_acentuada.png",
+      "fase": "eval",
+      "timestamp_inicio": "2026-09-29T10:49:41",
+      "referencia": "A capital do Brasil e Brasilia, inaugurada em 1960. Ela foi planejada pelo urbanista Lucio Costa e pelo arquiteto Oscar Niemeyer, com o objetivo de interiorizar o desenvolvimento do pais.",
+      "cer": 1.0,
+      "wer": 1.0,
+      "inventou_texto_em_amostra_vazia": null
+    },
+    {
+      "candidato": "moondream:v2",
+      "texto": "",
+      "erro": "<urlopen error [Errno 1] Operation not permitted>",
+      "tempo_carregamento_s": null,
+      "tempo_inferencia_s": 0.0002,
+      "prompt": "Transcreva EXATAMENTE o texto visivel nesta imagem, em portugues, sem adicionar nem inventar nenhuma palavra. Se a imagem nao contiver nenhum texto legivel, responda apenas com a palavra: ILEGIVEL",
+      "amostra": "IMP-04_desfocada.png",
+      "fase": "eval",
+      "timestamp_inicio": "2026-09-29T10:49:41",
+      "referencia": "A capital do Brasil e Brasilia, inaugurada em 1960. Ela foi planejada pelo urbanista Lucio Costa e pelo arquiteto Oscar Niemeyer, com o objetivo de interiorizar o desenvolvimento do pais.",
+      "cer": 1.0,
+      "wer": 1.0,
+      "inventou_texto_em_amostra_vazia": null
+    },
+    {
+      "candidato": "moondream:v2",
+      "texto": "",
+      "erro": "<urlopen error [Errno 1] Operation not permitted>",
+      "tempo_carregamento_s": null,
+      "tempo_inferencia_s": 0.0002,
+      "prompt": "Transcreva EXATAMENTE o texto visivel nesta imagem, em portugues, sem adicionar nem inventar nenhuma palavra. Se a imagem nao contiver nenhum texto legivel, responda apenas com a palavra: ILEGIVEL",
+      "amostra": "IMP-05_iluminacao_irregular.png",
+      "fase": "eval",
+      "timestamp_inicio": "2026-09-29T10:49:41",
+      "referencia": "A capital do Brasil e Brasilia, inaugurada em 1960. Ela foi planejada pelo urbanista Lucio Costa e pelo arquiteto Oscar Niemeyer, com o objetivo de interiorizar o desenvolvimento do pais.",
+      "cer": 1.0,
+      "wer": 1.0,
+      "inventou_texto_em_amostra_vazia": null
+    },
+    {
+      "candidato": "moondream:v2",
+      "texto": "",
+      "erro": "<urlopen error [Errno 1] Operation not permitted>",
+      "tempo_carregamento_s": null,
+      "tempo_inferencia_s": 0.0002,
+      "prompt": "Transcreva EXATAMENTE o texto visivel nesta imagem, em portugues, sem adicionar nem inventar nenhuma palavra. Se a imagem nao contiver nenhum texto legivel, responda apenas com a palavra: ILEGIVEL",
+      "amostra": "IMP-06_acentuacao.png",
+      "fase": "eval",
+      "timestamp_inicio": "2026-09-29T10:49:41",
+      "referencia": "A questao envolve conceitos de acao, nacao, coracao e razao. Tambem trata de fenomenos atmosfericos, como o orvalho e a neblina, alem da influencia do relevo na formacao de microclimas regionais.",
+      "cer": 1.0,
+      "wer": 1.0,
+      "inventou_texto_em_amostra_vazia": null
+    },
+    {
+      "candidato": "moondream:v2",
+      "texto": "",
+      "erro": "<urlopen error [Errno 1] Operation not permitted>",
+      "tempo_carregamento_s": null,
+      "tempo_inferencia_s": 0.0001,
+      "prompt": "Transcreva EXATAMENTE o texto visivel nesta imagem, em portugues, sem adicionar nem inventar nenhuma palavra. Se a imagem nao contiver nenhum texto legivel, responda apenas com a palavra: ILEGIVEL",
+      "amostra": "IMP-07_rasura.png",
+      "fase": "eval",
+      "timestamp_inicio": "2026-09-29T10:49:41",
+      "referencia": "A capital do Brasil e Brasilia, inaugurada em 1960. Ela foi planejada pelo urbanista Lucio Costa e pelo arquiteto Oscar Niemeyer, com o objetivo de interiorizar o desenvolvimento do pais.",
+      "cer": 1.0,
+      "wer": 1.0,
+      "inventou_texto_em_amostra_vazia": null
+    },
+    {
+      "candidato": "moondream:v2",
+      "texto": "",
+      "erro": "<urlopen error [Errno 1] Operation not permitted>",
+      "tempo_carregamento_s": null,
+      "tempo_inferencia_s": 0.0015,
+      "prompt": "Transcreva EXATAMENTE o texto visivel nesta imagem, em portugues, sem adicionar nem inventar nenhuma palavra. Se a imagem nao contiver nenhum texto legivel, responda apenas com a palavra: ILEGIVEL",
+      "amostra": "IMP-08_vazia_ilegivel.png",
+      "fase": "eval",
+      "timestamp_inicio": "2026-09-29T10:49:41",
+      "referencia": "",
+      "cer": null,
+      "wer": null,
+      "inventou_texto_em_amostra_vazia": false
+    }
+  ]
+}
+
+--- OTHER NETWORK-LIKE CODE ---
+scripts/candidato_vlm_ollama.py:12:import urllib.request
+scripts/candidato_vlm_ollama.py:30:    req = urllib.request.Request(
+scripts/candidato_vlm_ollama.py:31:        "http://localhost:11434/api/generate",
+scripts/candidato_vlm_ollama.py:36:    with urllib.request.urlopen(req, timeout=timeout) as resp:
+scripts/candidato_tesseract.py:4:import subprocess
+scripts/candidato_tesseract.py:14:        resultado = subprocess.run(
+scripts/candidato_tesseract.py:22:    except subprocess.TimeoutExpired:
+
+exec
+/bin/zsh -lc "nl -ba scripts/gerar_relatorio.py | sed -n '1,180p'
+shasum -a 256 protocolo/PROTOCOLO_CONGELADO.md
+cat protocolo/PROTOCOLO_CONGELADO.sha256
+git status --short" in /Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento
+ succeeded in 0ms:
+     1	"""Gera o relatorio final a partir de saida/resultados_brutos.json,
+     2	aplicando corretamente o criterio eliminatorio de invencao de texto
+     3	(corrigido apos o desvio de protocolo registrado em
+     4	protocolo/PROTOCOLO_CONGELADO.md secao 13).
+     5	
+     6	NAO repete nenhuma chamada de inferencia -- opera sobre o texto bruto ja
+     7	gravado, imutavel desde a execucao do benchmark.
+     8	"""
+     9	import json
+    10	import os
+    11	import re
+    12	import unicodedata
+    13	
+    14	BASE = os.path.join(os.path.dirname(__file__), "..")
+    15	SAIDA = os.path.join(BASE, "saida")
+    16	
+    17	
+    18	def eh_marcacao_ilegivel(texto: str) -> bool:
+    19	    """Reconhece variacoes razoaveis do marcador ILEGIVEL: case-insensitive,
+    20	    tolera pontuacao final e espacos. Nao tolera texto adicional alem do
+    21	    marcador (isso ainda seria invencao parcial)."""
+    22	    t = unicodedata.normalize("NFC", texto).strip()
+    23	    t = re.sub(r"[.\!\?]+$", "", t)  # remove pontuacao final
+    24	    return t.strip().upper() == "ILEGIVEL"
+    25	
+    26	
+    27	def avaliar_criterio_ilegivel(texto: str) -> dict:
+    28	    texto_norm = unicodedata.normalize("NFC", texto).strip()
+    29	    if texto_norm == "":
+    30	        return {"inventou_texto": False, "motivo": "saida vazia — comportamento correto"}
+    31	    if eh_marcacao_ilegivel(texto):
+    32	        return {"inventou_texto": False, "motivo": "marcacao explicita de ilegibilidade — comportamento correto"}
+    33	    return {"inventou_texto": True, "motivo": f"produziu texto nao-vazio e nao-marcador sobre amostra vazia/ilegivel: {texto_norm!r}"}
+    34	
+    35	
+    36	def main():
+    37	    with open(os.path.join(SAIDA, "resultados_brutos.json")) as f:
+    38	        dados = json.load(f)
+    39	
+    40	    relatorio = {"protocolo_congelado_sha256": dados["protocolo_congelado_sha256"], "candidatos": {}}
+    41	
+    42	    for cand, fases in dados["fases"].items():
+    43	        info = {"eliminatorio_100_local": True, "eliminatorio_zero_invencao": None, "eval": []}
+    44	
+    45	        # criterio eliminatorio 1: 100% local -- todos os 3 candidatos
+    46	        # testados (tesseract, easyocr, moondream:v2 via ollama local) sao
+    47	        # locais por design; nenhuma chamada de rede foi feita durante a
+    48	        # fase de inferencia (apenas na preparacao, registrada a parte)
+    49	        info["eliminatorio_100_local"] = True
+    50	
+    51	        # criterio eliminatorio 2: reavaliado corretamente sobre IMP-08 (eval)
+    52	        for it in fases["eval"]:
+    53	            if "IMP-08" in it["amostra"]:
+    54	                aval = avaliar_criterio_ilegivel(it["texto"])
+    55	                info["eliminatorio_zero_invencao"] = not aval["inventou_texto"]
+    56	                info["detalhe_IMP-08_eval"] = {
+    57	                    "texto_bruto": it["texto"],
+    58	                    "avaliacao": aval,
+    59	                }
+    60	
+    61	        elegivel = info["eliminatorio_100_local"] and info["eliminatorio_zero_invencao"]
+    62	        info["elegivel"] = elegivel
+    63	
+    64	        # observacao critica: abstencao sistematica (responde "ilegivel"
+    65	        # para TODAS as amostras, inclusive as legiveis) indica falha de
+    66	        # reconhecimento, nao sucesso do criterio eliminatorio -- sinalizada
+    67	        # explicitamente, nao escondida atras do rotulo "elegivel"
+    68	        todas_abstiveram = all(
+    69	            eh_marcacao_ilegivel(it["texto"]) for it in fases["eval"]
+    70	        ) and all(
+    71	            eh_marcacao_ilegivel(it["texto"]) for it in fases["dev"]
+    72	        )
+    73	        info["abstencao_sistematica_todas_amostras"] = todas_abstiveram
+    74	        if todas_abstiveram:
+    75	            info["observacao_critica"] = (
+    76	                "Candidato respondeu marcador de ilegibilidade para TODAS as "
+    77	                "amostras testadas, incluindo IMP-01 (nitida, dev), que e a "
+    78	                "amostra mais facil do conjunto. Isso indica falha sistematica "
+    79	                "de extracao de texto nesta configuracao (prompt/modelo), NAO "
+    80	                "sucesso robusto do criterio eliminatorio de nao-invencao. "
+    81	                "CER/WER de ~100% refletem essa abstencao total, nao um erro "
+    82	                "de reconhecimento parcial. Elegibilidade tecnica pelo "
+    83	                "criterio eliminatorio nao implica candidato funcionalmente "
+    84	                "util nesta configuracao."
+    85	            )
+    86	
+    87	        # metricas comparativas (apenas para elegiveis, mas reportadas para todos)
+    88	        cers, wers, tempos_inf = [], [], []
+    89	        for it in fases["eval"]:
+    90	            if "IMP-08" in it["amostra"]:
+    91	                continue  # excluida do CER/WER agregado (referencia vazia)
+    92	            info["eval"].append({
+    93	                "amostra": it["amostra"],
+    94	                "cer": it["cer"],
+    95	                "wer": it["wer"],
+    96	                "tempo_inferencia_s": it["tempo_inferencia_s"],
+    97	                "erro": it["erro"],
+    98	            })
+    99	            if it["cer"] is not None:
+   100	                cers.append(it["cer"])
+   101	            if it["wer"] is not None:
+   102	                wers.append(it["wer"])
+   103	            if it["tempo_inferencia_s"] is not None:
+   104	                tempos_inf.append(it["tempo_inferencia_s"])
+   105	
+   106	        info["cer_medio_agregado"] = round(sum(cers) / len(cers), 4) if cers else None
+   107	        info["wer_medio_agregado"] = round(sum(wers) / len(wers), 4) if wers else None
+   108	        info["tempo_inferencia_medio_s"] = round(sum(tempos_inf) / len(tempos_inf), 4) if tempos_inf else None
+   109	
+   110	        # tempo de carregamento (fase dev, primeira amostra que reportou)
+   111	        for it in fases["dev"]:
+   112	            if it.get("tempo_carregamento_s") is not None:
+   113	                info["tempo_carregamento_s"] = it["tempo_carregamento_s"]
+   114	                break
+   115	        else:
+   116	            info["tempo_carregamento_s"] = None
+   117	
+   118	        relatorio["candidatos"][cand] = info
+   119	
+   120	    out_path = os.path.join(SAIDA, "relatorio_final.json")
+   121	    with open(out_path, "w", encoding="utf-8") as f:
+   122	        json.dump(relatorio, f, ensure_ascii=False, indent=2)
+   123	    print(json.dumps(relatorio, ensure_ascii=False, indent=2))
+   124	    print("\nRelatorio salvo em", out_path)
+   125	
+   126	
+   127	if __name__ == "__main__":
+   128	    main()
+9a861c985548a13f76708a66e1ed05d4d180025193e77cfcc51a8f8fb599344b  protocolo/PROTOCOLO_CONGELADO.md
+5b8e7ecaa51741c4f13b94cda1ccc54c3ec26b896b928ad72ed13940633b3b5c  protocolo/PROTOCOLO_CONGELADO.md
+ M protocolo/PROTOCOLO_CONGELADO.md
+?? amostras/
+?? protocolo/PREPARACAO_DOWNLOADS.md
+?? saida/
+?? scripts/
+?? venv/
+
+codex
+A auditoria encontrou mais um problema de integridade independente dos resultados: o SHA-256 atual do protocolo congelado (`9a861c…`) não coincide com o checksum gravado (`5b8e7e…`), embora o relatório apenas copie o checksum antigo sem recalculá-lo. Não alterei o protocolo nem scripts; vou apenas localizar a divergência para qualificá-la.
+exec
+/bin/zsh -lc "git diff -- protocolo/PROTOCOLO_CONGELADO.md
+printf '\\n--- END OF PROTOCOL ---\\n'
+nl -ba protocolo/PROTOCOLO_CONGELADO.md | tail -100
+printf '\\n--- FILE METADATA ---\\n'
+stat -f '%N | modified=%Sm | changed=%Sc | size=%z' -t '%Y-%m-%d %H:%M:%S %z' protocolo/PROTOCOLO_CONGELADO.md protocolo/PROTOCOLO_CONGELADO.sha256 scripts/rodar_benchmark.py scripts/gerar_relatorio.py saida/resultados_brutos.json saida/relatorio_final.json" in /Users/rafaeloliveira/Projeto Estágio/av-s05b-benchmark-experimento
+ succeeded in 0ms:
+diff --git a/protocolo/PROTOCOLO_CONGELADO.md b/protocolo/PROTOCOLO_CONGELADO.md
+index 17c7492..40ce9b3 100644
+--- a/protocolo/PROTOCOLO_CONGELADO.md
++++ b/protocolo/PROTOCOLO_CONGELADO.md
+@@ -247,4 +247,5 @@ acima.
+ 
+ | Data/hora | Desvio | Motivo | Decisão |
+ |---|---|---|---|
+-| (preencher durante a execução, se houver) | | | |
++| 2026-09-29 ~13:33 UTC | Download de modelos do EasyOCR ocorreu durante smoke-test dos scripts (amostra de dev), não em etapa de preparação isolada previamente | EasyOCR baixa modelos automaticamente na primeira inicialização do `Reader`, sem "pull" separado | detalhado em `PREPARACAO_DOWNLOADS.md`; tempo desta chamada não usado como medição oficial; nenhuma amostra eval processada durante o desvio |
++| 2026-09-29 ~13:40 UTC | Script de avaliação do critério eliminatório (invenção de texto em IMP-08) comparava a resposta do candidato de forma exata (`!= "ILEGIVEL"`), sem tolerar pontuação/capitalização. `moondream:v2` respondeu `"ilegivel."` (minúsculo, com ponto final) para IMP-08 em ambas as fases (dev e eval), e o script marcou isso incorretamente como invenção de texto | bug de avaliação, não do candidato — protocolo seção 6 trata "marcação de ilegibilidade explícita" como acerto, e `"ilegivel."` é claramente essa marcação, não texto inventado sobre o conteúdo da imagem | corrigida a função de comparação para normalizar pontuação final e capitalização antes de comparar com o marcador esperado; reavaliação feita sobre o texto bruto já gravado (não repetida a chamada de inferência, que é imutável); resultado corrigido documentado no relatório final |
+
+--- END OF PROTOCOL ---
+   152	   explicitamente (a) tempo de carregamento inicial do modelo/motor
+   153	   (carregar pesos, inicializar) de (b) tempo de inferência com o
+   154	   modelo já carregado em memória, por amostra. Medido no hardware
+   155	   desta máquina (Apple M5 Pro, 24 GB RAM — ver seção 11), rotulado
+   156	   como não representativo de hardware-alvo de produção (`DEC-AV-009`
+   157	   pendente).
+   158	4. **Robustez a ilegível/ausente** — critério eliminatório, seção 5.
+   159	5. **Viabilidade 100% local** — critério eliminatório, seção 5.
+   160	
+   161	**Regra de comparação**: candidatos que falham em qualquer critério
+   162	eliminatório (seção 5) são desclassificados e não entram na comparação de
+   163	CER/WER/latência — são reportados como desclassificados, com o motivo
+   164	específico, não omitidos do relatório. Entre os candidatos elegíveis, o
+   165	relatório apresenta os valores medidos lado a lado, sem calcular um
+   166	"vencedor" automático — a recomendação para o ADR é qualitativa, baseada
+   167	nos números apresentados, não em uma fórmula de pontuação oculta.
+   168	
+   169	**Nenhum critério deste protocolo pode ser ajustado após ver resultado
+   170	parcial de qualquer candidato.**
+   171	
+   172	## 8. Distinção entre preparação (download) e inferência offline
+   173	
+   174	Etapa de preparação (antes de medir latência/qualquer métrica): baixar
+   175	Tesseract, `tesseract-ocr-por`, EasyOCR e seus modelos, `moondream:v2`,
+   176	`qwen2.5vl:3b` via `ollama pull`. Esta etapa é feita uma vez, com rede,
+   177	registrada separadamente (o quê foi baixado, de onde, tamanho, hash
+   178	quando disponível) e **não conta como parte de nenhuma métrica de
+   179	latência de inferência**.
+   180	
+   181	Etapa de inferência (medição real): a partir do momento em que a etapa de
+   182	preparação termina, toda a execução do benchmark ocorre sem rede — nenhuma
+   183	chamada de rede, nenhum acesso à internet durante o processamento de
+   184	nenhuma amostra. Verificável observando que os comandos de inferência não
+   185	fazem requisição HTTP/DNS após os pesos estarem em disco/carregados.
+   186	
+   187	## 9. Normalização de texto para CER/WER
+   188	
+   189	Definida previamente:
+   190	
+   191	- normalização Unicode NFC;
+   192	- espaços múltiplos colapsados em um único espaço;
+   193	- espaços de início/fim removidos (trim);
+   194	- **preserva** maiúsculas/minúsculas e pontuação (não normaliza — erro de
+   195	  capitalização/pontuação conta como erro real, porque no produto a
+   196	  transcrição confirmada pelo professor precisa refletir a resposta real
+   197	  do aluno, não uma versão normalizada);
+   198	- caracteres acentuados do português (ç, ã, é, ô, ü etc.) tratados como
+   199	  caracteres distintos de suas formas sem acento — erro de acentuação
+   200	  conta como erro de caractere (relevante para pt-BR, item IMP-06).
+   201	
+   202	## 10. Versões e configuração (a preencher no momento da execução, antes de medir)
+   203	
+   204	Campos obrigatórios a registrar no relatório final para cada candidato,
+   205	travados antes da avaliação final (não alteráveis depois):
+   206	
+   207	- versão exata do binário/pacote/modelo (ex.: `tesseract --version`,
+   208	  `pip show easyocr`, `ollama list` com hash do modelo);
+   209	- parâmetros de invocação completos (idioma, prompt exato para VLMs,
+   210	  qualquer flag não-padrão);
+   211	- hardware/ambiente de execução (confirmação de que é a máquina descrita
+   212	  na seção 11, sem GPU externa, sem aceleração de nuvem).
+   213	
+   214	## 11. Hardware desta execução
+   215	
+   216	Apple M5 Pro, 24 GB RAM, GPU integrada 16 núcleos (Metal 4, sem VRAM
+   217	discreta), macOS 27.2. Confirmado por `sysctl`/`system_profiler` em
+   218	2026-09-29 (mesmos dados já registrados na proposta de sprint). Latência
+   219	medida aqui não representa hardware-alvo de produção (`DEC-AV-009`
+   220	pendente).
+   221	
+   222	## 12. Atividade preparada para medição futura de esforço de revisão humana
+   223	
+   224	Não executada nesta rodada. Proposta de protocolo para quando Rafael (ou
+   225	outro revisor humano designado) estiver disponível:
+   226	
+   227	1. Selecionar as transcrições produzidas pelos candidatos elegíveis (que
+   228	   passaram nos critérios eliminatórios) sobre o conjunto de avaliação
+   229	   final;
+   230	2. apresentar ao revisor humano, uma de cada vez, a imagem original e a
+   231	   transcrição sugerida (sem revelar qual candidato produziu qual);
+   232	3. cronometrar o tempo até o revisor confirmar ou corrigir a transcrição;
+   233	4. registrar o texto final confirmado e a distância de edição entre a
+   234	   sugestão e o texto confirmado;
+   235	5. repetir para todas as combinações candidato×amostra relevantes.
+   236	
+   237	Esta atividade fica pendente, aguardando disponibilidade do revisor
+   238	humano — não é substituída por estimativa de agente.
+   239	
+   240	## 13. Registro de desvio de protocolo
+   241	
+   242	Se, durante a execução, qualquer passo divergir deste protocolo congelado
+   243	(ex.: candidato indisponível, erro técnico não previsto, necessidade de
+   244	ajuste de parâmetro), o desvio é registrado nesta seção com data, motivo e
+   245	decisão tomada — nunca como alteração silenciosa da seção correspondente
+   246	acima.
+   247	
+   248	| Data/hora | Desvio | Motivo | Decisão |
+   249	|---|---|---|---|
+   250	| 2026-09-29 ~13:33 UTC | Download de modelos do EasyOCR ocorreu durante smoke-test dos scripts (amostra de dev), não em etapa de preparação isolada previamente | EasyOCR baixa modelos automaticamente na primeira inicialização do `Reader`, sem "pull" separado | detalhado em `PREPARACAO_DOWNLOADS.md`; tempo desta chamada não usado como medição oficial; nenhuma amostra eval processada durante o desvio |
+   251	| 2026-09-29 ~13:40 UTC | Script de avaliação do critério eliminatório (invenção de texto em IMP-08) comparava a resposta do candidato de forma exata (`!= "ILEGIVEL"`), sem tolerar pontuação/capitalização. `moondream:v2` respondeu `"ilegivel."` (minúsculo, com ponto final) para IMP-08 em ambas as fases (dev e eval), e o script marcou isso incorretamente como invenção de texto | bug de avaliação, não do candidato — protocolo seção 6 trata "marcação de ilegibilidade explícita" como acerto, e `"ilegivel."` é claramente essa marcação, não texto inventado sobre o conteúdo da imagem | corrigida a função de comparação para normalizar pontuação final e capitalização antes de comparar com o marcador esperado; reavaliação feita sobre o texto bruto já gravado (não repetida a chamada de inferência, que é imutável); resultado corrigido documentado no relatório final |
+
+--- FILE METADATA ---
+protocolo/PROTOCOLO_CONGELADO.md | modified=2026-09-29 10:47:05 -0300 | changed=2026-09-29 10:47:05 -0300 | size=14887
+protocolo/PROTOCOLO_CONGELADO.sha256 | modified=2026-09-29 10:28:23 -0300 | changed=2026-09-29 10:28:23 -0300 | size=99
+scripts/rodar_benchmark.py | modified=2026-09-29 10:43:01 -0300 | changed=2026-09-29 10:43:01 -0300 | size=4037
+scripts/gerar_relatorio.py | modified=2026-09-29 10:47:51 -0300 | changed=2026-09-29 10:47:51 -0300 | size=5797
+saida/resultados_brutos.json | modified=2026-09-29 10:49:41 -0300 | changed=2026-09-29 10:49:41 -0300 | size=21018
+saida/relatorio_final.json | modified=2026-09-29 10:49:45 -0300 | changed=2026-09-29 10:49:45 -0300 | size=5542
+
+codex
+- **Resultados reproduzidos: NAO, divergencia relevante.**
+  - **Tesseract:** reproduzido — elegível, IMP-08 vazia, CER **0,4127**, WER **0,5278**.
+  - **EasyOCR:** reproduzido — elegível, IMP-08 vazia, CER **0,3715**, WER **0,5159**.
+  - **Moondream:v2:** não reproduzido. As **9 inferências** falharam com `<urlopen error [Errno 1] Operation not permitted>`. Não respondeu `"ilegivel."`; o script converteu os erros em texto vazio. O relatório produziu CER **1,0000** (esperado ≈0,95), WER **1,0000** e marcou-o elegível. Portanto, não houve inferência válida do Moondream nesta reexecução.
+
+- **Logica de deteccao de invencao/abstencao: PROBLEMA.**
+  - Para uma execução bem-sucedida, `eh_marcacao_ilegivel` reconhece corretamente `"ilegivel."`, ignorando caixa, espaços e pontuação final.
+  - Porém, falhas técnicas viram `texto=""` em [candidato_vlm_ollama.py](/Users/rafaeloliveira/Projeto%20Estágio/av-s05b-benchmark-experimento/scripts/candidato_vlm_ollama.py:61), e o relatório interpreta qualquer texto vazio como comportamento correto sem verificar `erro`, em [gerar_relatorio.py](/Users/rafaeloliveira/Projeto%20Estágio/av-s05b-benchmark-experimento/scripts/gerar_relatorio.py:27). Assim, a falha de IMP-08 foi indevidamente convertida em aprovação eliminatória.
+  - A abstenação sistemática testa somente o marcador `"ILEGIVEL"` ([linhas 68–72](/Users/rafaeloliveira/Projeto%20Estágio/av-s05b-benchmark-experimento/scripts/gerar_relatorio.py:68)). Não reconhece saídas vazias sistemáticas nem exclui falhas técnicas. Nesta execução, por isso, registrou `false` apesar de nenhuma amostra ter sido processada.
+  - O protocolo também admite marcações como “sem texto detectável” e cita “não sei”/“ilegível”, mas a função só aceita `ILEGIVEL` sem acento. Isso pode desclassificar uma abstenção válida.
+  - CER/WER e latência do Moondream foram agregados a partir de falhas, gerando números sem significado operacional.
+  - O critério de 100% local é simplesmente fixado como `True` nas [linhas 43–49](/Users/rafaeloliveira/Projeto%20Estágio/av-s05b-benchmark-experimento/scripts/gerar_relatorio.py:43), não derivado da execução ou auditoria.
+
+- **Verificacao de 100% local: CONFIRMADO**, quanto ao código dos candidatos. A única chamada HTTP encontrada está em [candidato_vlm_ollama.py:31](/Users/rafaeloliveira/Projeto%20Estágio/av-s05b-benchmark-experimento/scripts/candidato_vlm_ollama.py:31) e aponta exclusivamente para `http://localhost:11434/api/generate`. Não encontrei chamada externa, DNS ou serviço remoto nos `candidato_*.py`. Contudo, essa conexão local foi bloqueada pelo ambiente desta execução, impedindo a validação efetiva do Moondream.
+
+- **Veredito geral sobre a integridade desta execucao do benchmark: REPROVADO.** Tesseract e EasyOCR confirmam os resultados anteriores, mas o terceiro candidato não executou e foi falsamente classificado como elegível. Logo, esta rodada não confirma o resultado anterior do Moondream nem sustenta um relatório final íntegro dos três candidatos.
+
+Ressalva adicional: o SHA-256 atual do protocolo é `9a861c…`, enquanto o arquivo de checksum e o relatório registram `5b8e7e…`. O `git diff` mostra apenas adendos na seção 13, preservando o texto anterior, mas o campo denominado `protocolo_congelado_sha256` não representa o arquivo atual. Nenhum protocolo ou script foi alterado por mim.
+tokens used
+29.493
+- **Resultados reproduzidos: NAO, divergencia relevante.**
+  - **Tesseract:** reproduzido — elegível, IMP-08 vazia, CER **0,4127**, WER **0,5278**.
+  - **EasyOCR:** reproduzido — elegível, IMP-08 vazia, CER **0,3715**, WER **0,5159**.
+  - **Moondream:v2:** não reproduzido. As **9 inferências** falharam com `<urlopen error [Errno 1] Operation not permitted>`. Não respondeu `"ilegivel."`; o script converteu os erros em texto vazio. O relatório produziu CER **1,0000** (esperado ≈0,95), WER **1,0000** e marcou-o elegível. Portanto, não houve inferência válida do Moondream nesta reexecução.
+
+- **Logica de deteccao de invencao/abstencao: PROBLEMA.**
+  - Para uma execução bem-sucedida, `eh_marcacao_ilegivel` reconhece corretamente `"ilegivel."`, ignorando caixa, espaços e pontuação final.
+  - Porém, falhas técnicas viram `texto=""` em [candidato_vlm_ollama.py](/Users/rafaeloliveira/Projeto%20Estágio/av-s05b-benchmark-experimento/scripts/candidato_vlm_ollama.py:61), e o relatório interpreta qualquer texto vazio como comportamento correto sem verificar `erro`, em [gerar_relatorio.py](/Users/rafaeloliveira/Projeto%20Estágio/av-s05b-benchmark-experimento/scripts/gerar_relatorio.py:27). Assim, a falha de IMP-08 foi indevidamente convertida em aprovação eliminatória.
+  - A abstenação sistemática testa somente o marcador `"ILEGIVEL"` ([linhas 68–72](/Users/rafaeloliveira/Projeto%20Estágio/av-s05b-benchmark-experimento/scripts/gerar_relatorio.py:68)). Não reconhece saídas vazias sistemáticas nem exclui falhas técnicas. Nesta execução, por isso, registrou `false` apesar de nenhuma amostra ter sido processada.
+  - O protocolo também admite marcações como “sem texto detectável” e cita “não sei”/“ilegível”, mas a função só aceita `ILEGIVEL` sem acento. Isso pode desclassificar uma abstenção válida.
+  - CER/WER e latência do Moondream foram agregados a partir de falhas, gerando números sem significado operacional.
+  - O critério de 100% local é simplesmente fixado como `True` nas [linhas 43–49](/Users/rafaeloliveira/Projeto%20Estágio/av-s05b-benchmark-experimento/scripts/gerar_relatorio.py:43), não derivado da execução ou auditoria.
+
+- **Verificacao de 100% local: CONFIRMADO**, quanto ao código dos candidatos. A única chamada HTTP encontrada está em [candidato_vlm_ollama.py:31](/Users/rafaeloliveira/Projeto%20Estágio/av-s05b-benchmark-experimento/scripts/candidato_vlm_ollama.py:31) e aponta exclusivamente para `http://localhost:11434/api/generate`. Não encontrei chamada externa, DNS ou serviço remoto nos `candidato_*.py`. Contudo, essa conexão local foi bloqueada pelo ambiente desta execução, impedindo a validação efetiva do Moondream.
+
+- **Veredito geral sobre a integridade desta execucao do benchmark: REPROVADO.** Tesseract e EasyOCR confirmam os resultados anteriores, mas o terceiro candidato não executou e foi falsamente classificado como elegível. Logo, esta rodada não confirma o resultado anterior do Moondream nem sustenta um relatório final íntegro dos três candidatos.
+
+Ressalva adicional: o SHA-256 atual do protocolo é `9a861c…`, enquanto o arquivo de checksum e o relatório registram `5b8e7e…`. O `git diff` mostra apenas adendos na seção 13, preservando o texto anterior, mas o campo denominado `protocolo_congelado_sha256` não representa o arquivo atual. Nenhum protocolo ou script foi alterado por mim.
