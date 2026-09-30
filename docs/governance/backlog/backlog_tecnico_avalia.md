@@ -1,7 +1,7 @@
 # Backlog técnico canônico — Trilha "Operação de uma turma"
 
 > Fonte canônica desta trilha. Sprint, snapshot e dashboard referenciam os IDs abaixo; não duplicam o conteúdo completo.
-> Estado desta trilha: **PARCIALMENTE EXECUTADA**. `AV-S01` foi homologada em 2026-09-23 (6 itens); os demais itens permanecem propostos, salvo decisão explícita em seu próprio registro. Homologação e priorização continuam cabendo a Rafael (ver [`registers/decisions.md`](../registers/decisions.md)).
+> Estado desta trilha: **PARCIALMENTE EXECUTADA**. `AV-S01` foi homologada em 2026-09-23 (6 itens); `AV-S02` homologada e integrada em 2026-09-24 (3 itens novos, `BL-AV-1-05/06/09/10`, com migração operacional em `avalia_dev` ainda pendente); `AV-S03` homologada e integrada em 2026-09-29 (`BL-AV-2-01` a `05`, `DEC-AV-026`/`DEC-AV-027`); `BL-AV-4B-01`/`20` da `AV-S05B` parcialmente executados (2026-09-29, texto impresso medido, manuscrito pendente); os demais itens permanecem propostos, salvo decisão explícita em seu próprio registro. Homologação e priorização continuam cabendo a Rafael (ver [`registers/decisions.md`](../registers/decisions.md)).
 > Convenção de ID: `BL-AV-<etapa>-<seq>`. A convenção foi adotada em `AV-S01`; novos IDs mantêm a sequência e exigem rastreabilidade no plano de sprint.
 
 ## 0. Como ler este backlog
@@ -78,11 +78,11 @@ A trilha documentada em GOV-002 (`trilha_operacao_de_turma.md`) não continha ne
 | BL-AV-1-08 | Confirmar RN-017 (IA indisponível) após as correções de autorização | debito_correcao | 1 | 1 | AV-S01 | alta | homologado em AV-S01 (2026-09-23) |
 | BL-AV-1-09 | Isolar testes do caminho de reparo de JSON do modo global do AI Engine (`DEBT-AV-009`) | debito_correcao | 1 | 1 | AV-S02 | média | homologado (2026-09-24, PR #1 integrado) |
 | BL-AV-1-10 | Idempotência da revisão humana (`DEBT-AV-011`, achado real da validação visual de AV-S02) | debito_correcao | 1 | 1 | AV-S02 | alta | código homologado e integrado a `main` (2026-09-24, PR #1); migração operacional a `avalia_dev` continua PENDENTE — o código exige a `UniqueConstraint` real do banco, mas o ambiente operacional ainda não a recebeu; saneamento de duplicatas legadas é proposta separada, não autorizada |
-| BL-AV-2-01 | Modelo de dados Organização/Curso/Disciplina/Turma/Aluno | proposta_nova | 2 | 1 | AV-S03 | alta | proposto |
-| BL-AV-2-02 | Migração Alembic da estrutura acadêmica | proposta_nova | 2 | 1 | AV-S03 | alta | proposto |
-| BL-AV-2-03 | Permissões por vínculo professor↔turma nos endpoints | proposta_nova | 2 | 1 | AV-S03 | alta | proposto |
-| BL-AV-2-04 | Telas mínimas de cadastro de turma/aluno e vínculo à avaliação | proposta_nova | 2 | 1 | AV-S03 | média | proposto |
-| BL-AV-2-05 | Critério de aceite do marco: turma fictícia + alunos + vínculo respeitando acesso | proposta_nova | 2 | 1 | AV-S03 | alta | proposto |
+| BL-AV-2-01 | Modelo de dados Organização/Curso/Disciplina/Turma/Aluno | proposta_nova | 2 | 1 | AV-S03 | alta | homologado e integrado a `main` (`DEC-AV-027`, 2026-09-29, PR #3) |
+| BL-AV-2-02 | Migração Alembic da estrutura acadêmica | proposta_nova | 2 | 1 | AV-S03 | alta | homologado e integrado a `main` (`DEC-AV-027`, 2026-09-29, PR #3) |
+| BL-AV-2-03 | Permissões por vínculo professor↔turma nos endpoints | proposta_nova | 2 | 1 | AV-S03 | alta | homologado tecnicamente (`DEC-AV-026`, 2026-09-28) e integrado a `main` (`DEC-AV-027`, 2026-09-29, PR #3) |
+| BL-AV-2-04 | Telas mínimas de cadastro de turma/aluno e vínculo à avaliação | proposta_nova | 2 | 1 | AV-S03 | média | homologado e integrado a `main` (`DEC-AV-027`, 2026-09-29, PR #3); `DEBT-AV-012` (dupla configuração de flag) aceito como débito residual |
+| BL-AV-2-05 | Critério de aceite do marco: turma fictícia + alunos + vínculo respeitando acesso | proposta_nova | 2 | 1 | AV-S03 | alta | homologado e integrado a `main` (`DEC-AV-027`, 2026-09-29, PR #3) |
 | BL-AV-3-01 | Suportar múltiplas questões por avaliação | proposta_nova | 3 | 1 | AV-S04 | alta | proposto |
 | BL-AV-3-02 | Regras de edição/publicação/imutabilidade com múltiplas questões | proposta_nova | 3 | 1 | AV-S04 | alta | proposto |
 | BL-AV-3-03 | Versionamento de questão preservado nas correções já feitas | requisito_existente | 3 | 1 | AV-S04 | alta | proposto |
@@ -92,8 +92,8 @@ A trilha documentada em GOV-002 (`trilha_operacao_de_turma.md`) não continha ne
 | BL-AV-4-03 | Vínculo aluno↔avaliação↔questão↔resposta via estrutura acadêmica | requisito_existente | 4 | 2 | AV-S06 | alta | proposto |
 | BL-AV-4-04 | Regras de duplicidade, reenvio e confirmação | decisao | 4 | 2 | AV-S06 | alta | proposto |
 | BL-AV-4-05 | Registro de importação e tratamento de falha parcial | proposta_nova | 4 | 2 | AV-S06 | média | proposto |
-| BL-AV-4B-01 | Investigação técnica de OCR/visão local (texto impresso e manuscrito, pt-BR) | investigacao | 4B | 2 | AV-S05B | alta | proposto |
-| BL-AV-4B-02 | Decisão arquitetural de motor/modelo de OCR local (novo ADR) | decisao | 4B | 2 | AV-S05B | alta | proposto |
+| BL-AV-4B-01 | Investigação técnica de OCR/visão local (texto impresso e manuscrito, pt-BR) | investigacao | 4B | 2 | AV-S05B | alta | concluído (documental, texto impresso e manuscrito levantados; ver `levantamento_ocr_visao_local.md`) |
+| BL-AV-4B-02 | Decisão arquitetural de motor/modelo de OCR local (novo ADR) | decisao | 4B | 2 | AV-S05B | alta | rascunho não homologado (`docs/adr/ADR-009-ocr-visao-local-rascunho.md`) — nenhuma solução aprovada para uso, aguardando manuscrito e homologação de Rafael |
 | BL-AV-4B-03 | Recebimento e armazenamento de imagens (formato, tamanho, páginas, validação de conteúdo) | proposta_nova | 4B | 2 | AV-S06B | alta | proposto |
 | BL-AV-4B-04 | Controle de acesso, preservação do original e metadados de vínculo/autoria/data | proposta_nova | 4B | 2 | AV-S06B | alta | proposto |
 | BL-AV-4B-05 | Retenção, exclusão e proteção de logs contra dado sensível de imagem | decisao | 4B | 2 | AV-S06B | alta | proposto |
@@ -108,10 +108,10 @@ A trilha documentada em GOV-002 (`trilha_operacao_de_turma.md`) não continha ne
 | BL-AV-4B-14 | Vínculo aluno/avaliação/questão da resposta confirmada; bloqueio de início automático da correção antes da confirmação | proposta_nova | 4B | 2 | AV-S09B | alta | proposto |
 | BL-AV-4B-15 | Preservar cadeia imagem→OCR→transcrição confirmada→correção→revisão | requisito_existente_parcial | 4B | 2 | AV-S09B | alta | proposto |
 | BL-AV-4B-16 | Idempotência/deduplicação em reenvio e retentativa de imagem | proposta_nova | 4B | 2 | AV-S09B | média | proposto |
-| BL-AV-4B-17 | Isolamento de recursos entre processo de OCR/visão e processo de correção (memória/CPU/GPU) | decisao | 4B | 2 | AV-S07B | alta | proposto |
+| BL-AV-4B-17 | Isolamento de recursos entre processo de OCR/visão e processo de correção (memória/CPU/GPU) | decisao | 4B | 2 | AV-S07B | alta | proposto — decisão ainda não tomada; dado bruto de coexistência (moondream:v2 + modelo textual carregados simultaneamente sem eviction nesta máquina) registrado em `AV-S05B/saida/medicao_memoria_coexistencia.md`, para informar esta decisão futura, não antecipá-la |
 | BL-AV-4B-18 | Conjunto de testes de imagem (nitidez, inclinação, desfoque, iluminação, manuscrito, rasura, vazio/ilegível) | proposta_nova | 4B | 2 | AV-S10B | alta | proposto |
 | BL-AV-4B-19 | Teste ponta a ponta demonstrando correção de erro de OCR antes da avaliação pedagógica | proposta_nova | 4B | 2 | AV-S10B | alta | proposto |
-| BL-AV-4B-20 | Benchmark comparativo de OCR/visão com critérios previamente aprovados | investigacao | 4B | 2 | AV-S05B | alta | proposto |
+| BL-AV-4B-20 | Benchmark comparativo de OCR/visão com critérios previamente aprovados | investigacao | 4B | 2 | AV-S05B | alta | parcialmente executado (2026-09-29) — texto impresso medido (Tesseract, EasyOCR, moondream:v2), revisão cruzada Codex+Antigravity concluída; manuscrito ainda PENDENTE (aguarda amostra real autorizada); ver `sprint_AV-S05B_investigacao_ocr.md` |
 | BL-AV-4B-21 | Processamento assíncrono confiável da extração de uma imagem, persistente e recuperável | proposta_nova | 4B | 2 | AV-S07B | alta | proposto |
 | BL-AV-5-01 | Revisar ADR-006 à luz do volume-alvo real | investigacao | 5 | 2 | AV-S07 | alta | proposto |
 | BL-AV-5-02 | Decisão de arquitetura de worker/persistência para lote (novo ADR) | decisao | 5 | 2 | AV-S07 | alta | proposto |
