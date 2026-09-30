@@ -1,0 +1,83 @@
+Revisão independente do ADR-009 (texto do ADR, não do benchmark) — Antigravity CLI
+Modelo: Gemini 3.1 Pro (High)
+Modo: leitura apenas, sem edição/git/execução de benchmark (autorizado por Rafael em 2026-09-29)
+Escopo: docs/adr/ADR-009-ocr-visao-local-rascunho.md, avaliado contra as
+limitações metodológicas já identificadas na revisão documental da sprint
+(sobreposição IMP-08, vazio vs. ilegível, inspeção de código vs. tráfego real).
+
+================================================================================
+PARECER (saída bruta da execução, 2026-09-29)
+================================================================================
+
+- Distincao elegibilidade tecnica vs utilidade pratica: CORRETA. O ADR separa de forma cristalina a aprovação técnica no critério de "não invenção de texto" da completa falta de utilidade prática evidenciada pela abstenção sistemática do moondream:v2.
+- Risco de extrapolacao indevida para manuscrito: AUSENTE. O ADR é taxativo ao afirmar que o escopo avaliou exclusivamente texto impresso e crava explicitamente que "Nenhuma conclusão deste ADR se estende a manuscrito".
+- Reflexo das limitacoes (a) vazio vs ilegivel, (b) sobreposicao IMP-08, (c) inspecao de codigo vs trafego real: PRECISA AJUSTE.
+  - (a) O ADR omite que o critério eliminatório foi testado apenas contra uma imagem vazia (ruído), deixando em aberto o comportamento em escrita real ilegível.
+  - (b) O ADR omite que a amostra IMP-08 foi reaproveitada nas duas fases (dev e eval), não constituindo instâncias de avaliação independentes.
+  - (c) O ADR omite que o critério de "100% local" foi atestado apenas por inspeção de código dos scripts, e não por análise real do tráfego de rede.
+- Alegacao indevida de solucao apta a producao: AUSENTE. Na seção "Decisão desta rodada", o ADR declara claramente: "Nenhuma alternativa é aprovada como solução para uso em produto nesta decisão."
+- Preservacao do resultado negativo do moondream:v2: PRESERVADO. O ADR declara a "inutilidade prática" do modelo testado sem qualquer suavização, destacando as respostas de "ilegível" até para a amostra mais fácil.
+
+Lista de correções específicas sugeridas: seção "Escopo desta rodada" (ampliar
+com subseção de limitações metodológicas) e tabela "Resultado observado"
+(anotar "(ver limitações)" na coluna de critérios eliminatórios).
+
+Veredito final: APROVADO COM RESSALVAS. O rascunho do ADR blinda de forma
+excelente contra falsas extrapolações e consolida corretamente os fracassos
+práticos do teste. No entanto, necessita que as ressalvas e fragilidades
+metodológicas identificadas e registradas previamente na sprint também
+constem no ADR final de forma transparente, garantindo o rigor técnico da
+tomada de decisão.
+
+================================================================================
+CORREÇÃO APLICADA (2026-09-29, por Hermes, após este parecer)
+================================================================================
+
+As duas ressalvas apontadas foram aplicadas literalmente em
+docs/adr/ADR-009-ocr-visao-local-rascunho.md:
+1. Seção "Escopo desta rodada" renomeada para "Escopo e Limitações desta
+   rodada", com as 3 limitações metodológicas (vazio vs. ilegível,
+   sobreposição IMP-08, inspeção de código vs. tráfego real) documentadas
+   explicitamente, no texto sugerido pelo revisor.
+2. Tabela "Resultado observado" anotada com "(ver limitações acima)" na
+   coluna de critérios eliminatórios para os 3 candidatos.
+
+Nenhum resultado numérico, veredito de elegibilidade ou conclusão do ADR foi
+alterado — apenas adicionada transparência metodológica, conforme escopo
+autorizado ("corrigir apontamentos documentais pertinentes"). O ADR-009
+permanece RASCUNHO, não homologado, aguardando decisão de Rafael.
+
+Esta revisão específica do texto do ADR-009 satisfaz o critério de aceite
+AC-10 da sprint AV-S05B (revisão cruzada do ADR registrada, com veredito
+objetivo) — distinta da revisão anterior do Antigravity (rodadas 1 e 2), que
+cobriu protocolo/scripts/resultados brutos, não o texto do ADR em si.
+
+================================================================================
+CONFERÊNCIA LIMITADA (2026-09-29, Antigravity CLI, mesma sessão)
+================================================================================
+
+Escopo: verificação pontual de que as 2 correções sugeridas acima foram
+aplicadas corretamente ao ADR — NÃO é uma nova revisão completa, nem repete
+a avaliação dos demais pontos já aprovados (elegibilidade técnica vs.
+utilidade prática, ausência de extrapolação para manuscrito, preservação do
+resultado negativo do moondream:v2).
+
+Versão do ADR efetivamente conferida:
+SHA-256 = `8fda4a6e5c8b0805e8dab3695d8e36e13a4951f0bda19c055ebe393d66b7b30a`
+(docs/adr/ADR-009-ocr-visao-local-rascunho.md, hash idêntico antes e depois
+da conferência — nenhuma edição ocorreu entre o cálculo do hash e a
+execução da conferência).
+
+Resultado da conferência:
+1. As 3 limitações (vazio vs. ilegível; sobreposição IMP-08; inspeção de
+   código vs. tráfego real) estão explícitas e corretas na seção "Escopo e
+   Limitações desta rodada" — SIM, com os 3 trechos citados literalmente
+   pelo revisor.
+2. A tabela "Resultado observado" sinaliza a ressalva ("ver limitações
+   acima") nos 3 candidatos — SIM.
+3. Nenhum resultado numérico (CER/WER) ou veredito de elegibilidade foi
+   alterado pelas correções — confirmado: apenas transparência
+   metodológica foi adicionada, os valores e conclusões técnicas
+   permanecem idênticos.
+
+Veredito da conferência limitada: **CORREÇÕES APLICADAS CORRETAMENTE.**

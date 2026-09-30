@@ -1,0 +1,89 @@
+### Revisão Técnica Independente — Benchmark OCR/Visão Local (AV-S05B)
+
+---
+
+### Lógica de `gerar_relatorio.py` após correções: **PROBLEMA**
+
+A avaliação detalhada dos quatro pontos lógicos em [`scripts/gerar_relatorio.py`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/scripts/gerar_relatorio.py) revelou:
+
+1. **(a) Falha técnica vira `elegivel=None`, não `True` nem `False`:** **CORRETA** (para o critério eliminatório).
+   - Em [`avaliar_criterio_ilegivel`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/scripts/gerar_relatorio.py#L27-L38), caso `erro is not None`, a função retorna `{"inventou_texto": None, "falha_tecnica": True}`.
+   - Nas linhas [69-71](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/scripts/gerar_relatorio.py#L69-L71), `info["eliminatorio_zero_invencao"]` é definido como `None`.
+   - Nas linhas [85-86](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/scripts/gerar_relatorio.py#L85-L86), `if info["eliminatorio_zero_invencao"] is None: elegivel = None`. Isso impede que falhas técnicas de rede ou execução sejam interpretadas como sucesso no critério eliminatório. *(Nota de observação secundária: na linha 88, falhas em outras amostras de eval fora IMP-08 tornariam `elegivel=False` via `len(falhas_eval) == 0`, mas na execução final real não houve falhas técnicas).*
+2. **(b) Falha técnica é excluída do CER/WER agregado:** **CORRETA**.
+   - Nas linhas [130-140](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/scripts/gerar_relatorio.py#L130-L140), se `tem_falha` for verdadeiro, o item é registrado com `cer=None`, `wer=None`, `excluida_do_agregado_por_falha_tecnica=True` e o comando `continue` pula o cômputo em `cers`, `wers` e `tempos_inf`. Portanto, falhas técnicas não inflam artificialmente as métricas de erro de reconhecimento.
+3. **(c) Marcador de ilegibilidade tolera pontuação/capitalização mas não texto adicional:** **CORRETA**.
+   - Em [`eh_marcacao_ilegivel`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/scripts/gerar_relatorio.py#L18-L25), o texto sofre normalização NFC, remoção de espaços nas pontas e remoção de pontuação final via regex (`re.sub(r"[.\!\?]+$", "", t)`), verificando se `t.strip().upper() == "ILEGIVEL"`. Variações como `"ilegivel."`, `"ILEGIVEL!"` ou `"  ilegivel? "` são aceitas, enquanto textos adicionais como `"texto ilegivel"` ou sufixos espúrios são rejeitados.
+4. **(d) Abstenção sistemática é detectada corretamente excluindo amostras com falha técnica da análise:** **PROBLEMA IDENTIFICADO**.
+   - **Arquivo e linhas:** [`scripts/gerar_relatorio.py#L98-L120`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/scripts/gerar_relatorio.py#L98-L120).
+   - **Diagnóstico:** A exclusão de amostras com falha técnica é feita corretamente (`eval_sem_falha` e `dev_sem_falha` filtram `erro is None`). No entanto, a verificação usa uma condição estrita `all(eh_marcacao_ilegivel(it["texto"]) for it in eval_sem_falha)`.
+   - Na execução real registrada em [`saida/resultados_brutos.json#L350`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/saida/resultados_brutos.json#L350), o candidato `moondream:v2` respondeu `"ilegivel."` para 8 das 9 amostras (dev + eval), mas na amostra `IMP-05_iluminacao_irregular.png` respondeu `"ilegivelive."` (uma alucinação de sufixo típica de VLM compacto).
+   - Como `"ilegivelive."` falha em [`eh_marcacao_ilegivel`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/scripts/gerar_relatorio.py#L18-L25), `all(...)` retornou `False`.
+   - Consequentemente, a linha [108](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/scripts/gerar_relatorio.py#L108) gravou `"abstencao_sistematica_todas_amostras": false` e o bloco das linhas [109-120](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/scripts/gerar_relatorio.py#L109-L120) que insere a `observacao_critica` **não foi executado**. A detecção quebrou diante de uma leve variação morfológica gerada pelo modelo.
+
+---
+
+### Verificação de rede (100% local): **CONFIRMADO**
+
+Inspecionados os três scripts executores:
+- [`scripts/candidato_tesseract.py#L14-L19`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/scripts/candidato_tesseract.py#L14-L19): Invocação puramente local via `subprocess.run(["tesseract", caminho_imagem, "stdout", "-l", lang], ...)` sem tráfego de rede.
+- [`scripts/candidato_easyocr.py#L15-L27`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/scripts/candidato_easyocr.py#L15-L27): Inicialização local do `easyocr.Reader(lang_list, gpu=False)` e inferência com pesos previamente cacheados em disco, sem requisições externas durante inferência.
+- [`scripts/candidato_vlm_ollama.py#L30-L37`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/scripts/candidato_vlm_ollama.py#L30-L37): Conexão HTTP restrita a `http://localhost:11434/api/generate` (daemon do Ollama local). Nenhuma chamada externa à internet.
+
+---
+
+### Clareza sobre elegibilidade técnica vs utilidade prática do `moondream:v2`: **AMBÍGUO**
+
+- **Arquivo e linhas:** [`saida/relatorio_final.json#L207-L213`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/saida/relatorio_final.json#L207-L213).
+- **Diagnóstico:** O relatório final gerado **pode induzir a erro um leitor apressado**.
+  Em [`saida/relatorio_final.json`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/saida/relatorio_final.json#L207-L208), o candidato `moondream:v2` consta como:
+  ```json
+  "elegivel": true,
+  "abstencao_sistematica_todas_amostras": false,
+  "cer_medio_agregado": 0.9513,
+  "wer_medio_agregado": 1.0,
+  ```
+  Devido à falha lógica descrita no item anterior, o campo `observacao_critica` (que alertaria explicitamente que o modelo não transcreveu texto útil em nenhuma amostra e que elegibilidade técnica não implica utilidade funcional) foi suprimido. Um leitor que consulte apenas o JSON de saída vê `"elegivel": true` e `"abstencao_sistematica_todas_amostras": false`, sem qualquer nota contextual explicando que o modelo produziu 8 vezes `"ilegivel."` e 1 vez `"ilegivelive."`, sendo totalmente inútil como motor de OCR na presente configuração.
+
+---
+
+### Amostras (contagem, split, origem sintética): **CONFIRMADO**
+
+- **Contagem e Split:**
+  - Diretório [`amostras/dev/`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/amostras/dev/): exatamente 2 amostras (`IMP-01_nitida.png` e `IMP-08_vazia_ilegivel.png`).
+  - Diretório [`amostras/eval/`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/amostras/eval/): exatamente 7 amostras (`IMP-02` a `IMP-08`).
+  - A inclusão de `IMP-08` em ambos os conjuntos segue rigorosamente o desenho metodológico da Seção 4 de [`protocolo/PROTOCOLO_CONGELADO.md`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/protocolo/PROTOCOLO_CONGELADO.md#L66-L87).
+- **Origem Sintética:** Conforme inspecionado em [`scripts/gerar_amostras.py`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/scripts/gerar_amostras.py), as imagens são geradas programaticamente via Pillow e NumPy (fontes do sistema, ruído gaussiano sintético, rotações matemáticas e gradientes artificiais). Não há presença de dados ou caligrafia de alunos reais.
+
+---
+
+### Escopo de manuscrito (PENDENTE, não testado): **CONFIRMADO**
+
+- Na Seção 1 de [`protocolo/PROTOCOLO_CONGELADO.md#L13-L22`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/protocolo/PROTOCOLO_CONGELADO.md#L13-L22), o eixo de manuscrito está expressamente delimitado como **PENDENTE nesta rodada** (por não haver escrita manual real autorizada e recusar-se a simulação por fonte cursiva tipográfica).
+- Nenhuma amostra de manuscrito foi incluída ou avaliada no experimento.
+- O protocolo estabelece com clareza que o eixo permanece não avaliado, sem julgamento de reprovação aos candidatos quanto a manuscritos.
+
+---
+
+### Confronto de Métricas em `saida/relatorio_final.json`:
+
+Comparação exata entre os dados medidos em [`saida/relatorio_final.json`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/saida/relatorio_final.json) e os valores de referência esperados:
+
+| Candidato | Elegível | CER Médio Agregado | WER Médio Agregado | Comportamento das Saídas |
+|---|---|---|---|---|
+| **Tesseract** | `true` | `0.4127` (~0.41) | `0.5278` (~0.53) | Reconheceu perfeitamente IMP-06 (CER=0.0) e IMP-07 (CER=0.021); degradou em inclinações acentuadas (IMP-03: CER=1.0). Saída vazia em IMP-08. |
+| **EasyOCR** | `true` | `0.3715` (~0.37) | `0.5159` (~0.52) | Melhor desempenho em iluminação irregular (IMP-05: CER=0.043) e acentuação (IMP-06: CER=0.026). Saída vazia em IMP-08. |
+| **moondream:v2** | `true` | `0.9513` (~0.95) | `1.0` (1.0) | Respondeu `"ilegivel."` em 8 amostras (incluindo IMP-01 limpa em dev) e `"ilegivelive."` em IMP-05 eval. |
+
+---
+
+### Veredito Geral sobre a Integridade deste Experimento: **APROVADO COM RESSALVAS**
+
+**Justificativa Objetiva:**
+1. **Aspectos Aprovados:**
+   - **Rigor Metodológico e Reprodutibilidade:** O protocolo foi congelado previamente com hash SHA-256 preservado no histórico do repositório (`5b8e7eca...`); as etapas de preparação/download foram separadas da inferência ([`protocolo/PREPARACAO_DOWNLOADS.md`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/protocolo/PREPARACAO_DOWNLOADS.md)); os dados brutos de inferência ([`saida/resultados_brutos.json`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/saida/resultados_brutos.json)) permanecem íntegros e autênticos.
+   - **Transparência de Desvios:** As ocorrências durante a execução (download implícito de modelos no EasyOCR, falha de sandbox do Codex em localhost e sensibilidade de string em IMP-08) foram devidamente registradas na Seção 13 de [`protocolo/PROTOCOLO_CONGELADO.md`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/protocolo/PROTOCOLO_CONGELADO.md#L240-L253), em vez de mascaradas.
+   - **Isolamento e Segurança:** Zero chamadas de rede externas e conformidade total quanto à ausência de dados reais de alunos e suspensão do eixo de manuscrito.
+2. **Ressalvas (Motivo do Veredito não ser "Aprovado sem ressalvas"):**
+   - **Fragilidade no Script de Pós-Processamento e Omissão de Alerta Crítico:** A lógica de detecção de abstenção sistemática em [`scripts/gerar_relatorio.py#L98-L120`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/scripts/gerar_relatorio.py#L98-L120) falhou ao lidar com a resposta `"ilegivelive."` (IMP-05), resultando na marcação incorreta de `"abstencao_sistematica_todas_amostras": false` e na ausência da nota explicativa `observacao_critica` em [`saida/relatorio_final.json`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/av-s05b-benchmark-experimento/saida/relatorio_final.json#L207-L213).
+   - O artefato final gerado atualmente mascara a inutilidade funcional do `moondream:v2`, exigindo que qualquer consumidor do benchmark consulte os dados brutos para compreender que o modelo se absteve de transcrever 100% das imagens.
