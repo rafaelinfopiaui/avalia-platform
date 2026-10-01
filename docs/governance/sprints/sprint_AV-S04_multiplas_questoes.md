@@ -976,3 +976,43 @@ Regra de coordenação: cada tarefa é atribuída a um único agente por vez; ne
 **Pacote recuperável:** `docs/governance/evidence/AV-S04/pacote-execucao-local/`, incluindo inventário com checksums (`inventario_checksums_2026-10-01.md`, regenerado após a correção final), relatórios de cada rodada, scripts de validação PostgreSQL reexecutáveis, e evidência de navegador real.
 
 - pacote recuperável local mantido em localização durável dentro do projeto (não em `/tmp`), incluindo arquivos novos e base Git, até a apresentação final para decisão de publicação.
+
+## 11. Homologação e integração (2026-10-01)
+
+Rafael homologou a entrega funcional de `AV-S04` publicada no PR #9
+(https://github.com/rafaelinfopiaui/avalia-platform/pull/9), HEAD
+`ef47b3e392cbb5d1c943eec690f5ef4fdec31ced`, com base nas evidências e
+revisões das seções 7b/10 acima, e autorizou a integração mediante as
+condições registradas em `DEC-AV-029`.
+
+**Correção de precisão sobre a suíte Core na CI remota:** o job `Core API
+(FastAPI + Postgres)` do workflow `.github/workflows/ci.yml` sobe um
+serviço `postgres:16` com healthcheck como infraestrutura de paridade,
+mas o step "Run core tests" executa
+`env -u AI_ENGINE_URL -u DATABASE_URL -u JWT_SECRET pytest app/tests -q`,
+que remove `DATABASE_URL` do ambiente antes de invocar o pytest. A suíte
+cai então no fallback SQLite de `core/app/tests/conftest.py`
+(`sqlite:///./test_avalia.db`), não no Postgres provisionado — comentário
+preexistente no próprio `ci.yml` já documentava essa decisão de desenho
+("a suíte de testes [...] é desenhada com SQLite [...] portanto a limpeza
+explícita de variáveis [...] é proposital"). Confirmado por leitura
+literal do log da run (`DATABASE_URL: ***localhost:5432/avalia_dev`
+aparece apenas no `env:` do step de setup anterior, nunca repassado ao
+step de testes). **Formulação anterior retificada:** relatórios desta
+sessão haviam descrito a CI como "Core API + Postgres real em CI", o que
+é impreciso — a CI remota valida o Core com SQLite (determinístico,
+rápido); a validação real contra PostgreSQL 16 (migração recuperável,
+recuperação de índice inválido, row-lock `SELECT...FOR UPDATE`,
+concorrência) foi feita **localmente**, em bancos isolados descartáveis,
+não na CI. Nenhuma infraestrutura foi ampliada para sustentar a
+formulação anterior; a distinção entre CI remota (SQLite) e validação
+local em Postgres isolado (real) está preservada explicitamente aqui e em
+`DEC-AV-029`.
+
+**Distinção explícita, como exigido por Rafael:** esta homologação cobre
+a **entrega funcional** (código, testes, migração versionada, contrato,
+frontend) integrada ao histórico Git de `main`. Ela **não** constitui
+aplicação operacional da migração `a9f4c2e71b06` em `avalia_dev` — essa
+migração permanece não aplicada ao ambiente operacional, pendente de
+autorização separada e explícita, fora do escopo desta homologação.
+
