@@ -1,0 +1,66 @@
+TAREFA (FASE 1b — CORREÇÕES APÓS REVISÃO INDEPENDENTE) — AV-S04
+
+Repositório avalia-plataform, branch feat/av-s04-multiplas-questoes. NÃO faça
+git commit/push/merge. NÃO toque em avalia_dev. NÃO execute migração contra
+nenhum banco. Toque APENAS nestes dois arquivos:
+- core/app/main.py
+- core/alembic/versions/a9f4c2e71b06_add_question_position_and_clone.py
+
+NÃO toque em core/app/tests/, core/app/schemas.py, core/app/models.py nem
+docs/contracts/openapi.yaml nesta tarefa (outra tarefa, em paralelo, está
+escrevendo testes novos em core/app/tests/test_assessment_multiple_questions.py
+— não crie esse arquivo você, não interfira).
+
+Uma revisão independente encontrou dois problemas reais no seu código da fase
+anterior. Corrija exatamente estes dois pontos:
+
+1. BUG REAL (bloqueador): `delete_question` (core/app/main.py, função
+   delete_question) chama `db.delete(question)` sem verificar se já existem
+   `Answer` registradas para essa questão. Isso viola o invariante central da
+   sprint (seção 1 do sprint doc: "nenhuma operação permitida pode reescrever
+   o contexto de uma correção existente"). Em SQLite (usado nos testes) isso
+   orfanizou silenciosamente a FK da Answer; em Postgres real provavelmente
+   geraria IntegrityError não tratada no commit.
+
+   Correção exigida: antes de excluir a questão, consultar se existe pelo
+   menos uma Answer com `question_id == question.id`. Se existir, rejeitar a
+   exclusão com HTTPException(status_code=409, detail="Questão possui
+   respostas registradas; não pode ser excluída.") — sem excluir nada, sem
+   tocar em nenhuma outra linha. Se não existir nenhuma Answer, o
+   comportamento atual (excluir e recompactar posições) permanece como está.
+
+2. Migração (core/alembic/versions/a9f4c2e71b06_add_question_position_and_clone.py):
+   a coluna `questions.created_at` é tornada NOT NULL via
+   `op.alter_column("questions", "created_at", nullable=False)` direto (linha
+   ~74), sem o padrão de baixo-lock `CHECK ... NOT VALID` + `VALIDATE
+   CONSTRAINT` + `SET NOT NULL` que a seção 3.4 do sprint doc exige
+   explicitamente também para `created_at` ("e Question.created_at NOT NULL,
+   se adicionada"), não apenas para `position`.
+
+   Correção exigida: aplicar exatamente o mesmo padrão de 3 passos já usado
+   para `position` (CHECK NOT VALID sobre created_at IS NOT NULL, depois
+   VALIDATE CONSTRAINT, depois SET NOT NULL, depois DROP do CHECK auxiliar),
+   antes de tornar created_at NOT NULL.
+
+3. Opcional, mas recomendado pela revisão (severidade baixa): adicionar, no
+   início de upgrade(), uma verificação programática que detecta um índice
+   `ix_questions_assessment_position` deixado em estado INVALID por uma
+   tentativa anterior interrompida de CREATE UNIQUE INDEX CONCURRENTLY, e o
+   remove (DROP INDEX) antes de tentar criá-lo de novo — em vez de depender
+   apenas do comentário/docstring atual. Use uma consulta ao catálogo do
+   Postgres (pg_index / pg_class) para detectar indisvalid=true com esse
+   nome exato, e só então DROP INDEX se encontrado. Se isso for
+   significativamente complexo ou arriscado de acertar sem testar contra um
+   Postgres real, pode pular este item 3 e apenas relatar que foi deixado
+   como estava (documentado, não automatizado) — isso é aceitável, os itens
+   1 e 2 são os bloqueadores reais.
+
+Depois de corrigir:
+1. cd core && .venv/bin/python -m pytest app/tests -q
+   (deve continuar 68 passed, nenhuma regressão)
+2. cd core && .venv/bin/python -m ruff check --config ../ruff.toml app
+3. Escreva um relatório final curto: o que mudou exatamente (linhas), e
+   confirmação dos dois comandos acima.
+
+Autorização: DEC-AV-028 (docs/governance/registers/decisions.md). Sem
+commit/push/merge.

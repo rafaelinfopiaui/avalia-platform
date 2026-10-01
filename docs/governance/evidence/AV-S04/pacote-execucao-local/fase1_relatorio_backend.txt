@@ -1,0 +1,103 @@
+FASE 1 — BACKEND (autor: Codex CLI / codex-cli 0.150.1)
+
+Comando executado:
+codex exec --sandbox workspace-write --cd <repo> "<prompt em fase1_prompt_backend_codex.txt>"
+
+Resultado: exit 0. Tokens usados: 105582 (reportado pelo próprio Codex).
+
+Arquivos alterados pelo Codex (verificado via `git diff --stat` após a execução):
+- core/app/main.py (+275/-11)
+- core/app/models.py (+19/-3)
+- core/app/schemas.py (+32/-8)
+- core/app/tests/test_academic_authorization.py (+35/-4) — ajuste mínimo de
+  payload (adicionou campo `question` obrigatório em 4 chamadas de teste
+  pré-existentes que criavam Assessment sem nenhuma questão; sem alterar
+  nenhuma asserção de comportamento)
+- docs/contracts/openapi.yaml (+140/-6)
+- core/alembic/versions/a9f4c2e71b06_add_question_position_and_clone.py (novo)
+
+Verificação independente (eu, Hermes, não o Codex):
+
+1. git diff completo lido integralmente — ver linhas acima citadas.
+2. Testes: `cd core && .venv/bin/python -m pytest app/tests -q`
+   -> 68 passed, 13 warnings (mesmo total do baseline pré-mudança; nenhuma
+   regressão, nenhum teste novo adicionado nesta fase, conforme instruído).
+3. Lint: `cd core && .venv/bin/python -m ruff check --config ../ruff.toml app`
+   -> All checks passed!
+4. Migração NÃO foi executada contra nenhum banco nesta fase (confirmado por
+   instrução explícita no prompt e por não haver nenhuma evidência de conexão
+   a banco nos comandos do Codex).
+
+Conformidade com o plano (seções 3.1-3.7 e 4 do sprint doc), verificada por
+leitura direta do código produzido:
+
+- 3.1 clonagem: `clone_assessment` cria Assessment novo com `cloned_from_id`,
+  Question/Rubric com IDs novos, nenhuma Answer/CorrectionJob/HumanReview
+  copiada, AuditEvent `action="CLONE"` com `before_json={"source_assessment_id"}`.
+  `Question.rubrics` ganhou `order_by="Rubric.version.desc()"` — corrige a
+  seleção não determinística apontada pela revisão da rodada 3. CONFORME.
+- 3.2 compatibilidade: `AssessmentCreate.normalize_questions` implementa
+  exatamente a tabela de verdade especificada (lista vazia = não fornecido;
+  ambos com conteúdo = erro; só question = normalizado). `AssessmentOut.question`
+  via `computed_field`: `questions[0]` apenas se `len==1`, senão `None`.
+  `log_event("assessment_created_legacy_singular_payload", ...)` presente.
+  CONFORME.
+- 3.3 endpoints de coleção: os 4 endpoints existem
+  (`POST .../questions`, `PATCH /v1/questions/{id}`,
+  `DELETE /v1/questions/{id}`, `PUT .../questions/order`), todos chamam
+  `_require_draft` (409 se publicada) e `require_assessment_mutation` (via
+  `_get_assessment_for_question` para os dois endpoints raiz-questão, que
+  também foi reaproveitado em `create_rubric`, eliminando a checagem de
+  ownership duplicada apontada pela revisão independente). Lock de
+  concorrência via `.with_for_update()` em `_lock_assessment` e em
+  `_get_assessment_for_question`. CONFORME.
+- 3.4 position: coluna `position` com `UniqueConstraint`, migração usa
+  `CHECK ... NOT VALID` + `VALIDATE CONSTRAINT` + `SET NOT NULL` para a
+  não-nulidade, e `CREATE UNIQUE INDEX CONCURRENTLY` + `ADD CONSTRAINT ...
+  USING INDEX` para a unicidade (não usa NOT VALID para UNIQUE, correto).
+  Comentário no cabeçalho da migração documenta a limpeza de índice INVALID
+  remanescente. Query de verificação `GROUP BY ... HAVING COUNT(*) > 1`
+  executada condicionalmente antes do backfill, com desempate por
+  `created_at`/`id` quando há múltiplas questões. Reorder/delete usam offset
+  temporário (`max_position + total + 1`) antes de aplicar posições finais,
+  dentro do lock. CONFORME.
+- 3.6 assessment_max_score: computed_field, soma de `questions[].max_score`,
+  zero se vazia. CONFORME.
+- 3.7 limites: `QuestionInput.statement`/`reference_answer` com
+  `Field(max_length=10000)`; limite de 50 questões validado tanto no
+  `model_validator` de `AssessmentCreate` quanto em `create_question`
+  (current_count >= 50 -> 422). `title` não recebeu nenhum `max_length`.
+  CONFORME.
+- AC-04 (publicação atômica): lógica preservada; agora também publica a
+  rubrica correta mesmo após a correção de `order_by`. CONFORME.
+
+Divergências do plano identificadas (nenhuma crítica, registradas para a
+revisão independente confirmar):
+
+1. O endpoint de clonagem não estava explicitamente nomeado no prompt como
+   `POST /v1/assessments/{id}/clone`, mas é a interpretação direta da seção
+   3.1 — a rota foi inferida pelo Codex, não estava no texto literal do
+   prompt nem do sprint doc (que descreve o comportamento, não a rota HTTP
+   exata). Precisa ser confirmado pela revisão independente que esta é uma
+   escolha de rota razoável e documentada (está no OpenAPI atualizado).
+2. `publish_assessment`: a correção de `question.rubrics[-1]` para
+   `question.rubrics[0]` está correta DADO que a relação `rubrics` agora tem
+   `order_by="Rubric.version.desc()"` (então `[0]` é a mais recente) — a
+   lógica foi ajustada corretamente em conjunto com a mudança da relação, mas
+   merece confirmação cruzada da revisão independente por ser um ponto onde
+   um erro silencioso (inverter a ordem) produziria o comportamento oposto ao
+   pretendido sem quebrar nenhum teste existente.
+3. O teste `test_academic_authorization.py` foi tocado (ajuste de payload,
+   não de asserção) — relatado conforme instrução; nenhuma outra alteração
+   em `core/app/tests/` foi feita.
+
+Risco identificado, não presente no plano original: o Codex usou
+`cascade="all, delete-orphan"` em `Question.rubrics` e `Rubric.criteria`
+(não estava explicitamente pedido no prompt). Isso é provavelmente desejável
+(evita rubrics/criteria órfãos ao excluir uma Question/Rubric), mas é uma
+decisão de modelagem adicional não coberta literalmente pelo plano — deve ser
+confirmada pela revisão independente como segura e não introdutora de efeito
+colateral inesperado (ex.: exclusão em cascata de uma Rubric já publicada e
+referenciada por correções históricas — a análise deve confirmar que nenhuma
+Rubric publicada e referenciada é excluída por este cascade em nenhum fluxo
+implementado).

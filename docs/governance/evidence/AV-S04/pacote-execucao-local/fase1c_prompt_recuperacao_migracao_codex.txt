@@ -1,0 +1,32 @@
+TAREFA AV-S04 — corrigir recuperabilidade da migração após falha no índice concorrente
+
+Repositório: avalia-plataform, branch feat/av-s04-multiplas-questoes.
+NÃO faça commit/push/merge. NÃO toque em avalia_dev. Não altere arquivos de testes backend (Claude trabalha neles em paralelo) nem main.py/models.py/schemas.py/frontend.
+
+Contexto confirmado por execução independente em PostgreSQL 16 isolado:
+- A migração limpa funciona e foi validada em av_s04_migration_test.
+- Porém a recuperação após interrupção está quebrada. Simulei estado parcial pós-DDL/pré-índice, deixei ix_questions_assessment_position INVALID, removi o índice inválido conforme o comentário atual e reexecutei `alembic upgrade head`. Falhou em `DuplicateColumn: column created_at already exists`.
+- Causa: `autocommit_block()` faz commit do DDL anterior; se CREATE UNIQUE INDEX CONCURRENTLY falha, Alembic não grava a revisão, mas created_at/position/NOT NULL permanecem. A migração recomeça do topo e não é idempotente.
+- A seção 3.4 do sprint exige verificar e remover índice INVALID antes de tentar de novo; Rafael exigiu validar recuperação de execução interrompida.
+
+Siga systematic debugging/TDD: use um banco PostgreSQL 16 ISOLADO E DESCARTÁVEL chamado av_s04_migration_recovery_agent (nunca avalia_dev). Primeiro reproduza o RED acima. Depois faça a menor correção robusta em:
+- core/alembic/versions/a9f4c2e71b06_add_question_position_and_clone.py
+
+Requisitos da correção:
+1. Detectar programaticamente `ix_questions_assessment_position` existente e INVALID via pg_class/pg_index; removê-lo com `DROP INDEX CONCURRENTLY` dentro de autocommit_block antes de tentar criar.
+2. Tornar upgrade() recuperável em todos os checkpoints relevantes que podem ter sido persistidos antes/depois do autocommit: colunas questions.created_at/position; checks auxiliares de NOT NULL; nullable; índice já válido sem constraint; constraint única já anexada (o Postgres renomeia o índice para o nome da constraint); assessments.cloned_from_id; FK.
+3. Não usar `CREATE INDEX IF NOT EXISTS` para mascarar índice inválido. Se houver índice válido exato e ainda não houver constraint, reutilize-o; se constraint já existir, não recrie.
+4. Preservar a query GROUP BY obrigatória antes da decisão do backfill e preservar backfill determinístico created_at ASC, id ASC.
+5. Preservar CHECK NOT VALID + VALIDATE + SET NOT NULL para position e created_at quando ainda necessário.
+6. Não tornar a migração permissiva a estados incompatíveis: se uma coluna/constraint homônima existir com definição incompatível, falhar claramente em vez de ignorar.
+7. Downgrade deve continuar correto.
+
+Validação obrigatória real:
+A) fresh: DB isolado em c4a8..., com assessment contendo 3 questions preexistentes e outra com 1; upgrade head; conferir posições determinísticas, NOT NULL, unique constraint/FK, rejeições de integridade.
+B) recovery: DB isolado em c4a8..., simular estado parcial com created_at/position já persistidas e índice INVALID; corrigir os dados que provocaram a falha, mas NÃO remover manualmente o índice inválido; executar `alembic upgrade head`. Deve limpar automaticamente o INVALID e concluir, sem DuplicateColumn.
+C) checkpoint valid-index: simular índice válido já criado sem constraint; upgrade deve anexá-lo e concluir.
+D) rodar `cd core && .venv/bin/python -m ruff check --config ../ruff.toml alembic/versions/a9f4c2e71b06_add_question_position_and_clone.py`.
+
+Pode criar um script reexecutável SOMENTE em docs/governance/evidence/AV-S04/pacote-execucao-local/ para reproduzir A/B/C, desde que ele tenha guardas explícitos contra nome avalia_dev e só crie/destroi DBs com prefixo av_s04_migration_. Registre saída/relatório no mesmo diretório. Não altere nenhum outro arquivo.
+
+Ao final, relate arquivos tocados, RED observado, GREEN real A/B/C, ruff e limitações.

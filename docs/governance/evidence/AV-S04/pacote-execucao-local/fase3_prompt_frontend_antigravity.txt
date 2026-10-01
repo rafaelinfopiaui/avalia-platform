@@ -1,0 +1,44 @@
+TAREFA AV-S04 — Fase 3 frontend, implementação completa de múltiplas questões
+
+Repositório avalia-plataform, branch feat/av-s04-multiplas-questoes. NÃO faça commit/push/merge. NÃO toque em core/, migrações, docs/contracts nem governança; outros agentes trabalham nesses arquivos. Edite apenas frontend/.
+
+Leia integralmente docs/governance/sprints/sprint_AV-S04_multiplas_questoes.md seções 3.1–3.7 e critérios AC-05/06/08/09/10/13. Depois inspecione o frontend atual e o contrato backend já implementado em core/app/main.py, schemas.py e docs/contracts/openapi.yaml apenas para leitura.
+
+Implemente o frontend AV-S04 de forma funcional, não um mock:
+
+1) frontend/src/types.ts
+- `questions` canônico e obrigatório nas respostas novas; mantenha `question?` somente como campo computado de compatibilidade de saída no tipo, sem usá-lo em código novo.
+- Question inclui position e os campos/rubrica reais do backend; Assessment inclui cloned_from_id e assessment_max_score.
+
+2) frontend/src/services/api.ts
+- createAssessment envia exclusivamente `questions`, nunca `question`.
+- funções tipadas para POST /assessments/{id}/questions, PUT /questions/{id}, DELETE /questions/{id}, PUT /assessments/{id}/questions/order, POST /assessments/{id}/clone.
+- preserve APIs existentes.
+
+3) AssessmentEditorPage.tsx
+- formulário suporta criar e editar no mínimo 2 blocos independentes de questão+rubrica; adicionar/remover até limite 50; statement/reference_answer/max_score e critérios por bloco.
+- ler exclusivamente `assessment.questions`, ordenado por position; nenhum fallback `assessment.question`.
+- criar avaliação enviando lista plural canônica; salvar rubrica para cada questão retornada.
+- em edição de rascunho, persistir título/turma, adições, edições, exclusões e ordem usando endpoints corretos. Reordenação visual deve ter controles claros mover acima/abaixo e persistir via endpoint transacional; não apenas reordenar localmente.
+- publicação só habilitada quando TODAS as questões e rubricas estiverem válidas, soma de critérios de cada bloco igual ao max_score, e ao menos uma questão. Trate 409/422 com mensagem da API.
+- exibir `assessment_max_score` rotulado exatamente como “Pontuação máxima da avaliação”, sem confundir com nota obtida.
+- para avaliação publicada, UI somente leitura para campos mutáveis e ação explícita “Clonar para editar” chamando clone e navegando ao novo rascunho; não tente editar publicada.
+- acessibilidade básica: labels/aria nos controles de reordenação, seleção e remoção; keys estáveis, não índice para blocos editáveis.
+
+4) AnswerPage.tsx
+- ler exclusivamente `assessment.questions`.
+- exigir seleção explícita da questão pelo usuário quando houver qualquer quantidade; nenhuma seleção implícita `questions[0]`, nenhum fallback singular. Botão de envio desabilitado até selecionar.
+- mostrar position/enunciado/max_score da selecionada e assessment_max_score como “Pontuação máxima da avaliação”.
+
+5) ReviewPage.tsx
+- o contexto já retorna `ctx.question` exata pinada; modele-a diretamente em ReviewData e use essa questão, sem armazená-la em `assessment.question`, sem fallback para primeira questão.
+- rotular nota final da correção como “Nota obtida nesta correção” quando aplicável, distinta de pontuação máxima da avaliação.
+
+6) CSS necessário em frontend/src (sem redesign amplo), mantendo padrões visuais existentes.
+
+7) Não adicione biblioteca de testes sem necessidade. O projeto não tem framework de testes frontend. Valide obrigatoriamente:
+- npm run build
+- npm run lint
+Corrija todos os erros. Faça buscas finais que comprovem: nenhum payload novo contém `question:` em createAssessment; nenhum fallback `assessment?.question || ...` ou `saved.question || ...`; AnswerPage exige escolha explícita.
+
+Registre no resultado final arquivos alterados, comportamento implementado, saída exata de build/lint e limitações. Sem commit/push/merge.

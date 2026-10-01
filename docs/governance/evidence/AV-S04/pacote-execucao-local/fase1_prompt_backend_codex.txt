@@ -1,0 +1,133 @@
+TAREFA (FASE 1 — BACKEND) — AV-S04 múltiplas questões por avaliação
+
+Você está no repositório avalia-plataform, branch feat/av-s04-multiplas-questoes.
+NÃO faça git commit, git push, nem qualquer operação Git além de editar arquivos
+no working tree. NÃO toque em avalia_dev, não execute migração contra banco
+compartilhado, não faça deploy. Trabalhe SOMENTE nos arquivos de backend listados
+abaixo. NÃO toque em frontend/ nesta tarefa (outra tarefa trata disso depois).
+
+Leia primeiro, por completo, antes de escrever qualquer código:
+- docs/governance/sprints/sprint_AV-S04_multiplas_questoes.md (seções 2, 3, 3.1-3.7, 4, 5)
+- .hermes/plans/2026-09-30_170000-av-s04-multiplas-questoes.md (seções 2-5, Task 1-5)
+
+Implemente EXATAMENTE o que essas seções especificam, sem inventar comportamento
+além delas. Pontos obrigatórios, não negociáveis:
+
+1. Compatibilidade de contrato (seção 3.2 do sprint doc):
+   - AssessmentCreate ganha `questions: Optional[list[QuestionInput]] = None`,
+     mantém `question: Optional[QuestionInput] = None`.
+   - Semântica de presença exata: lista vazia `questions: []` conta como "não
+     fornecido". Ambos com conteúdo real -> 422 rejeitando ambos. Nenhum dos
+     dois com conteúdo real -> 422. Apenas `question` com conteúdo real (mesmo
+     que `questions: []` esteja presente) -> aceito, normalizado internamente
+     para questions=[question].
+   - AssessmentOut ganha campo computado `question`: igual a questions[0]
+     SOMENTE SE len(questions)==1; None se 0 ou >1 questões. `questions` segue
+     sempre canônico e completo.
+   - Registrar via log_event quando o payload legado singular for usado
+     (ex: assessment_created_legacy_singular_payload=true).
+
+2. `Question.position` (seção 3.4):
+   - coluna position: int, não-nulo, UniqueConstraint(assessment_id, position).
+   - Antes de decidir o backfill, a migração deve incluir a query de
+     verificação real:
+     SELECT assessment_id, COUNT(*) AS total FROM questions GROUP BY
+     assessment_id HAVING COUNT(*) > 1;
+   - Migração Alembic: NOT VALID + VALIDATE CONSTRAINT + SET NOT NULL para o
+     CHECK de position IS NOT NULL; CREATE UNIQUE INDEX CONCURRENTLY seguido de
+     ADD CONSTRAINT ... USING INDEX para a UniqueConstraint (não usar NOT VALID
+     para UNIQUE, não é suportado). Documente no arquivo de migração que, se
+     a criação concorrente do índice for interrompida, um índice INVALID pode
+     ficar e deve ser DROPado antes de nova tentativa.
+   - `Assessment.questions` ordenado por position.
+
+3. Clonagem (seção 3.1):
+   - Assessment.cloned_from_id: Optional[str], FK para assessments.id, nullable,
+     sem cascade de exclusão.
+   - Clonar copia title, class_group_id, e cada Question (statement,
+     reference_answer, max_score, position) como NOVAS linhas com NOVOS IDs.
+     Para cada Question clonada, cria nova Rubric com version=1,
+     is_published=false.
+   - NÃO copia nenhuma Answer/CorrectionJob/AIExecutionResult/HumanReview/
+     AuditEvent do original.
+   - AuditEvent da clonagem: action="CLONE", resource_type="Assessment",
+     before_json={"source_assessment_id": "<id original>"}.
+   - Corrigir a seleção não determinística de rubrica em publish_assessment:
+     adicionar order_by=Rubric.version.desc() (ou created_at.desc()) à relação
+     Question.rubrics.
+
+4. Endpoints de coleção (seção 3.3):
+   - POST /v1/assessments/{assessment_id}/questions
+   - PATCH /v1/questions/{question_id}
+   - DELETE /v1/questions/{question_id}
+   - PUT /v1/assessments/{assessment_id}/questions/order
+   - Todos restritos a assessment.status == RASCUNHO; se PUBLICADA, 409 com
+     mensagem explícita ("Avaliação publicada não pode ser alterada; crie um
+     clone.").
+   - Todos usam require_assessment_mutation (não reimplementar cadeia
+     equivalente). Para os dois endpoints raiz-questão (PATCH/DELETE
+     /v1/questions/{id}), criar um helper único
+     _get_assessment_for_question(db, question_id, user) -> tuple[Question,
+     Assessment] que resolve question->assessment e chama
+     require_assessment_mutation uma única vez; reutilizar esse helper também
+     em create_rubric (eliminando a checagem de ownership duplicada hoje
+     existente ali).
+   - Lock de concorrência: toda mutação de posição (adicionar, editar,
+     excluir, reordenar) deve executar SELECT ... FOR UPDATE sobre a linha de
+     Assessment no início da transação.
+   - Reordenação: recebe lista completa de question_id na nova ordem; valida
+     que contém exatamente os IDs atuais, sem repetição/faltantes, antes de
+     qualquer escrita. Usa offset temporário de magnitude
+     max_position_atual + total_de_questoes_da_avaliacao + 1 antes de aplicar
+     valores finais, para nunca violar a unicidade transitoriamente. Rollback
+     integral em qualquer erro.
+   - Exclusão: mesmo lock antes de recompactar posições das remanescentes.
+     Exclusão da última questão de um rascunho é PERMITIDA (rascunho pode
+     ficar vazio); a restrição de mínimo 1 questão se aplica apenas à
+     PUBLICAÇÃO.
+
+5. Pontuação máxima (seção 3.6): assessment_max_score computado (não
+   persistido) = soma de Question.max_score. Zero questões -> 0.
+
+6. Limites (seção 3.7):
+   - max 50 questions por avaliação (lista `questions`/criação via coleção).
+   - QuestionInput.statement e QuestionInput.reference_answer: max_length=10000.
+   - NÃO aplicar limite de 10000 a title, a nenhum id, a RubricCriterionInput.
+     name/description, nem a max_score.
+
+7. Publicação (AC-04): falha atomicamente com 422 quando qualquer questão não
+   tiver rubrica válida, quando o total da rubrica divergir do max_score da
+   questão, ou quando a avaliação tiver zero questões.
+
+Arquivos a modificar/criar (SOMENTE estes, backend):
+- core/app/models.py
+- core/app/schemas.py
+- core/app/main.py
+- core/alembic/versions/<nova_revisao>_add_question_position_and_clone.py (novo)
+- docs/contracts/openapi.yaml (atualizar documentação dos campos/erros, sem
+  quebrar o restante do contrato)
+
+NÃO crie testes nesta tarefa (isso é a Fase 2, feita por outro agente depois).
+NÃO modifique core/app/tests/ nesta tarefa, exceto se for estritamente
+necessário ajustar uma fixture pré-existente para o código compilar — nesse
+caso, documente exatamente o que mudou e por quê no relatório final.
+
+Ao terminar:
+1. Rode: cd core && .venv/bin/python -m pytest app/tests -q
+   Relate o resultado exato (quantos passam/falham) — é esperado que ALGUNS
+   testes antigos relacionados a `question` singular possam precisar de ajuste
+   mínimo de payload se o comportamento mudou; se isso acontecer, ajuste
+   apenas o payload do teste (não a asserção de comportamento) e documente.
+2. Rode: cd core && .venv/bin/python -m ruff check --config ../ruff.toml app
+   (se ruff não estiver instalado no venv, apenas reporte isso, não instale
+   nada novo sem reportar primeiro).
+3. NÃO execute a migração Alembic contra nenhum banco (nem SQLite de teste,
+   nem Postgres) nesta tarefa — isso será validado por outra tarefa em
+   Postgres 16 isolado.
+4. Escreva um relatório final em texto simples cobrindo: arquivos alterados,
+   decisões tomadas, qualquer divergência do plano (e por quê), resultado dos
+   testes/lint, e qualquer risco identificado que não estava no plano.
+
+Autorização: Rafael autorizou esta execução local em DEC-AV-028
+(docs/governance/registers/decisions.md). Não é necessária nova aprovação
+para este trabalho local. Commit/push/merge continuam fora de escopo.

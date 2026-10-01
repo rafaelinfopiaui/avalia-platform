@@ -1,0 +1,29 @@
+TAREFA AV-S04 — corrigir e completar a suíte backend criada na Fase 2
+
+NÃO faça commit/push/merge. NÃO toque em código de produção, migrações, frontend, contrato ou governança existente. Edite somente:
+- core/app/tests/test_assessment_multiple_questions.py
+- docs/governance/evidence/AV-S04/pacote-execucao-local/fase2_relatorio_testes_backend.md (relatório)
+Pode remover o arquivo agent-created fora do local permitido `docs/governance/snapshots/relatorio_fase2_testes_backend.md` após transferir informação útil; ele foi criado indevidamente nesta rodada e não é histórico do usuário.
+
+A primeira versão tem 12 testes que passam, mas é insuficiente e ruff falha E501 na linha ~203. Não confie no resumo anterior. Leia seção 4 do sprint doc e os modelos/endpoints completos. Corrija com testes comportamentais reais e claros.
+
+Lacunas obrigatórias a fechar:
+1) AC-04: testar separadamente zero questões e mismatch de rubrica, confirmando atomicidade/status RASCUNHO e estado inalterado após cada 422.
+2) AC-06: além de IDs/cloned_from, preparar no ORIGINAL Answer, CorrectionJob, HumanReview e AuditEvent (pode usar ORM para montar dados históricos coerentes); após clone, provar via queries relacionais/IDs que nenhum desses registros operacionais pertence ao clone e original permanece inalterado.
+3) AC-07: teste real, não comentário: original publicado com Answer + CorrectionJob pinado à rubrica original; clonar, editar e republicar clone com rubrica diferente; GET /correction-jobs/{id}/context do job ORIGINAL continua retornando question/rubric/versão original. Confirme conteúdo/referência e critério original.
+4) AC-08: avaliação com >=2 questões; job da segunda; contexto retorna exatamente a segunda, nunca primeira. Testar também que publicar escolhe a rubrica de MAIOR version com relação order_by desc, criando duas versões antes de publicar.
+5) AC-09/16: tabela de verdade completa: plural; singular; ambos com conteúdo e mensagem EXATA; nenhum; questions=[]; singular+questions=[]; saída question populated apenas len=1 e None para len=0 ou >1.
+6) AC-11: para ID repetido, faltante e pertencente a outra avaliação, confirmar 422 e ordem/posições integralmente inalteradas após cada caso; exclusão intermediária recompacta. Adicionar regressão do bug encontrado: DELETE de questão de rascunho com Answer retorna 409 e preserva Question e Answer (mensagem exata).
+7) AC-12: 50/51; testar separadamente statement 10000/10001 e reference_answer 10000/10001; confirmar title não ganhou max_length inspecionando metadata do campo e com título longo; max_score=0/negativo retorna 422; confirmar Numeric(6,2) no modelo SQLAlchemy continua precision=6 scale=2 (SQLite não prova enforcement).
+8) AC-14: não basta outro professor receber 403. Monkeypatch/spie `_get_assessment_for_question` e prove que update_question, delete_question e create_rubric passam por esse mesmo helper compartilhado. Reorder/add operam por assessment_id e devem provar `require_assessment_mutation` sem duplicar ownership. Pode complementar com inspeção de fonte apenas se comportamento dinâmico não distinguir.
+9) AC-15: NÃO rotule threading SQLite como prova de FOR UPDATE. Mantenha no máximo como smoke de invariante com limitação explícita. A prova PostgreSQL real será script separado. Capture status/erros das threads; nenhuma exceção silenciosa.
+10) AC-17: confirme payload distinguível completo de `log_event`, não apenas substring do nome do evento.
+11) Corrija ruff integralmente e remova comentários provisórios/coloquiais. Testes devem ser determinísticos e cada nome/docstring indicar AC.
+12) Não mascare falhas com ORs vagos, não ignore status responses intermediárias.
+
+Rode e reporte exatamente:
+cd core && .venv/bin/python -m pytest app/tests/test_assessment_multiple_questions.py -v
+cd core && .venv/bin/python -m pytest app/tests -q
+cd core && .venv/bin/python -m ruff check --config ../ruff.toml app
+
+O relatório deve mapear cada AC->testes e declarar honestamente que locks/migração são validados em PostgreSQL por evidência separada, não por SQLite.

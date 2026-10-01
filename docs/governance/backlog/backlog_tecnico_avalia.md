@@ -83,10 +83,10 @@ A trilha documentada em GOV-002 (`trilha_operacao_de_turma.md`) não continha ne
 | BL-AV-2-03 | Permissões por vínculo professor↔turma nos endpoints | proposta_nova | 2 | 1 | AV-S03 | alta | homologado tecnicamente (`DEC-AV-026`, 2026-09-28) e integrado a `main` (`DEC-AV-027`, 2026-09-29, PR #3) |
 | BL-AV-2-04 | Telas mínimas de cadastro de turma/aluno e vínculo à avaliação | proposta_nova | 2 | 1 | AV-S03 | média | homologado e integrado a `main` (`DEC-AV-027`, 2026-09-29, PR #3); `DEBT-AV-012` (dupla configuração de flag) aceito como débito residual |
 | BL-AV-2-05 | Critério de aceite do marco: turma fictícia + alunos + vínculo respeitando acesso | proposta_nova | 2 | 1 | AV-S03 | alta | homologado e integrado a `main` (`DEC-AV-027`, 2026-09-29, PR #3) |
-| BL-AV-3-01 | Suportar múltiplas questões por avaliação | proposta_nova | 3 | 1 | AV-S04 | alta | proposto |
-| BL-AV-3-02 | Regras de edição/publicação/imutabilidade com múltiplas questões | proposta_nova | 3 | 1 | AV-S04 | alta | proposto |
-| BL-AV-3-03 | Versionamento de questão preservado nas correções já feitas | requisito_existente | 3 | 1 | AV-S04 | alta | proposto |
-| BL-AV-3-04 | Atualizar contrato OpenAPI/schema para múltiplas questões | debito_correcao | 3 | 1 | AV-S04 | média | proposto |
+| BL-AV-3-01 | Suportar múltiplas questões por avaliação | proposta_nova | 3 | 1 | AV-S04 | alta | planejamento publicado (2026-09-30); nenhuma implementação iniciada; ver `sprint_AV-S04_multiplas_questoes.md` |
+| BL-AV-3-02 | Regras de edição/publicação/imutabilidade com múltiplas questões | proposta_nova | 3 | 1 | AV-S04 | alta | planejamento publicado (2026-09-30); nenhuma implementação iniciada; ver `sprint_AV-S04_multiplas_questoes.md` |
+| BL-AV-3-03 | Versionamento de questão preservado nas correções já feitas | requisito_existente | 3 | 1 | AV-S04 | alta | planejamento publicado (2026-09-30); nenhuma implementação iniciada; ver `sprint_AV-S04_multiplas_questoes.md` |
+| BL-AV-3-04 | Atualizar contrato OpenAPI/schema para múltiplas questões | debito_correcao | 3 | 1 | AV-S04 | média | planejamento publicado (2026-09-30); nenhuma implementação iniciada; ver `sprint_AV-S04_multiplas_questoes.md` |
 | BL-AV-4-01 | Contrato de importação CSV (schema/campos/erros por linha) | proposta_nova | 4 | 2 | AV-S05 | alta | proposto |
 | BL-AV-4-02 | Prévia de importação com relatório de erros por linha | proposta_nova | 4 | 2 | AV-S05 | alta | proposto |
 | BL-AV-4-03 | Vínculo aluno↔avaliação↔questão↔resposta via estrutura acadêmica | requisito_existente | 4 | 2 | AV-S06 | alta | proposto |

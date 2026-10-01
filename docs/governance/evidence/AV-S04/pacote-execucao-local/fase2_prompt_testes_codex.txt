@@ -1,0 +1,100 @@
+TAREFA (FASE 2 — TESTES BACKEND) — AV-S04 múltiplas questões por avaliação
+
+Repositório avalia-plataform, branch feat/av-s04-multiplas-questoes. NÃO faça
+git commit/push/merge. NÃO toque em avalia_dev. NÃO execute migração Alembic
+contra nenhum banco (isso é outra tarefa, em Postgres isolado). NÃO modifique
+core/app/main.py, core/app/models.py, core/app/schemas.py, docs/contracts/
+openapi.yaml, nem a migração — esses arquivos já foram implementados por
+outro agente (Codex, Fase 1) e já foram revisados independentemente. Se você
+encontrar um bug real neles enquanto escreve testes, NÃO corrija você mesmo:
+pare, escreva o teste que comprova o bug (deve falhar), e documente o achado
+no relatório final em vez de editar o código de produção.
+
+Leia primeiro, por completo:
+- docs/governance/sprints/sprint_AV-S04_multiplas_questoes.md, seção 4
+  (Critérios de aceite AC-01 a AC-18) e seção 3 (para entender o
+  comportamento esperado).
+- core/app/main.py, core/app/models.py, core/app/schemas.py (código já
+  implementado) para entender exatamente o que testar.
+- core/app/tests/conftest.py e core/app/tests/test_authorization_boundaries.py
+  como referência de padrão de fixture/teste já usado no projeto.
+
+Crie o arquivo novo: core/app/tests/test_assessment_multiple_questions.py
+
+Cubra, no mínimo, um teste (ou mais, se necessário) para cada um destes
+critérios de aceite, citando o AC correspondente no nome/docstring do teste:
+
+- AC-01/AC-02: criar rascunho com >=2 questões ordenadas; GET retorna cada
+  questão exatamente uma vez, ordenada por position crescente.
+- AC-03: outro professor tentando mutar questão de rascunho de terceiro
+  retorna 403, sem alterar estado (reutilizando helper require_assessment_mutation).
+- AC-04: publicação falha com 422 atomicamente se qualquer questão não tiver
+  rubrica válida, ou total da rubrica divergir do max_score, ou zero questões.
+- AC-05: após publicada, qualquer tentativa de mutação (criar/editar/excluir/
+  reordenar questão, editar título) retorna 409.
+- AC-06/AC-07: clonar avaliação publicada cria rascunho com novos IDs de
+  questão/rubrica, cloned_from_id correto, nenhuma Answer/CorrectionJob/
+  HumanReview/AuditEvent do original copiada; original permanece publicado e
+  inalterado; clonar, editar e republicar o clone com rubrica diferente, então
+  confirmar que o CorrectionJobContext histórico das respostas do ORIGINAL
+  continua resolvendo a rubrica/versão original (não a do clone).
+- AC-08: contexto de revisão resolve a questão/rubrica exata via question_id
+  pinado, não "a primeira questão"; publish_assessment usa ordenação
+  explícita de rubrica, não ordem de inserção.
+- AC-09: payload legado singular `question` é aceito e normalizado; `questions`
+  plural aceito diretamente; ambos com conteúdo real -> 422 com mensagem
+  explícita; nenhum dos dois ou `questions: []` sozinho -> 422; `question`
+  preenchido + `questions: []` -> aceito como apenas question (AC-16 também
+  cobre isso, mas inclua aqui o teste de contrato OpenAPI-compatível).
+- AC-11: reordenação transacional — troca simples de duas posições; exclusão
+  de questão intermediária com recompactação; rollback integral se payload de
+  reordenação tiver ID repetido, faltante, ou de outra avaliação (422, estado
+  inalterado).
+- AC-12: 50 questões aceitas, 51 rejeitadas (422); texto de exatamente 10000
+  caracteres aceito em statement E separadamente em reference_answer; 10001
+  rejeitado (422) nos dois; teste negativo explícito de que title com 500
+  caracteres não é limitado por max_length novo (nenhum max_length foi
+  adicionado a title); max_score continua validado por Field(gt=0) e pelo
+  limite numérico Numeric(6,2), sem interferência do novo limite de caracteres.
+- AC-13: avaliação de questão única pré-existente (simulando dado anterior à
+  migração, criada via ORM direto com position=1) continua retornável via GET
+  com position=1 e mesmo conteúdo.
+- AC-14: os 4 endpoints de mutação de questão usam require_assessment_mutation
+  via helper único _get_assessment_for_question nos dois endpoints
+  raiz-questão; teste confirmando que create_rubric também usa esse helper
+  (sem checagem de ownership duplicada).
+- AC-15: teste de concorrência — duas chamadas de reordenação (ou reordenação
+  vs exclusão) sobre a mesma avaliação não produzem posição duplicada nem
+  buraco na sequência 1..N. Use threading real ou duas conexões/sessions
+  concorrentes contra o mesmo SQLite de teste se o lock FOR UPDATE for
+  testável nesse ambiente; se SQLite não suportar FOR UPDATE de forma
+  significativa, documente essa limitação explicitamente no relatório e
+  escreva o teste mesmo assim validando o resultado final (ausência de
+  duplicata/buraco), já que a validação real de lock sob concorrência real
+  será feita em Postgres isolado por outra tarefa.
+- AC-16: tabela de verdade completa de question/questions (já parcialmente
+  cobery por AC-09, mas AC-16 exige also: um payload com question preenchido
+  e questions=[] é tratado como "apenas question fornecido", aceito).
+- AC-17: uso do payload legado é registrado via log_event de forma
+  distinguível (capture/mocke log_event e confirme a chamada com o payload
+  esperado).
+- AC-18 (parcial, sem banco real): não testável sem Postgres; apenas
+  documente no relatório que este AC depende da tarefa de migração isolada,
+  não desta.
+
+Depois de escrever os testes:
+1. Rode: cd core && .venv/bin/python -m pytest app/tests/test_assessment_multiple_questions.py -v
+   Relate resultado exato.
+2. Rode: cd core && .venv/bin/python -m pytest app/tests -q (suíte completa)
+   Relate resultado exato — deve continuar tudo verde, incluindo os 68 testes
+   pré-existentes.
+3. Rode: cd core && .venv/bin/python -m ruff check --config ../ruff.toml app
+
+Escreva um relatório final em texto simples: quantos testes criados, quais ACs
+cobertos por qual teste, resultado exato de cada comando acima, qualquer bug
+real encontrado no código de produção (sem corrigi-lo você mesmo), e qualquer
+limitação de ambiente (ex.: SQLite vs Postgres para concorrência).
+
+Autorização: Rafael autorizou esta execução local em DEC-AV-028
+(docs/governance/registers/decisions.md). Commit/push/merge continuam fora
+de escopo.
