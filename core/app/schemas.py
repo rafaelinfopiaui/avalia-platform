@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, computed_field, model_validator
 
 
 # ---- Auth ----
@@ -59,8 +59,8 @@ class RubricOut(BaseModel):
 
 # ---- Question / Assessment ----
 class QuestionInput(BaseModel):
-    statement: str
-    reference_answer: str
+    statement: str = Field(max_length=10000)
+    reference_answer: str = Field(max_length=10000)
     max_score: Decimal = Field(gt=0)
 
 
@@ -69,6 +69,7 @@ class QuestionOut(BaseModel):
     statement: str
     reference_answer: str
     max_score: Decimal
+    position: int
     rubrics: list[RubricOut] = []
 
     class Config:
@@ -78,7 +79,29 @@ class QuestionOut(BaseModel):
 class AssessmentCreate(BaseModel):
     title: str
     class_group_id: Optional[str] = None
+    questions: Optional[list[QuestionInput]] = None
     question: Optional[QuestionInput] = None
+
+    @model_validator(mode="after")
+    def normalize_questions(self):
+        has_questions = bool(self.questions)
+        has_question = self.question is not None
+        if has_questions and has_question:
+            raise ValueError(
+                "Forneça `questions` ou `question`, não ambos. "
+                "`question` está depreciado; prefira `questions`."
+            )
+        if not has_questions and not has_question:
+            raise ValueError("Pelo menos uma questão é obrigatória.")
+        if has_question:
+            self.questions = [self.question]
+        if len(self.questions or []) > 50:
+            raise ValueError("Uma avaliação pode ter no máximo 50 questões.")
+        return self
+
+
+class QuestionOrderInput(BaseModel):
+    question_ids: list[str]
 
 
 class AssessmentUpdate(BaseModel):
@@ -91,8 +114,19 @@ class AssessmentOut(BaseModel):
     status: str
     owner_id: str
     class_group_id: Optional[str] = None
+    cloned_from_id: Optional[str] = None
     created_at: datetime
     questions: list[QuestionOut] = []
+
+    @computed_field(return_type=Optional[QuestionOut])
+    @property
+    def question(self):
+        return self.questions[0] if len(self.questions) == 1 else None
+
+    @computed_field(return_type=Decimal)
+    @property
+    def assessment_max_score(self):
+        return sum((question.max_score for question in self.questions), Decimal("0"))
 
     class Config:
         from_attributes = True

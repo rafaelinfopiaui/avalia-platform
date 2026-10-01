@@ -63,8 +63,9 @@ export interface ProfessorClassLink {
 
 export interface User { id?: string; name?: string; email: string; role?: string }
 export interface Criterion { id?: string; name: string; description: string; max_score: number }
-export interface Question { id?: string; statement: string; reference_answer: string; max_score: number; rubric?: { criteria: Criterion[] } }
-export interface Assessment { id: string; title: string; status: AssessmentStatus; class_group_id?: string | null; question?: Question; questions?: Question[]; created_at?: string; updated_at?: string }
+export interface Rubric { id?: string; question_id?: string; version?: number; is_published?: boolean; criteria: Criterion[] }
+export interface Question { id?: string; statement: string; reference_answer: string; max_score: number; position?: number; rubrics?: Rubric[]; rubric?: { criteria: Criterion[] } }
+export interface Assessment { id: string; title: string; status: AssessmentStatus; class_group_id?: string | null; cloned_from_id?: string | null; assessment_max_score?: number; question?: Question; questions?: Question[]; created_at?: string; updated_at?: string }
 export interface Answer { id: string; question_id: string; student_name?: string; text: string }
 // Alinhado ao schema real do Core (app/schemas.py CriterionScoreOut / AIExecutionOut / CorrectionJobOut)
 export interface CriterionSuggestion { criterion_id: string; criterion_name?: string; score: number; max_score: number; reason?: string; evidence?: string; confidence?: number; was_clamped?: boolean }

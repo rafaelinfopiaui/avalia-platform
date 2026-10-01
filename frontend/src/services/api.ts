@@ -111,11 +111,16 @@ export const getAssessment = (id: string) => request<Assessment>(`/assessments/$
 export const createAssessment = (payload: {
   title: string
   class_group_id?: string | null
-  question: Omit<import('../types').Question, 'id' | 'rubric'>
+  questions: Omit<import('../types').Question, 'id' | 'rubric' | 'rubrics' | 'position'>[]
 }) => request<Assessment>('/assessments', { method: 'POST', body: JSON.stringify(payload) })
-export const updateAssessment = (id: string, payload: unknown) => request<Assessment>(`/assessments/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+export const updateAssessment = (id: string, payload: unknown) => request<Assessment>(`/assessments/${id}`, { method: 'PATCH', body: JSON.stringify(payload) })
+export const createQuestion = (assessmentId: string, payload: Omit<import('../types').Question, 'id' | 'rubric' | 'rubrics' | 'position'>) => request<import('../types').Question>(`/assessments/${assessmentId}/questions`, { method: 'POST', body: JSON.stringify(payload) })
+export const updateQuestion = (questionId: string, payload: Omit<import('../types').Question, 'id' | 'rubric' | 'rubrics' | 'position'>) => request<import('../types').Question>(`/questions/${questionId}`, { method: 'PATCH', body: JSON.stringify(payload) })
+export const deleteQuestion = (questionId: string) => request<void>(`/questions/${questionId}`, { method: 'DELETE' })
+export const reorderQuestions = (assessmentId: string, questionIds: string[]) => request<Assessment>(`/assessments/${assessmentId}/questions/order`, { method: 'PUT', body: JSON.stringify({ question_ids: questionIds }) })
+export const cloneAssessment = (assessmentId: string) => request<Assessment>(`/assessments/${assessmentId}/clone`, { method: 'POST' })
 export const saveRubric = (questionId: string, criteria: Criterion[]) => request(`/questions/${questionId}/rubric`, { method: 'POST', body: JSON.stringify({ criteria: criteria.map(({ name, description, max_score }) => ({ name, description, max_score })) }) })
-export const publishAssessment = (id: string) => request<Assessment>(`/assessments/${id}/publish`, { method: 'POST' })
+export const publishAssessment = (id: string) => request<{ status: 'PUBLICADA' }>(`/assessments/${id}/publish`, { method: 'POST' })
 export const createAnswer = (payload: { question_id: string; student_name: string; text: string }) => request<Answer>('/answers', { method: 'POST', body: JSON.stringify({ question_id: payload.question_id, student_name_fake: payload.student_name, text: payload.text }) })
 export async function requestCorrection(answerId: string): Promise<Pick<CorrectionJob, 'id' | 'status'>> {
   const result = await request<{ id?: string; job_id?: string; status: JobStatus }>(`/answers/${answerId}/corrections`, { method: 'POST' })

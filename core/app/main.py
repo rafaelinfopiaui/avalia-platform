@@ -6,7 +6,8 @@ from decimal import Decimal
 import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -54,6 +55,8 @@ from app.schemas import (
     HumanReviewSummaryOut,
     LoginRequest,
     MeResponse,
+    QuestionInput,
+    QuestionOrderInput,
     QuestionOut,
     RubricInput,
     RubricOut,
@@ -155,12 +158,13 @@ def create_assessment(
     )
     db.add(assessment)
     db.flush()
-    if payload.question:
+    for position, item in enumerate(payload.questions or [], start=1):
         q = Question(
             assessment_id=assessment.id,
-            statement=payload.question.statement,
-            reference_answer=payload.question.reference_answer,
-            max_score=payload.question.max_score,
+            statement=item.statement,
+            reference_answer=item.reference_answer,
+            max_score=item.max_score,
+            position=position,
         )
         db.add(q)
     db.commit()
@@ -176,6 +180,13 @@ def create_assessment(
     )
     db.commit()
     log_event("assessment_created", correlation_id, assessment_id=assessment.id, user_id=user.id)
+    if payload.question is not None:
+        log_event(
+            "assessment_created_legacy_singular_payload",
+            correlation_id,
+            assessment_id=assessment.id,
+            assessment_created_legacy_singular_payload=True,
+        )
     return assessment
 
 
@@ -186,6 +197,44 @@ def _get_owned_assessment(db: Session, assessment_id: str, user: User) -> Assess
     if user.role == Role.PROFESSOR and assessment.owner_id != user.id:
         raise HTTPException(status_code=403, detail="Você não tem permissão sobre esta avaliação.")
     return assessment
+
+
+def _get_assessment_for_question(
+    db: Session, question_id: str, user: User
+) -> tuple[Question, Assessment]:
+    question = db.get(Question, question_id)
+    if question is None:
+        raise HTTPException(status_code=404, detail="Questão não encontrada.")
+    assessment = (
+        db.query(Assessment)
+        .filter(Assessment.id == question.assessment_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if assessment is None:
+        raise HTTPException(status_code=404, detail="Avaliação não encontrada.")
+    require_assessment_mutation(db, user, assessment)
+    return question, assessment
+
+
+def _lock_assessment(db: Session, assessment_id: str) -> Assessment:
+    assessment = (
+        db.query(Assessment)
+        .filter(Assessment.id == assessment_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if assessment is None:
+        raise HTTPException(status_code=404, detail="Avaliação não encontrada.")
+    return assessment
+
+
+def _require_draft(assessment: Assessment) -> None:
+    if assessment.status == AssessmentStatus.PUBLICADA:
+        raise HTTPException(
+            status_code=409,
+            detail="Avaliação publicada não pode ser alterada; crie um clone.",
+        )
 
 
 @app.get("/v1/assessments/{assessment_id}", response_model=AssessmentOut)
@@ -206,6 +255,7 @@ def update_assessment(
 ):
     assessment = _get_owned_assessment(db, assessment_id, user)
     require_assessment_mutation(db, user, assessment)
+    _require_draft(assessment)
     assessment.title = payload.title
     db.commit()
     db.refresh(assessment)
@@ -226,10 +276,11 @@ def publish_assessment(
     if not assessment.questions:
         return error_response(422, "MISSING_QUESTION", "A avaliação precisa de ao menos uma questão.", correlation_id)
 
+    rubrics_to_publish = []
     for question in assessment.questions:
         published_rubric = next((r for r in question.rubrics if r.is_published), None)
         # pega rubrica mais recente se nenhuma publicada ainda (permitir publicar avaliação + rubrica junto)
-        rubric = published_rubric or (question.rubrics[-1] if question.rubrics else None)
+        rubric = published_rubric or (question.rubrics[0] if question.rubrics else None)
         if rubric is None or not rubric.criteria:
             return error_response(
                 422,
@@ -246,14 +297,238 @@ def publish_assessment(
                 correlation_id,
                 details={"expected": str(question.max_score), "actual": str(total)},
             )
-        rubric.is_published = True
+        rubrics_to_publish.append(rubric)
 
+    for rubric in rubrics_to_publish:
+        rubric.is_published = True
     assessment.status = AssessmentStatus.PUBLICADA
     db.commit()
     db.add(AuditEvent(actor_id=user.id, action="PUBLISH", resource_type="Assessment", resource_id=assessment.id))
     db.commit()
     log_event("assessment_published", correlation_id, assessment_id=assessment.id)
     return {"status": "PUBLICADA"}
+
+
+@app.post("/v1/assessments/{assessment_id}/clone", response_model=AssessmentOut, status_code=201)
+def clone_assessment(
+    assessment_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
+    source = _get_owned_assessment(db, assessment_id, user)
+    if source.status != AssessmentStatus.PUBLICADA:
+        raise HTTPException(status_code=409, detail="Apenas avaliações publicadas podem ser clonadas.")
+    clone = Assessment(
+        title=source.title,
+        owner_id=user.id,
+        class_group_id=source.class_group_id,
+        cloned_from_id=source.id,
+        status=AssessmentStatus.RASCUNHO,
+    )
+    db.add(clone)
+    db.flush()
+    for source_question in source.questions:
+        cloned_question = Question(
+            assessment_id=clone.id,
+            statement=source_question.statement,
+            reference_answer=source_question.reference_answer,
+            max_score=source_question.max_score,
+            position=source_question.position,
+        )
+        db.add(cloned_question)
+        db.flush()
+        source_rubric = source_question.rubrics[0] if source_question.rubrics else None
+        if source_rubric is not None:
+            cloned_rubric = Rubric(
+                question_id=cloned_question.id, version=1, is_published=False
+            )
+            db.add(cloned_rubric)
+            db.flush()
+            for criterion in source_rubric.criteria:
+                db.add(
+                    RubricCriterion(
+                        rubric_id=cloned_rubric.id,
+                        name=criterion.name,
+                        description=criterion.description,
+                        max_score=criterion.max_score,
+                    )
+                )
+    db.add(
+        AuditEvent(
+            actor_id=user.id,
+            action="CLONE",
+            resource_type="Assessment",
+            resource_id=clone.id,
+            before_json=json.dumps({"source_assessment_id": source.id}),
+        )
+    )
+    db.commit()
+    db.refresh(clone)
+    return clone
+
+
+@app.post("/v1/assessments/{assessment_id}/questions", response_model=QuestionOut, status_code=201)
+def create_question(
+    assessment_id: str,
+    payload: QuestionInput,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
+    assessment = _lock_assessment(db, assessment_id)
+    require_assessment_mutation(db, user, assessment)
+    _require_draft(assessment)
+    current_count = db.query(Question).filter(Question.assessment_id == assessment.id).count()
+    if current_count >= 50:
+        raise HTTPException(status_code=422, detail="Uma avaliação pode ter no máximo 50 questões.")
+    question = Question(
+        assessment_id=assessment.id,
+        statement=payload.statement,
+        reference_answer=payload.reference_answer,
+        max_score=payload.max_score,
+        position=current_count + 1,
+    )
+    db.add(question)
+    db.flush()
+    db.add(
+        AuditEvent(
+            actor_id=user.id,
+            action="CREATE",
+            resource_type="Question",
+            resource_id=question.id,
+            after_json=json.dumps({"assessment_id": assessment.id, "position": question.position}),
+        )
+    )
+    db.commit()
+    db.refresh(question)
+    return question
+
+
+@app.patch("/v1/questions/{question_id}", response_model=QuestionOut)
+def update_question(
+    question_id: str,
+    payload: QuestionInput,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
+    question, assessment = _get_assessment_for_question(db, question_id, user)
+    _require_draft(assessment)
+    before = {"max_score": str(question.max_score), "position": question.position}
+    question.statement = payload.statement
+    question.reference_answer = payload.reference_answer
+    question.max_score = payload.max_score
+    db.add(
+        AuditEvent(
+            actor_id=user.id,
+            action="UPDATE",
+            resource_type="Question",
+            resource_id=question.id,
+            before_json=json.dumps(before),
+            after_json=json.dumps(
+                {"max_score": str(question.max_score), "position": question.position}
+            ),
+        )
+    )
+    db.commit()
+    db.refresh(question)
+    return question
+
+
+@app.delete("/v1/questions/{question_id}", status_code=204)
+def delete_question(
+    question_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
+    question, assessment = _get_assessment_for_question(db, question_id, user)
+    _require_draft(assessment)
+    if db.query(Answer.id).filter(Answer.question_id == question.id).first() is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Questão possui respostas registradas; não pode ser excluída.",
+        )
+    remaining = (
+        db.query(Question)
+        .filter(Question.assessment_id == assessment.id, Question.id != question.id)
+        .order_by(Question.position)
+        .all()
+    )
+    deleted_position = question.position
+    try:
+        db.delete(question)
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Questão possui respostas registradas; não pode ser excluída.",
+        ) from None
+    if remaining:
+        offset = max(item.position for item in remaining) + len(remaining) + 1
+        db.execute(
+            update(Question)
+            .where(Question.assessment_id == assessment.id)
+            .values(position=Question.position + offset)
+        )
+        db.flush()
+        for position, item in enumerate(remaining, start=1):
+            item.position = position
+    db.add(
+        AuditEvent(
+            actor_id=user.id,
+            action="DELETE",
+            resource_type="Question",
+            resource_id=question.id,
+            before_json=json.dumps(
+                {"assessment_id": assessment.id, "position": deleted_position}
+            ),
+        )
+    )
+    db.commit()
+    return Response(status_code=204)
+
+
+@app.put("/v1/assessments/{assessment_id}/questions/order", response_model=AssessmentOut)
+def reorder_questions(
+    assessment_id: str,
+    payload: QuestionOrderInput,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
+    assessment = _lock_assessment(db, assessment_id)
+    require_assessment_mutation(db, user, assessment)
+    _require_draft(assessment)
+    questions = db.query(Question).filter(Question.assessment_id == assessment.id).all()
+    previous_order = [question.id for question in sorted(questions, key=lambda item: item.position)]
+    current_ids = {question.id for question in questions}
+    if len(payload.question_ids) != len(set(payload.question_ids)) or set(payload.question_ids) != current_ids:
+        raise HTTPException(
+            status_code=422,
+            detail="A ordem deve conter exatamente todos os IDs atuais, sem repetições.",
+        )
+    if questions:
+        offset = max(question.position for question in questions) + len(questions) + 1
+        db.execute(
+            update(Question)
+            .where(Question.assessment_id == assessment.id)
+            .values(position=Question.position + offset)
+        )
+        db.flush()
+        by_id = {question.id: question for question in questions}
+        for position, question_id in enumerate(payload.question_ids, start=1):
+            by_id[question_id].position = position
+    db.add(
+        AuditEvent(
+            actor_id=user.id,
+            action="REORDER",
+            resource_type="Assessment",
+            resource_id=assessment.id,
+            before_json=json.dumps({"question_ids": previous_order}),
+            after_json=json.dumps({"question_ids": payload.question_ids}),
+        )
+    )
+    db.commit()
+    db.refresh(assessment)
+    return assessment
 
 
 # ---------------- Rubric ----------------
@@ -266,13 +541,8 @@ def create_rubric(
     user: User = Depends(require_role("professor", "admin")),
 ):
     correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
-    question = db.get(Question, question_id)
-    if question is None:
-        raise HTTPException(status_code=404, detail="Questão não encontrada.")
-    assessment = db.get(Assessment, question.assessment_id)
-    if user.role == Role.PROFESSOR and assessment.owner_id != user.id:
-        raise HTTPException(status_code=403, detail="Sem permissão sobre esta questão.")
-    require_assessment_mutation(db, user, assessment)
+    question, assessment = _get_assessment_for_question(db, question_id, user)
+    _require_draft(assessment)
 
     existing_versions = db.query(Rubric).filter(Rubric.question_id == question_id).count()
     rubric = Rubric(question_id=question_id, version=existing_versions + 1, is_published=False)

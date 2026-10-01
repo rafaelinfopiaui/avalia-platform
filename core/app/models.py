@@ -79,6 +79,9 @@ class Assessment(Base):
     class_group_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("class_groups.id"), nullable=True
     )
+    cloned_from_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("assessments.id"), nullable=True
+    )
     status: Mapped[AssessmentStatus] = mapped_column(
         Enum(AssessmentStatus), default=AssessmentStatus.RASCUNHO, nullable=False
     )
@@ -87,7 +90,9 @@ class Assessment(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
-    questions: Mapped[list["Question"]] = relationship(back_populates="assessment")
+    questions: Mapped[list["Question"]] = relationship(
+        back_populates="assessment", order_by="Question.position"
+    )
 
 
 class Organization(Base):
@@ -204,14 +209,23 @@ class ProfessorClassLink(Base):
 
 class Question(Base):
     __tablename__ = "questions"
+    __table_args__ = (
+        UniqueConstraint("assessment_id", "position", name="uq_questions_assessment_position"),
+    )
     id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
     assessment_id: Mapped[str] = mapped_column(String, ForeignKey("assessments.id"), nullable=False)
     statement: Mapped[str] = mapped_column(Text, nullable=False)
     reference_answer: Mapped[str] = mapped_column(Text, nullable=False)
     max_score: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     assessment: Mapped["Assessment"] = relationship(back_populates="questions")
-    rubrics: Mapped[list["Rubric"]] = relationship(back_populates="question")
+    rubrics: Mapped[list["Rubric"]] = relationship(
+        back_populates="question",
+        order_by="Rubric.version.desc()",
+        cascade="all, delete-orphan",
+    )
 
 
 class Rubric(Base):
@@ -223,7 +237,9 @@ class Rubric(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     question: Mapped["Question"] = relationship(back_populates="rubrics")
-    criteria: Mapped[list["RubricCriterion"]] = relationship(back_populates="rubric")
+    criteria: Mapped[list["RubricCriterion"]] = relationship(
+        back_populates="rubric", cascade="all, delete-orphan"
+    )
 
 
 class RubricCriterion(Base):

@@ -105,7 +105,15 @@ def test_active_professor_can_list_and_create_resources_in_own_class(
     response = client.post(
         "/v1/assessments",
         headers=headers,
-        json={"title": "Authorized assessment", "class_group_id": class_group.id},
+        json={
+            "title": "Authorized assessment",
+            "class_group_id": class_group.id,
+            "question": {
+                "statement": "Questão de autorização",
+                "reference_answer": "Resposta esperada",
+                "max_score": 10,
+            },
+        },
     )
     assert response.status_code == 201, response.text
     assert response.json()["class_group_id"] == class_group.id
@@ -185,7 +193,14 @@ def test_academic_module_flag_controls_creation_of_legacy_assessment_without_cla
     response = client.post(
         "/v1/assessments",
         headers=_headers(professor_token),
-        json={"title": f"Legacy flag {academic_module_enabled}"},
+        json={
+            "title": f"Legacy flag {academic_module_enabled}",
+            "question": {
+                "statement": "Questão legada",
+                "reference_answer": "Resposta esperada",
+                "max_score": 10,
+            },
+        },
     )
 
     assert response.status_code == expected_status, response.text
@@ -203,7 +218,15 @@ def test_linked_assessment_creation_is_allowed_with_flag_on_or_off(
     response = client.post(
         "/v1/assessments",
         headers=_headers(professor_token),
-        json={"title": "Linked assessment", "class_group_id": class_group.id},
+        json={
+            "title": "Linked assessment",
+            "class_group_id": class_group.id,
+            "question": {
+                "statement": "Questão vinculada",
+                "reference_answer": "Resposta esperada",
+                "max_score": 10,
+            },
+        },
     )
 
     assert response.status_code == 201, response.text
@@ -270,7 +293,15 @@ def test_expired_link_does_not_authorize_new_operations(client, db_session, prof
     response = client.post(
         "/v1/assessments",
         headers=_headers(professor_token),
-        json={"title": "Too late", "class_group_id": class_group.id},
+        json={
+            "title": "Too late",
+            "class_group_id": class_group.id,
+            "question": {
+                "statement": "Questão fora da vigência",
+                "reference_answer": "Resposta esperada",
+                "max_score": 10,
+            },
+        },
     )
     assert response.status_code == 403, response.text
 
