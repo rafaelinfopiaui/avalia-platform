@@ -35,3 +35,19 @@
 - alteração em `avalia_dev` e saneamento operacional;
 - implementação funcional da AV-S04;
 - homologação de OCR para produto.
+
+## Reconciliação posterior — organização local (2026-09-30)
+
+As linhas 16–21 acima registram o estado no momento de abertura deste pacote.
+Após autorização específica e teste de recuperação isolado:
+
+- o ambiente experimental foi movido para `experiments/av-s05b/` e permanece
+  ignorado pelo Git;
+- a única entrada órfã de `/private/tmp/av-s03-work` foi confirmada por
+  `git worktree prune --dry-run --verbose --expire now` e então podada;
+- a branch `local/av-s03-execucao` permaneceu preservada em
+  `7f18ec30a4ee486af0d99b131728a32bc362941d`.
+
+O registro original não foi reescrito retroativamente. O estado final e as
+provas de recuperação estão em
+`docs/governance/evidence/ORGANIZACAO-LOCAL/registro_organizacao_local_2026-09-30.md`.

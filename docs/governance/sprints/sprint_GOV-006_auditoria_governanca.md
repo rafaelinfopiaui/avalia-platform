@@ -167,6 +167,7 @@ mesma lista de arquivos alterados nos dois checkouts continha versões
   que excluem `BL-AV-1-10` por seu débito `DEBT-AV-011` aberto), chegando
   a 10 + 5 = 15 em vez do valor correto. O valor correto, partindo da base
   real (9, sem `BL-AV-1-10`) mais os 5 itens da `AV-S03`, é **14**.
+
 - **Versão com os registros mais recentes:** nenhum dos dois checkouts,
   isoladamente, tinha o estado mais atual — o checkout principal tinha o
   numerador mais correto (9) mas desatualizado quanto à integração da
@@ -175,6 +176,15 @@ mesma lista de arquivos alterados nos dois checkouts continha versões
   um numerador desatualizado (7, não 9). A versão correta é a combinação
   das duas: numerador base 9 (do checkout principal) + 5 itens da `AV-S03`
   (do worktree) = **14**.
+
+#### Reconciliação posterior — 2026-09-30
+
+As afirmações acima registram corretamente o estado observado durante a
+auditoria GOV-006. Posteriormente, na regularização documental da organização
+local, `snapshot_EXEC-2026-09-28-01_pacote_revisao_av-s03.md` foi incorporado à
+branch `docs/organizacao-local-20260930` como documento histórico. Portanto, a
+expressão “apenas no checkout principal, untracked” não descreve mais seu estado
+atual; permanece somente como constatação datada da auditoria.
 
 ### 6.2 `sprint_AV-S03_estrutura_academica.md`, `decisions.md`, `backlog_tecnico_avalia.md`
 

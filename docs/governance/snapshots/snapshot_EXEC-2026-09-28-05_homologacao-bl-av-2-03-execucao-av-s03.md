@@ -29,8 +29,9 @@ commit_referencia: "66c95201daf893fa7b2852e0d94b20314f8d8f34"
 
 ## 2. Homologação de BL-AV-2-03
 
-Rafael homologou `BL-AV-2-03` na versão final identificada pelos checksums do pacote em
-`docs/governance/evidence/AV-S03-recuperacao/BL-AV-2-03-pacote/` (`checksums_FINAL_20260928_162232`),
+Rafael homologou `BL-AV-2-03` na versão reconstruída identificada pelo pacote canônico em
+`docs/governance/evidence/AV-S03/pacote-revisao-20260928/` e pelo manifesto histórico
+`docs/governance/evidence/AV-S03-recuperacao/BL-AV-2-03-pacote/checksums_FINAL_20260928_162232.sha256`,
 com base no parecer independente e adversarial da terceira rodada de revisão cruzada (Antigravity,
 somente leitura): **APROVADO SEM RESSALVAS**. Registrado formalmente em `DEC-AV-026`
 (`docs/governance/registers/decisions.md`).
@@ -94,13 +95,16 @@ Registrado na sprint (§9) para decisão de Rafael; nenhuma alteração de autor
 
 ## 6. Pacote consolidado e verificação de completude
 
-Dois pacotes recuperáveis foram produzidos, ambos com checksums SHA-256 verificados:
+Dois pacotes recuperáveis foram produzidos, ambos com checksums SHA-256 verificados.
+Na regularização documental de 2026-09-30, o conteúdo integral redundante ficou no pacote externo
+`RECUPERACAO-LOCAL-20260930_221041`; no Git permanecem apenas o necessário à rastreabilidade e o
+pacote canônico revisável:
 
-1. `docs/governance/evidence/AV-S03-recuperacao/BL-AV-2-03-pacote/` — pacote específico da
-   homologação de `BL-AV-2-03` (3 pareceres completos do Antigravity, snapshots das 3 rodadas,
-   tarball do código no estado homologado).
-2. `docs/governance/evidence/AV-S03-recuperacao/AV-S03-pacote-consolidado/` — pacote consolidado de
-   toda a AV-S03 no estado atual (22 arquivos rastreados pelo `git status`, incluindo `BL-AV-2-04`).
+1. `docs/governance/evidence/AV-S03-recuperacao/` — índice dos 39 artefatos originais, parecer final,
+   manifesto final e 18 capturas da reconstrução; tarballs e rodadas intermediárias não foram
+   duplicados no Git.
+2. `docs/governance/evidence/AV-S03/pacote-revisao-20260928/` — pacote canônico revisável da
+   reconstrução, com diffs, inventário e arquivos novos.
 
 **Verificação de completude real** (não apenas checksum agregado): o tarball consolidado foi extraído
 em diretório temporário e cada um dos 22 arquivos foi comparado byte-a-byte (`diff`) contra o arquivo

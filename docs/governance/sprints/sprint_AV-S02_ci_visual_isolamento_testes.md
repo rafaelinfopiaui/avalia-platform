@@ -46,7 +46,7 @@ Dependências reais por item:
 | BL-AV-1-06 / DEBT-AV-005 | CI mínima versionada | [`backlog_tecnico_avalia.md`](../backlog/backlog_tecnico_avalia.md) §3 |
 | BL-AV-1-09 / DEBT-AV-009 | isolamento dos 2 testes do caminho real contra `AI_ENGINE_MODE=simulated` global | [`technical_debts.md`](../registers/technical_debts.md), `EXEC-2026-09-23-05` §4 |
 | Homologação de AV-S01 | incluir a correção de `DEBT-AV-009` na próxima sprint elegível; não iniciar antes de aprovação | [`decisions.md`](../registers/decisions.md), `DEC-AV-003` |
-| Roteiro visual | fluxo login → avaliação → rubrica → publicação → resposta → correção → revisão | [`docs/roteiro-apresentacao-supervisor.md`](../../roteiro-apresentacao-supervisor.md) §3 |
+| Roteiro visual | fluxo login → avaliação → rubrica → publicação → resposta → correção → revisão | material local, não versionado, deliberadamente fora de qualquer commit desta sprint (ver linha 440); preservado em `local-nao-versionado/materiais-apresentacao/roteiro-apresentacao-supervisor.md` desde a organização de 2026-09-30 §3 |
 
 Lacunas de fonte: nenhuma. O modo de inferência da evidência visual desta sprint é explicitamente simulado; inferência real/Ollama permanece fora do escopo e não será alegada.
 

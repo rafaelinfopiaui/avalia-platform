@@ -1,0 +1,74 @@
+### Relatório de Revisão Cruzada Independente (Read-Only) — BL-AV-2-03
+
+**Ambiente e Execução dos Testes:**
+- Comando executado: `cd core && source .venv/bin/activate && python -m pytest app/tests -q`
+- Resultado real observado: **56 passed, 12 warnings em 32.00s** (incluindo os 8 testes de [`test_academic_authorization.py`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/tests/test_academic_authorization.py)).
+
+---
+
+### Respostas aos Quesitos Específicos
+
+#### 1. Admin tem mesmo acesso global previsto (sem exigir vínculo)?
+**SIM.** Em [`academic.py:148-149`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L148-L149) (`has_active_class_link`), admin retorna `True` incondicionalmente. Em [`academic.py:166-167`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L166-L167) (`require_assessment_mutation`), admin retorna imediatamente. Nas listagens globais (`/organizations`, `/courses`, `/class-groups`, `/enrollments`), o filtro de escopo só é aplicado se `user.role == Role.PROFESSOR`, deixando o admin com visão e mutação irrestritas.
+
+#### 2. Professor sem vínculo ativo é bloqueado (403) em TODAS as rotas de escrita relevantes, sem vazar existência de recursos (evitar 200/404 que revele dados)?
+**NÃO. Há vazamento de existência (oráculo de enumeração 404 vs 403).**
+Nas rotas abaixo, a verificação de existência do recurso no banco (`_get`) ocorre **antes** da checagem de autorização por vínculo:
+- [`academic.py:431-433`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L431-L433) (`POST /v1/enrollments`): executa `_get(db, ClassGroup, payload.class_group_id)` e `_get(db, Student, payload.student_id)` antes de `require_active_class_link(...)`. Se a turma ou aluno não existirem, retorna 404; se existirem, retorna 403.
+- [`academic.py:452-454`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L452-L454) (`GET /v1/enrollments/{resource_id}`): busca a matrícula via `_get` (retorna 404 se não existe) antes de validar vínculo com a turma (retorna 403 se existe).
+- [`academic.py:465-466`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L465-L466) (`PATCH /v1/enrollments/{resource_id}`): `_get` antes de `require_active_class_link`.
+- [`academic.py:486-487`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L486-L487) (`POST /v1/assessments/{assessment_id}/class-group`): faz `_get` na turma antes de chamar `require_active_class_link`.
+- [`academic.py:292-297`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L292-L297) (`GET` em entidades via `_register_admin_crud`): `_get` antes do filtro de escopo do professor, retornando 404 se inexistente e 403 se existente fora do escopo.
+
+#### 3. Vínculo expirado/futuro realmente NÃO concede acesso a operações NOVAS, mas preserva leitura histórica de avaliações PRÓPRIAS conforme decisão 6.ii da sprint?
+**PARCIALMENTE.** 
+- Leitura histórica e bloqueio de criação/edição/publicação direta de avaliação estão funcionais em `GET/PATCH /v1/assessments/{id}` e `POST /v1/assessments/{id}/publish`.
+- **Porém**, operações novas subsequentes (submissão de respostas, disparo de correções e revisões de notas) **não verificam vínculo**. Um professor com vínculo expirado continua podendo injetar novas respostas e disparar novas correções para turmas cujos vínculos já se encerraram (ver Quesito 5).
+
+#### 4. Avaliação já vinculada a turma, após expiração do vínculo do professor responsável, fica bloqueada para edição/republicação (não apenas para criação)?
+**SIM.** Em [`main.py:206`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/main.py#L206) (`update_assessment`) e [`main.py:221`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/main.py#L221) (`publish_assessment`), invoca-se [`require_assessment_mutation`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L165-L172). Como o vínculo expirou, `has_active_class_link` retorna `False` e é lançado 403 ("Vínculo ativo com a turma é obrigatório"). Testado com sucesso em `test_expired_professor_can_read_but_not_edit_or_republish_linked_assessment`.
+
+#### 5. Existe algum caso onde a checagem de autorização é feita depois de uma escrita no banco (checagem tardia), ou algum caminho que faz bypass da checagem?
+- **Checagem tardia (escrita antes do check):** NÃO encontrada. As rotas validam autorização antes do `db.add` e `db.commit`.
+- **Bypass de checagem:** **SIM, múltiplos:**
+  1. [`main.py:298-306`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/main.py#L298-L306) (`POST /v1/answers`): chama apenas `_get_owned_assessment`, sem invocar `require_assessment_mutation` nem `require_active_class_link`.
+  2. [`main.py:358-372`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/main.py#L358-L372) (`POST /v1/answers/{answer_id}/corrections`): chama apenas `_get_owned_assessment`, permitindo solicitar correções mesmo com vínculo expirado.
+  3. [`main.py:471-479`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/main.py#L471-L479) (`POST /v1/corrections/{job_id}/reviews`): chama `_get_job_context` que apenas verifica propriedade original da avaliação, sem checar vínculo ativo com a turma.
+  4. [`academic.py:477-488`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L477-L488) (`POST /v1/assessments/{assessment_id}/class-group`): permite vincular/trocar a turma de uma avaliação sem checar se a avaliação já possuía uma turma anterior cujo vínculo expirou.
+  5. [`config.py:18-20`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/config.py#L18-L20) e [`academic.py:170`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L170): `academic_module_enabled` é `false` por padrão. Se `class_group_id` for nulo, `require_assessment_mutation` ignora completamente qualquer vínculo acadêmico.
+
+#### 6. Os testes cobrem os casos negativos de forma real (HTTP real via TestClient), não apenas os positivos?
+**PARCIALMENTE.**
+- Utilizam `TestClient` real em requisições HTTP verdadeiras para os 8 testes implementados.
+- **Lacunas negativas relevantes não testadas:**
+  - Nenhuma verificação de `ProfessorRole.COLLABORATOR` tentando ações exclusivas do `RESPONSIBLE` (ex.: criar/editar matrícula exige `responsible=True`, mas não há teste negativo garantindo que colaborador receba 403).
+  - Nenhuma verificação para requisições não autenticadas (401) nas rotas de `academic.py` (previsto na matriz 5.1).
+  - Nenhuma verificação de que acessar recurso inexistente em turma não autorizada não gera vazamento 404 vs 403.
+  - Nenhuma verificação negativa sobre bloqueio de `answers`, `corrections` ou `reviews` para vínculos expirados.
+
+#### 7. Alguma query lista globalmente e filtra em memória Python ao invés de filtrar no banco (ineficiente e potencial vazamento)?
+**NÃO.** Todas as rotas de listagem (`/organizations`, `/courses`, `/disciplines`, `/course-disciplines`, `/class-groups`, `/students`, `/enrollments`, `/professor-class-links`, `/assessments`) aplicam os predicados e subqueries diretamente no SQLAlchemy (`query.filter(...)`, `in_()`, `join()`). Não há `query.all()` com filtragem posterior em Python.
+
+---
+
+### Veredito Final
+
+**AJUSTES NECESSÁRIOS**
+
+#### Achados Bloqueantes Específicos:
+
+1. **[Vazamento de Metadados / Oráculo de Enumeração 404 vs 403]**
+   - **Locais:** 
+     - [`core/app/routers/academic.py:431-433`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L431-L433)
+     - [`core/app/routers/academic.py:452-454`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L452-L454)
+     - [`core/app/routers/academic.py:465-466`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L465-L466)
+     - [`core/app/routers/academic.py:486-487`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L486-L487)
+     - [`core/app/routers/academic.py:292-297`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L292-L297)
+   - **Problema:** A existência da entidade é consultada com `_get()` antes de checar se o professor tem autorização sobre ela. Isso revela a existência de turmas, matrículas e alunos a professores não vinculados através da resposta 404 (quando não existe) versus 403 (quando existe).
+
+2. **[Bypass de Autorização em Escrita do Fluxo Operacional da Turma]**
+   - **Locais:** 
+     - [`core/app/main.py:297-306`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/main.py#L297-L306) (`POST /v1/answers`)
+     - [`core/app/main.py:357-372`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/main.py#L357-L372) (`POST /v1/answers/{id}/corrections`)
+     - [`core/app/main.py:470-479`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/main.py#L470-L479) (`POST /v1/corrections/{id}/reviews`)
+   - **Problema:** Operações de escrita fundamentais sobre avaliações vinculadas a turmas usam apenas `_get_owned_assessment` e ignoram o estado de vigência do vínculo do professor com a turma (`require_assessment_mutation`), permitindo que um professor cujo vínculo expirou continue inserindo respostas e executando correções/revisões.

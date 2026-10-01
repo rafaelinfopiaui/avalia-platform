@@ -18,9 +18,11 @@ primeira rodada experimental do benchmark, autorizada por Rafael em
 2026-09-29 como investigação exploratória, fora do repositório de produção.
 
 Protocolo completo, congelado antes de qualquer medição:
-`av-s05b-benchmark-experimento/protocolo/PROTOCOLO_CONGELADO.md` (fora
-deste repositório). Resultado bruto e relatório final:
-`av-s05b-benchmark-experimento/saida/`.
+`docs/governance/evidence/AV-S05B/protocolo/PROTOCOLO_CONGELADO.md`.
+Resultado bruto e relatório final:
+`docs/governance/evidence/AV-S05B/saida/`. O ambiente de trabalho local
+foi consolidado em `experiments/av-s05b/` em 2026-09-30 e permanece
+ignorado pelo Git; a evidência canônica é a cópia versionada acima.
 
 ## Escopo e Limitações desta rodada
 
@@ -128,9 +130,10 @@ decisão.** Este ADR registra apenas:
   inutilidade prática do moondream:v2 nesta configuração, sem confundir isso
   com sua elegibilidade técnica binária.
 - Pareceres preservados em
-  `av-s05b-benchmark-experimento/saida/revisao_antigravity_rodada1.txt` e
-  `revisao_antigravity_revalidacao.txt`; execução independente do Codex em
-  `saida/execucao_independente_codex.txt`.
+  `docs/governance/evidence/AV-S05B/saida/revisao_antigravity_rodada1.txt` e
+  `docs/governance/evidence/AV-S05B/saida/revisao_antigravity_revalidacao.txt`;
+  execução independente do Codex em
+  `docs/governance/evidence/AV-S05B/saida/execucao_independente_codex.txt`.
 
 ## Nota de correção pós-ADR (2026-09-29, verificação independente posterior)
 
@@ -145,9 +148,10 @@ depois da revalidação acima, e corrigidas na mesma rodada:
    nesta sprint) **coexistem carregados simultaneamente
    sem eviction automática** nesta máquina (24 GB RAM unificada), total
    ~5,7 GB. Detalhe completo em
-   `saida/medicao_memoria_coexistencia.md`. Isso não decide `BL-AV-4B-17`
+   `docs/governance/evidence/AV-S05B/saida/medicao_memoria_coexistencia.md`.
+   Isso não decide `BL-AV-4B-17`
    (permanece alocado a `AV-S07B`), apenas registra o dado bruto pedido.
-2. **Limpeza pós-experimento incompleta**: `PREPARACAO_DOWNLOADS.md`
+2. **Limpeza pós-experimento incompleta**: `docs/governance/evidence/AV-S05B/protocolo/PREPARACAO_DOWNLOADS.md`
    descrevia a remoção de Tesseract e `moondream:v2` da máquina, mas as
    reinstalações feitas para as rodadas de reexecução do Codex e
    revalidação não haviam sido desfeitas. Confirmado por comando
