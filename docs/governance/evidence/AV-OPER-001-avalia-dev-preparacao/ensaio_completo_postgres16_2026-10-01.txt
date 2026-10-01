@@ -1,0 +1,319 @@
+POSTGRES_VERSION=postgres (PostgreSQL) 16.15 (Homebrew)
+DUMP_PATH=[PROTECTED_DUMP_OUTSIDE_GIT]
+DUMP_SHA256=39b66b790d9ec941ad0c8bed8ffb1b53a99a70997678b0b1c8bee796b247fa47
+CLUSTER_DIR=[TEMPORARY_ISOLATED_CLUSTER]
+=== A RESTORE + SOURCE STATE VALIDATION ===
+NOTICE:  database "av_s02_saneamento_happy" does not exist, skipping
+DURATION_RESTORE_av_s02_saneamento_happy_SECONDS=0.046
+ASSERTION_OK_RESTORED_ALEMBIC_VERSION=e1b02279b1a5
+ASSERTION_OK_RESTORED_DUPLICATE_ROWS=3
+ASSERTION_OK_RESTORED_DUPLICATE_GROUPS=1
+ASSERTION_OK_RESTORED_USERS=4
+ASSERTION_OK_RESTORED_ASSESSMENTS=10
+ASSERTION_OK_RESTORED_QUESTIONS=10
+ASSERTION_OK_RESTORED_HUMAN_REVIEWS=18
+ASSERTION_OK_RESTORED_AUDIT_EVENTS=36
+RESTORE_EFFECTIVE_GREEN
+                job_id                | review_count | distinct_reviewers | distinct_decisions | distinct_totals | distinct_scores | distinct_justifications |                                                   ordered_ids                                                    | classification 
+--------------------------------------+--------------+--------------------+--------------------+-----------------+-----------------+-------------------------+------------------------------------------------------------------------------------------------------------------+----------------
+ 4f56a10b-3a44-4df5-9047-adef7546a3c0 |            3 |                  1 |                  1 |               1 |               1 |                       1 | {31d31b5c-05c7-4206-b2ff-43b2eda14026,8a9c2ba6-fca4-4f47-9b2a-12f7a3e7345c,9459489c-dd8e-4f33-936a-bc76cb7d5f0b} | EQUIVALENT
+(1 row)
+
+                  id                  |                job_id                |             reviewer_id              | decision | final_total |                                                                   final_scores_json                                                                    | justification |         created_at         
+--------------------------------------+--------------------------------------+--------------------------------------+----------+-------------+--------------------------------------------------------------------------------------------------------------------------------------------------------+---------------+----------------------------
+ 31d31b5c-05c7-4206-b2ff-43b2eda14026 | 4f56a10b-3a44-4df5-9047-adef7546a3c0 | cabba145-18bc-40a1-9faa-489f4bfda018 | APPROVE  |        2.00 | [{"criterion_id": "53548671-87e7-4784-a7f3-27ce80b66355", "score": "1.00"}, {"criterion_id": "f99920d8-2368-491c-b82e-f976b6e598c0", "score": "1.00"}] |               | 2026-09-23 22:53:35.110755
+ 8a9c2ba6-fca4-4f47-9b2a-12f7a3e7345c | 4f56a10b-3a44-4df5-9047-adef7546a3c0 | cabba145-18bc-40a1-9faa-489f4bfda018 | APPROVE  |        2.00 | [{"criterion_id": "53548671-87e7-4784-a7f3-27ce80b66355", "score": "1.00"}, {"criterion_id": "f99920d8-2368-491c-b82e-f976b6e598c0", "score": "1.00"}] |               | 2026-09-23 22:55:15.904278
+ 9459489c-dd8e-4f33-936a-bc76cb7d5f0b | 4f56a10b-3a44-4df5-9047-adef7546a3c0 | cabba145-18bc-40a1-9faa-489f4bfda018 | APPROVE  |        2.00 | [{"criterion_id": "53548671-87e7-4784-a7f3-27ce80b66355", "score": "1.00"}, {"criterion_id": "f99920d8-2368-491c-b82e-f976b6e598c0", "score": "1.00"}] |               | 2026-09-23 22:58:47.630896
+(3 rows)
+
+                  id                  |               actor_id               |     action     | resource_type |             resource_id              |                                           before_json                                            |                                                                       after_json                                                                       |         created_at         
+--------------------------------------+--------------------------------------+----------------+---------------+--------------------------------------+--------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------+----------------------------
+ b12db6d4-3b44-42ca-aa9a-99748fc4b982 | cabba145-18bc-40a1-9faa-489f4bfda018 | REVIEW_APPROVE | CorrectionJob | 4f56a10b-3a44-4df5-9047-adef7546a3c0 | {"53548671-87e7-4784-a7f3-27ce80b66355": "1.00", "f99920d8-2368-491c-b82e-f976b6e598c0": "1.00"} | [{"criterion_id": "53548671-87e7-4784-a7f3-27ce80b66355", "score": "1.00"}, {"criterion_id": "f99920d8-2368-491c-b82e-f976b6e598c0", "score": "1.00"}] | 2026-09-23 22:53:35.114334
+ 4f737eab-3ba0-40af-8738-ae847377ba34 | cabba145-18bc-40a1-9faa-489f4bfda018 | REVIEW_APPROVE | CorrectionJob | 4f56a10b-3a44-4df5-9047-adef7546a3c0 | {"53548671-87e7-4784-a7f3-27ce80b66355": "1.00", "f99920d8-2368-491c-b82e-f976b6e598c0": "1.00"} | [{"criterion_id": "53548671-87e7-4784-a7f3-27ce80b66355", "score": "1.00"}, {"criterion_id": "f99920d8-2368-491c-b82e-f976b6e598c0", "score": "1.00"}] | 2026-09-23 22:55:15.907615
+ cad4d910-8c91-4a7e-9714-266fac3f7ee6 | cabba145-18bc-40a1-9faa-489f4bfda018 | REVIEW_APPROVE | CorrectionJob | 4f56a10b-3a44-4df5-9047-adef7546a3c0 | {"53548671-87e7-4784-a7f3-27ce80b66355": "1.00", "f99920d8-2368-491c-b82e-f976b6e598c0": "1.00"} | [{"criterion_id": "53548671-87e7-4784-a7f3-27ce80b66355", "score": "1.00"}, {"criterion_id": "f99920d8-2368-491c-b82e-f976b6e598c0", "score": "1.00"}] | 2026-09-23 22:58:47.636134
+(3 rows)
+
+DURATION_DIAGNOSTIC_SECONDS=0.030
+=== B HAPPY PATH FULL CHAIN ===
+SET
+psql:/Users/rafaeloliveira/Projeto Estágio/avalia-plataform/core/scripts/av_s02_saneamento_human_reviews.sql:32: NOTICE:  Guard isolado OK: av_s02_saneamento_happy
+DO
+                job_id                | review_count | distinct_reviewers | distinct_decisions | distinct_totals | distinct_scores | distinct_justifications 
+--------------------------------------+--------------+--------------------+--------------------+-----------------+-----------------+-------------------------
+ 4f56a10b-3a44-4df5-9047-adef7546a3c0 |            3 |                  1 |                  1 |               1 |               1 |                       1
+(1 row)
+
+BEGIN
+SET
+DO
+LOCK TABLE
+LOCK TABLE
+LOCK TABLE
+DO
+DO
+INSERT 0 2
+DO
+DELETE 2
+DO
+COMMIT
+SANITATION_APPLIED_GREEN
+DURATION_SANITATION_av_s02_saneamento_happy_SECONDS=0.032
+ASSERTION_OK_POST_SANITATION_DUPLICATE_GROUPS=0
+ASSERTION_OK_POST_SANITATION_ARCHIVED=2
+SET
+psql:/Users/rafaeloliveira/Projeto Estágio/avalia-plataform/core/scripts/av_s02_saneamento_human_reviews.sql:32: NOTICE:  Guard isolado OK: av_s02_saneamento_happy
+DO
+ job_id | review_count | distinct_reviewers | distinct_decisions | distinct_totals | distinct_scores | distinct_justifications 
+--------+--------------+--------------------+--------------------+-----------------+-----------------+-------------------------
+(0 rows)
+
+BEGIN
+SET
+DO
+LOCK TABLE
+LOCK TABLE
+LOCK TABLE
+DO
+DO
+COMMIT
+SANITATION_ALREADY_COMPLETE_VALID_NOOP
+DURATION_SANITATION_av_s02_saneamento_happy_SECONDS=0.038
+ASSERTION_OK_SANITATION_IDEMPOTENT_ACTIVE=1
+ASSERTION_OK_SANITATION_IDEMPOTENT_ARCHIVE=2
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade e1b02279b1a5 -> 7b1d6d853f20, add unique human review job id
+DURATION_MIGRATION_7B1_SECONDS=0.261
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade 7b1d6d853f20 -> c4a8b2d91e37, add academic structure
+DURATION_MIGRATION_C4A_SECONDS=0.202
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade c4a8b2d91e37 -> a9f4c2e71b06, add question position and assessment clone provenance
+DURATION_MIGRATION_A9F_SECONDS=0.206
+SET
+DO
+DO
+DO
+DO
+DO
+             result              
+---------------------------------
+ POST_MIGRATION_VALIDATION_GREEN
+(1 row)
+
+DURATION_POST_MIGRATION_VALIDATION_SECONDS=0.031
+DEMO_SEED_CREATED_AND_VALID
+DEMO_ASSESSMENT_ID=demo-av-s04-assessment-multiple-questions
+DEMO_ACADEMIC_FLAGS_REQUIRED=ACADEMIC_MODULE_ENABLED=true,VITE_ACADEMIC_MODULE_ENABLED=true
+DURATION_DEMO_SEED_FIRST_SECONDS=0.395
+DEMO_SEED_ALREADY_VALID
+DURATION_DEMO_SEED_SECOND_IDEMPOTENCY_SECONDS=0.187
+ASSERTION_OK_DEMO_TWO_QUESTIONS=2
+ASSERTION_OK_DEMO_POSITIONS=1,2
+ASSERTION_OK_DEMO_ACTIVE_PROFESSOR_LINK=1
+HAPPY_PATH_FULL_CHAIN_GREEN
+=== C FAILURE NON-EQUIVALENT DUPLICATES ===
+NOTICE:  database "av_s02_saneamento_conflict" does not exist, skipping
+DURATION_RESTORE_av_s02_saneamento_conflict_SECONDS=0.044
+ASSERTION_OK_CONFLICT_ACTIVE_ROWS_UNCHANGED=3
+ASSERTION_OK_CONFLICT_ARCHIVE_DDL_ROLLED_BACK=0
+FAILURE_NON_EQUIVALENT_ABORT_GREEN
+=== D FAILURE AFTER ARCHIVE COPY BEFORE DELETE/COMMIT ===
+NOTICE:  database "av_s02_saneamento_precommit_failure" does not exist, skipping
+DURATION_RESTORE_av_s02_saneamento_precommit_failure_SECONDS=0.045
+ASSERTION_OK_PRECOMMIT_ACTIVE_ROWS_ROLLED_BACK=3
+ASSERTION_OK_PRECOMMIT_ARCHIVE_TABLE_ROLLED_BACK=0
+FAILURE_PRECOMMIT_ROLLBACK_GREEN
+=== E RECOVERY AFTER SANITATION BEFORE CONSTRAINT ===
+NOTICE:  database "av_s02_saneamento_recovery_pre_constraint" does not exist, skipping
+DURATION_RESTORE_av_s02_saneamento_recovery_pre_constraint_SECONDS=0.044
+SET
+psql:/Users/rafaeloliveira/Projeto Estágio/avalia-plataform/core/scripts/av_s02_saneamento_human_reviews.sql:32: NOTICE:  Guard isolado OK: av_s02_saneamento_recovery_pre_constraint
+DO
+                job_id                | review_count | distinct_reviewers | distinct_decisions | distinct_totals | distinct_scores | distinct_justifications 
+--------------------------------------+--------------+--------------------+--------------------+-----------------+-----------------+-------------------------
+ 4f56a10b-3a44-4df5-9047-adef7546a3c0 |            3 |                  1 |                  1 |               1 |               1 |                       1
+(1 row)
+
+BEGIN
+SET
+DO
+LOCK TABLE
+LOCK TABLE
+LOCK TABLE
+DO
+DO
+INSERT 0 2
+DO
+DELETE 2
+DO
+COMMIT
+SANITATION_APPLIED_GREEN
+DURATION_SANITATION_av_s02_saneamento_recovery_pre_constraint_SECONDS=0.031
+SET
+DO
+BEGIN
+SET
+DO
+LOCK TABLE
+LOCK TABLE
+LOCK TABLE
+DO
+INSERT 0 2
+DO
+DO
+DELETE 2
+DO
+COMMIT
+RECOVERY_APPLIED_GREEN
+DURATION_RECOVERY_av_s02_saneamento_recovery_pre_constraint_SECONDS=0.030
+ASSERTION_OK_RECOVERY_PRE_ACTIVE_ROWS=3
+ASSERTION_OK_RECOVERY_PRE_ARCHIVE_EMPTY=0
+SET
+DO
+BEGIN
+SET
+DO
+LOCK TABLE
+LOCK TABLE
+LOCK TABLE
+DO
+COMMIT
+RECOVERY_ALREADY_COMPLETE_VALID_NOOP
+DURATION_RECOVERY_av_s02_saneamento_recovery_pre_constraint_SECONDS=0.029
+ASSERTION_OK_RECOVERY_IDEMPOTENT_ACTIVE=3
+RECOVERY_AFTER_SANITATION_BEFORE_CONSTRAINT_GREEN
+=== F RECOVERY AFTER 7B1 CONSTRAINT ===
+NOTICE:  database "av_s02_saneamento_recovery_post_constraint" does not exist, skipping
+DURATION_RESTORE_av_s02_saneamento_recovery_post_constraint_SECONDS=0.045
+SET
+psql:/Users/rafaeloliveira/Projeto Estágio/avalia-plataform/core/scripts/av_s02_saneamento_human_reviews.sql:32: NOTICE:  Guard isolado OK: av_s02_saneamento_recovery_post_constraint
+DO
+                job_id                | review_count | distinct_reviewers | distinct_decisions | distinct_totals | distinct_scores | distinct_justifications 
+--------------------------------------+--------------+--------------------+--------------------+-----------------+-----------------+-------------------------
+ 4f56a10b-3a44-4df5-9047-adef7546a3c0 |            3 |                  1 |                  1 |               1 |               1 |                       1
+(1 row)
+
+BEGIN
+SET
+DO
+LOCK TABLE
+LOCK TABLE
+LOCK TABLE
+DO
+DO
+INSERT 0 2
+DO
+DELETE 2
+DO
+COMMIT
+SANITATION_APPLIED_GREEN
+DURATION_SANITATION_av_s02_saneamento_recovery_post_constraint_SECONDS=0.031
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade e1b02279b1a5 -> 7b1d6d853f20, add unique human review job id
+DURATION_RECOVERY_POST_APPLY_7B1_SECONDS=0.199
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running downgrade 7b1d6d853f20 -> e1b02279b1a5, add unique human review job id
+DURATION_RECOVERY_POST_DOWNGRADE_TO_E1_SECONDS=0.192
+SET
+DO
+BEGIN
+SET
+DO
+LOCK TABLE
+LOCK TABLE
+LOCK TABLE
+DO
+INSERT 0 2
+DO
+DO
+DELETE 2
+DO
+COMMIT
+RECOVERY_APPLIED_GREEN
+DURATION_RECOVERY_av_s02_saneamento_recovery_post_constraint_SECONDS=0.029
+ASSERTION_OK_RECOVERY_POST_ALEMBIC_VERSION=e1b02279b1a5
+ASSERTION_OK_RECOVERY_POST_ACTIVE_ROWS=3
+RECOVERY_AFTER_CONSTRAINT_GREEN
+=== G CONCURRENT INDEX FAILURE + RESUME ===
+PostgreSQL: postgres (PostgreSQL) 16.15 (Homebrew)
+=== A fresh ===
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> e1b02279b1a5, schema inicial avalia
+INFO  [alembic.runtime.migration] Running upgrade e1b02279b1a5 -> 7b1d6d853f20, add unique human review job id
+INFO  [alembic.runtime.migration] Running upgrade 7b1d6d853f20 -> c4a8b2d91e37, add academic structure
+INSERT 0 1
+INSERT 0 2
+INSERT 0 2
+INSERT 0 4
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade c4a8b2d91e37 -> a9f4c2e71b06, add question position and assessment clone provenance
+DO
+UPDATE 1
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade c4a8b2d91e37 -> a9f4c2e71b06, add question position and assessment clone provenance
+DO
+A GREEN
+=== B recovery-invalid-index ===
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> e1b02279b1a5, schema inicial avalia
+INFO  [alembic.runtime.migration] Running upgrade e1b02279b1a5 -> 7b1d6d853f20, add unique human review job id
+INFO  [alembic.runtime.migration] Running upgrade 7b1d6d853f20 -> c4a8b2d91e37, add academic structure
+INSERT 0 1
+INSERT 0 2
+INSERT 0 2
+INSERT 0 4
+ALTER TABLE
+ALTER TABLE
+UPDATE 4
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ERROR:  could not create unique index "ix_questions_assessment_position"
+DETAIL:  Key (assessment_id, "position")=(a1, 1) is duplicated.
+DO
+UPDATE 4
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade c4a8b2d91e37 -> a9f4c2e71b06, add question position and assessment clone provenance
+DO
+B GREEN
+=== C checkpoint-valid-index ===
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> e1b02279b1a5, schema inicial avalia
+INFO  [alembic.runtime.migration] Running upgrade e1b02279b1a5 -> 7b1d6d853f20, add unique human review job id
+INFO  [alembic.runtime.migration] Running upgrade 7b1d6d853f20 -> c4a8b2d91e37, add academic structure
+INSERT 0 1
+INSERT 0 2
+INSERT 0 2
+INSERT 0 4
+ALTER TABLE
+ALTER TABLE
+UPDATE 4
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+CREATE INDEX
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade c4a8b2d91e37 -> a9f4c2e71b06, add question position and assessment clone provenance
+DO
+C GREEN
+=== ruff ===
+All checks passed!
+ALL GREEN
+DURATION_MIGRATION_CONCURRENT_INDEX_RECOVERY_SECONDS=2.468
+CONCURRENT_INDEX_RECOVERY_GREEN
+=== H DATABASE NAME GUARD ===
+DATABASE_NAME_GUARD_GREEN
+ALL_DRY_RUN_SCENARIOS_GREEN
