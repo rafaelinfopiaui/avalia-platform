@@ -73,9 +73,16 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/AssessmentCreate' }
       responses:
-        "201": { description: Criada }
+        "201":
+          description: Criada; questions é a representação canônica completa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssessmentOut' }
         "403": { description: Professor sem vínculo ativo com a turma }
-        "422": { description: Turma obrigatória quando o módulo acadêmico está habilitado }
+        "422":
+          description: >-
+            Turma obrigatória; nenhum campo de questão; questions acima de 50;
+            texto acima de 10.000 caracteres; ou question e questions não vazios juntos
 
   /assessments/{id}/publish:
     post:
@@ -86,10 +93,82 @@ paths:
       responses:
         "200": { description: Publicada }
         "422":
-          description: Validação falhou (ex. soma da rubrica != valor da questão)
+          description: >-
+            Validação atômica falhou: zero questões, rubrica ausente/inválida
+            ou soma da rubrica diferente do max_score da questão
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /assessments/{id}/clone:
+    post:
+      summary: Clonar avaliação publicada como novo rascunho independente
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "201":
+          description: Clone criado com novos IDs de questão e rubrica
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssessmentOut' }
+        "409": { description: A avaliação de origem não está publicada }
+
+  /assessments/{id}/questions:
+    post:
+      summary: Adicionar questão ao fim de uma avaliação em rascunho
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuestionInput' }
+      responses:
+        "201": { description: Questão criada }
+        "409": { description: "Avaliação publicada não pode ser alterada; crie um clone." }
+        "422": { description: Limite de 50 questões ou 10.000 caracteres excedido }
+
+  /assessments/{id}/questions/order:
+    put:
+      summary: Reordenar a lista completa de questões de um rascunho
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuestionOrderInput' }
+      responses:
+        "200": { description: Avaliação com ordem atualizada }
+        "409": { description: "Avaliação publicada não pode ser alterada; crie um clone." }
+        "422": { description: Lista não contém exatamente todos os IDs atuais uma vez }
+
+  /questions/{id}:
+    patch:
+      summary: Editar conteúdo e pontuação de questão de rascunho
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuestionInput' }
+      responses:
+        "200": { description: Questão atualizada }
+        "409": { description: "Avaliação publicada não pode ser alterada; crie um clone." }
+        "422": { description: Campo inválido ou acima de 10.000 caracteres }
+    delete:
+      summary: Excluir questão e recompactar posições; pode deixar rascunho vazio
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Questão excluída }
+        "409": { description: "Avaliação publicada não pode ser alterada; crie um clone." }
 
   /questions/{id}/rubric:
     post:
@@ -501,4 +580,63 @@ components:
       properties:
         title: { type: string }
         class_group_id: { type: string, nullable: true }
-        question: { $ref: '#/components/schemas/QuestionInput' }
+        questions:
+          type: array
+          maxItems: 50
+          description: Campo canônico; uma lista vazia equivale a não fornecido.
+          items: { $ref: '#/components/schemas/QuestionInput' }
+        question:
+          deprecated: true
+          description: >-
+            Entrada legada depreciada. Não usar em integrações novas. Rejeitada
+            quando questions também tiver conteúdo; aceita quando questions for [].
+          allOf:
+            - { $ref: '#/components/schemas/QuestionInput' }
+    QuestionInput:
+      type: object
+      required: [statement, reference_answer, max_score]
+      properties:
+        statement: { type: string, maxLength: 10000 }
+        reference_answer: { type: string, maxLength: 10000 }
+        max_score: { type: number, minimum: 0, exclusiveMinimum: true }
+    QuestionOut:
+      allOf:
+        - { $ref: '#/components/schemas/QuestionInput' }
+        - type: object
+          required: [id, position, rubrics]
+          properties:
+            id: { type: string }
+            position: { type: integer, minimum: 1 }
+            rubrics: { type: array, items: { type: object } }
+    QuestionOrderInput:
+      type: object
+      required: [question_ids]
+      properties:
+        question_ids:
+          type: array
+          uniqueItems: true
+          maxItems: 50
+          items: { type: string }
+    AssessmentOut:
+      type: object
+      required: [id, title, status, owner_id, created_at, questions, assessment_max_score]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        status: { type: string, enum: [RASCUNHO, PUBLICADA] }
+        owner_id: { type: string }
+        class_group_id: { type: string, nullable: true }
+        cloned_from_id: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        questions:
+          type: array
+          description: Representação canônica completa, ordenada por position.
+          items: { $ref: '#/components/schemas/QuestionOut' }
+        question:
+          nullable: true
+          description: Igual à única questão somente quando questions tem tamanho 1; null caso contrário.
+          allOf:
+            - { $ref: '#/components/schemas/QuestionOut' }
+        assessment_max_score:
+          type: number
+          description: Soma computada de questions[].max_score; zero quando não há questões.
