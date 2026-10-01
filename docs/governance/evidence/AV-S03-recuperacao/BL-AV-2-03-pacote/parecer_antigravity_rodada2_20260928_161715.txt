@@ -1,0 +1,146 @@
+root agent idle; waiting up to 8m0s for 1 background task(s)
+Aguardando a conclusão da execução da suíte de testes pytest no Core...
+# Relatório de Revisão Cruzada Independente e Adversarial (BL-AV-2-03)
+
+**Worktree:** `/Users/rafaeloliveira/Projeto Estágio/avalia-plataform-worktrees/av-s03-work`  
+**Branch:** `local/av-s03-recuperacao`  
+**Modo:** Somente Leitura (nenhum arquivo foi alterado nesta sessão)  
+**Data/Hora:** 2026-09-28T16:05:00-03:00  
+
+---
+
+## 1. Verificação dos Achados Anteriores (Item a Item)
+
+### 1.1. Oráculo de Enumeração 404 vs 403 nos 5 Locais Originais
+**Status: REALMENTE CORRIGIDO** nos 5 locais originais.
+
+1. **`POST /v1/enrollments` ([academic.py](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L428-L432)):**
+   A consulta da turma agora aplica `_active_class_ids(db, user)` antes de testar existência. Turma inexistente e turma fora do escopo do professor colapsam em `404` com mensagem `"Recurso não encontrado."`.
+2. **`GET /v1/enrollments/{resource_id}` ([academic.py](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L450-L460)):**
+   Aplica `_enrollment_scope(query, db, user)` antes de resolver o ID. Retorna `404` idêntico para id inexistente ou matrícula fora do escopo.
+3. **`PATCH /v1/enrollments/{resource_id}` ([academic.py](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L463-L484)):**
+   Filtra diretamente por turmas onde o professor possui papel ativo `RESPONSIBLE`. Se inexistente ou não responsável, colapsa em `404`.
+4. **`POST /v1/assessments/{assessment_id}/class-group` ([academic.py](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L500-L512)):**
+   A avaliação alvo é filtrada por `Assessment.owner_id == user.id` (retorna `404` se não existir ou pertencer a outro) e a nova turma é filtrada por `_active_class_ids` (retorna `404` se não existir ou não estiver vinculada).
+5. **`GET via _register_admin_crud` ([academic.py](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L287-L297)):**
+   Em `get_item`, o filtro `scope_filter(query, db, user)` é aplicado na query antes da filtragem por `model.id == resource_id`. Inexistente e fora de escopo colapsam em `404`. O mesmo foi aplicado a `GET /organizations/{resource_id}` ([academic.py:243-253](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L243-L253)).
+
+> [!WARNING]
+> **Oráculo residual fora dos 5 locais originais:**  
+> Em `GET /v1/professor-class-links/{resource_id}` ([academic.py:378-380](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L378-L380)), o código executa `_get(...)` (retornando `404` se o ID não existe no banco) e em seguida testa `if item.professor_id != user.id: raise HTTPException(403)`. Isso permite a um professor enumerar IDs de vínculos de outros professores (`404` = ID não existe; `403` = ID existe e pertence a outro professor). Deve ser alinhado ao padrão dos demais endpoints filtrando por `professor_id == user.id` antes de retornar `404`.
+
+---
+
+### 1.2. Bypass de Vínculo em `POST /answers`, `POST /answers/{id}/corrections` e `POST /corrections/{id}/reviews`
+**Status: REALMENTE CORRIGIDO**
+
+- As três rotas de escrita agora invocam explicitamente `require_assessment_mutation(db, user, assessment)`:
+  - `POST /v1/answers` em [main.py:307](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/main.py#L307)
+  - `POST /v1/answers/{answer_id}/corrections` em [main.py:374](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/main.py#L374)
+  - `POST /v1/corrections/{job_id}/reviews` em [main.py:482](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/main.py#L482)
+- Quando o professor tem vínculo expirado com a turma associada à avaliação, as três rotas respondem `403 Forbidden` (`"Vínculo ativo com a turma é obrigatório."`).
+- A leitura histórica de dados é preservada: `GET /v1/assessments/{id}`, `GET /v1/assessments`, `GET /v1/correction-jobs/{id}` e `GET /v1/correction-jobs/{id}/context` continuam funcionando normalmente com `200 OK` para o professor proprietário mesmo após expiração do vínculo, pois não chamam `require_assessment_mutation`.
+
+---
+
+### 1.3. Reatribuição de Turma (`POST /v1/assessments/{id}/class-group`)
+**Status: REALMENTE CORRIGIDO**
+
+- Em [academic.py:506](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L506), `attach_assessment_class_group` chama `require_assessment_mutation(db, user, assessment)` logo após recuperar a avaliação e antes de inspecionar a nova turma.
+- Se a avaliação já estiver vinculada a uma turma e o vínculo do professor com essa turma atual estiver expirado, `require_assessment_mutation` aciona `require_active_class_link` sobre a turma atual e retorna `403 Forbidden`.
+- Isso impede que um professor cujo vínculo expirou na Turma A "mude" a avaliação para a Turma B para contornar o bloqueio de expiração.
+
+---
+
+### 1.4. `academic_module_enabled=false` e Lacuna de Cobertura de Testes
+**Status: COMPORTAMENTO EM CÓDIGO CONFIRMADO SEGURO; LACUNA DE TESTES CONFIRMADA (Severidade Média-Alta)**
+
+1. **Comportamento em Código:**  
+   Em `require_assessment_mutation` ([academic.py:165-172](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L165-L172)), a checagem é:
+   ```python
+   if assessment.class_group_id is not None:
+       require_active_class_link(db, user, assessment.class_group_id)
+   ```
+   A função **não consulta** `settings.academic_module_enabled`. Logo, qualquer avaliação que já possua `class_group_id` continuará exigindo vínculo ativo mesmo se a flag estiver `false`. O bypass de ausência de vínculo aplica-se estritamente às avaliações onde `class_group_id is None` (legadas).
+2. **Lacuna de Cobertura de Testes:**  
+   Confirmado por busca estática (`grep -rn "academic_module_enabled" core/app/tests` retornou vazio): **não há nenhum teste que ative `academic_module_enabled=True`**.
+   - Como o padrão de configuração é `False`, a linha [main.py:146-147](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/main.py#L146-L147) (`if settings.academic_module_enabled and payload.class_group_id is None: raise HTTPException(422)`) **nunca foi executada em testes**.
+   - A matriz de ativação (criação sem turma com flag ligada [422] vs desligada [201], e validação de legada vs vinculada com flag ligada e desligada) possui zero cobertura automatizada.
+   - **Severidade:** Média-Alta para liberação da feature flag em produção, pois nada no CI garante que a ativação da flag funciona como especificado.
+
+---
+
+## 2. Investigação do Achado Novo (Hermes — `create_enrollment` e `Student`)
+
+**Local:** [academic.py:433-434](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L433-L434)  
+**Código atual:**
+```python
+    if class_query.first() is None:
+        raise HTTPException(status_code=404, detail="Recurso não encontrado.")
+    _get(db, Student, payload.student_id)
+    require_active_class_link(db, user, payload.class_group_id, responsible=True)
+```
+
+### Análise Adversarial:
+1. **Mecânica do Oráculo:**
+   - Um professor com papel `COLLABORATOR` na turma possui um vínculo ativo (`_active_class_ids` inclui a turma). Portanto, `class_query.first()` passa com sucesso.
+   - Na linha 433, o sistema executa `_get(db, Student, payload.student_id)`. Se o `student_id` **não existir** no banco de dados, `_get` lança `HTTPException(404, "Recurso não encontrado.")`.
+   - Se o `student_id` **existir** no banco de dados, a linha 433 passa e a execução alcança a linha 434 (`require_active_class_link(..., responsible=True)`), que lança `HTTPException(403, "Vínculo ativo com a turma é obrigatório.")` porque o colaborador não é responsável.
+   - **Efeito prático:** Um colaborador consegue descobrir se qualquer ID de aluno existe ou não no sistema (`404` = aluno não existe; `403` = aluno existe, mas não posso matricular).
+2. **Avaliação frente à Sprint 5.1 Item 3:**
+   - A decisão de sprint ("identidade global de Student... professor pode operar matrícula dentro da turma autorizada") autoriza que o professor que tem permissão de matrícula opere sobre a entidade global de aluno.
+   - Ela **não autoriza** que usuários sem privilégio de matrícula (como colaboradores) realizem sondagem/enumeração da tabela global de estudantes.
+   - Na arquitetura de segurança, a checagem de autorização do sujeito sobre a ação (`require_active_class_link(..., responsible=True)`) **deve preceder** qualquer inspeção ou busca sobre os operandos da requisição (`_get(Student)`).
+3. **Classificação:** **ACHADO BLOQUEANTE RESIDUAL (Ajuste Obrigatório)**.
+   A resolução é trivial e de custo zero: inverter a ordem das linhas 433 e 434:
+   ```python
+   require_active_class_link(db, user, payload.class_group_id, responsible=True)
+   _get(db, Student, payload.student_id)
+   ```
+   Dessa forma, colaboradores são rejeitados com `403` imediatamente, sem que nenhuma query sobre o aluno seja feita.
+
+---
+
+## 3. Reexecução Independente dos Testes (Read-Only)
+
+Executado no ambiente do Core (`cd core && source .venv/bin/activate && python -m pytest ...`):
+
+1. **Suíte completa do Core (`python -m pytest app/tests -q`):**
+   - **Resultado real:** `61 passed, 12 warnings in 35.59s`
+   - **Status:** 100% de sucesso na regressão completa.
+
+2. **Arquivo específico (`python -m pytest app/tests/test_academic_authorization.py -v`):**
+   - **Resultado real:** `13 passed, 12 warnings in 4.85s`
+   - **Contagem:** 13 testes coletados e aprovados.
+
+---
+
+## 4. Avaliação da Qualidade dos Novos Testes Negativos
+
+Os 13 testes em [test_academic_authorization.py](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/tests/test_academic_authorization.py) foram auditados:
+- **São testes HTTP reais:** Utilizam `TestClient(app)` acoplado à sessão do banco de dados SQLite (`db_session`), disparando middlewares, injeção de dependências (`Depends`), autenticação JWT e rotas FastAPI completas.
+- **Cobertura efetiva:**
+  - `test_collaborator_cannot_create_enrollment`: Valida rejeição com 403 para colaborador criando matrícula (mas usou aluno existente, o que escondeu o oráculo do achado Hermes).
+  - `test_academic_routes_require_authentication`: Valida 401 em rotas sem token.
+  - `test_out_of_scope_and_missing_resources_have_identical_status`: Valida explicitamente anti-oráculo (404 tanto para missing quanto para out-of-scope em turmas e matrículas).
+  - `test_expired_professor_cannot_write_operational_class_flow`: Valida 403 para vínculo expirado nas 3 rotas operacionais (`/answers`, `/answers/{id}/corrections`, `/corrections/{id}/reviews`).
+  - `test_expired_current_class_link_blocks_assessment_reassignment`: Valida 403 ao tentar reatribuir avaliação cuja turma atual possui vínculo expirado.
+- **Limitações dos testes atuais:**
+  - Ausência de testes parametrizados para `academic_module_enabled` (True vs False).
+  - Ausência de teste para o oráculo de `GET /professor-class-links/{id}`.
+  - O teste de colaborador em matrícula não verificou o comportamento com `student_id` inexistente.
+
+---
+
+## 5. Veredito Objetivo
+
+### **AJUSTES NECESSÁRIOS**
+
+Apesar de a maioria expressiva dos achados ter sido implementada e validada com sucesso pelo Codex, restam 2 correções pontuais de segurança (oráculos de enumeração) e 1 lacuna de testes antes da homologação final:
+
+1. **[academic.py:433-434](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L433-L434) (Achado Hermes — Bloqueante):**
+   Inverter a ordem em `create_enrollment` para que `require_active_class_link(db, user, payload.class_group_id, responsible=True)` seja executado **antes** de `_get(db, Student, payload.student_id)`.
+2. **[academic.py:378-380](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L378-L380) (Oráculo Residual em `get_link` — Bloqueante):**
+   Em `GET /v1/professor-class-links/{resource_id}`, substituir a busca via `_get` seguida de `raise 403` por query filtrada pelo escopo do professor (`query.filter(ProfessorClassLink.professor_id == user.id)`), colapsando recurso inexistente e fora de escopo em `404` único, igual a todos os demais endpoints.
+3. **[test_academic_authorization.py](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/tests/test_academic_authorization.py) (Lacuna de Cobertura — Recomendação Crítica):**
+   Adicionar testes para cobrir o toggle `settings.academic_module_enabled` (validando o erro 422 quando ligado e sem turma, e a criação permitida quando desligado).

@@ -21,6 +21,10 @@ baseline_entrada: "../snapshots/latest_execution.md (main em a5974b1ffecc18f59ed
 > (fora deste repositório, diretório local durável sem Git/remote; um Git local
 > chegou a ser inicializado por erro de processo e foi removido integralmente,
 > preservando arquivos e checksums — ver seção de desvios).
+> **Localização após a consolidação de 2026-09-30:** o caminho acima é o
+> local histórico da execução. O ambiente de trabalho foi movido para
+> `experiments/av-s05b/` (ignorado pelo Git); a evidência canônica permanece em
+> `docs/governance/evidence/AV-S05B/`.
 >
 > **Escopo desta rodada: exclusivamente texto impresso.** O eixo de
 > manuscrito permanece PENDENTE — Rafael determinou que exige escrita manual
@@ -181,10 +185,10 @@ qualidade de reconhecimento antes de medir):
 | AC-02 | Benchmark (`BL-AV-4B-20`) executado sobre o conjunto de amostras da seção 10, cobrindo todos os cenários propostos (nítido/inclinado/desfocado/iluminação irregular/manuscrito/rasura/vazio-ilegível) | **obrigatório** | execução real, reproduzível | **parcialmente atendido** — os cenários de texto impresso (nítido, inclinação leve, inclinação acentuada, desfocada, iluminação irregular, acentuação, rasura) foram executados sobre 6 amostras de avaliação distintas; o cenário "vazio/ilegível" foi testado com **apenas uma amostra sintética de ruído puro** (IMP-08), usada tanto na fase de ajuste (verificação funcional) quanto na fase de avaliação — não são duas evidências independentes, é a mesma imagem reaproveitada com propósito diferente em cada fase, por desenho explícito do protocolo (seção 4). Cenário de **manuscrito não executado** (pendente de amostra real autorizada) |
 | AC-03 | Nenhuma imagem real de aluno usada no benchmark — 100% fictícias ou explicitamente autorizadas | **obrigatório** | inspeção do conjunto de amostras usado | **atendido** — confirmado por leitura de `scripts/gerar_amostras.py` (geração 100% programática via Pillow/NumPy, texto sintético, sem dado de aluno real) e revisão independente do Antigravity |
 | AC-04 | Critério eliminatório de viabilidade 100% local respeitado — nenhuma alternativa testada faz chamada de rede a serviço externo | **obrigatório** | inspeção de código/tráfego de rede durante a execução | **atendido, por inspeção de código — não por captura de tráfego de rede real**: confirmado por leitura própria de `candidato_tesseract.py` (chamada local via `subprocess.run`, sem cliente HTTP), `candidato_easyocr.py` (biblioteca local, sem chamada de rede no caminho de inferência) e `candidato_vlm_ollama.py` (único cliente HTTP do conjunto, restrito por código a `http://localhost:11434/api/generate`); a revisão independente do Antigravity chegou à mesma conclusão pelo mesmo método (leitura de código). Nenhuma das duas revisões usou captura de pacotes, monitor de interface de rede ou firewall de auditoria durante a execução — a evidência é "o código não contém nenhuma chamada de rede externa", não "nenhum tráfego de rede externo foi observado durante a execução real" |
-| AC-05 | Critério eliminatório de invenção de texto em amostras vazias/ilegíveis: taxa de invenção **zero** é condição de elegibilidade — qualquer alternativa que invente texto em amostra vazia/ilegível é desclassificada, não apenas penalizada | **obrigatório** | medição direta no eixo de robustez (seção 9, eixo 4) | **parcialmente atendido**: a única amostra deste eixo (IMP-08) é uma **imagem vazia** (ruído aleatório puro, gerado por `numpy.random`, sem nenhum traço de escrita) — os 3 candidatos produziram saída vazia (Tesseract, EasyOCR) ou marcação explícita de ilegibilidade (moondream:v2), nenhum inventou conteúdo. **O caso distinto de imagem com escrita real, porém totalmente ilegível, NÃO foi testado** (ex.: rabisco ininteligível, texto manuscrito degradado ao ponto de não ter nenhum caractere reconhecível) — esse é um estímulo visualmente diferente de ruído puro e pode induzir comportamento diferente em um VLM. O requisito original do critério (cobrir "vazias/ilegíveis", os dois subtipos) não foi reduzido para contabilizar este item como atendido: metade do subtipo exigido permanece sem evidência, por isso a classificação é **parcial**, não "atendido com ressalva". "Zero ocorrências" permanece evidência limitada a um único subtipo do eixo, não generalização — conforme já registrado no protocolo (seção 5). Fechamento da lacuna proposto (não executado) em `docs/governance/evidence/AV-S05B/proposta_coleta_manuscrito_2026-09-29.md` (amostras `MAN-EVAL-06`/vazia e `MAN-EVAL-07`/ilegível) |
-| AC-06 | Relatório de benchmark reproduzível — comando, data, ambiente e resultado registrados para cada alternativa e cada eixo | **obrigatório** | inspeção documental do relatório | **atendido** — `saida/relatorio_final.json` e `saida/resultados_brutos.json` registram comando (`scripts/rodar_benchmark.py`), timestamp (`2026-09-29T10:51:08-0300`) e ambiente (seção 11 do protocolo); reproduzido de forma independente pelo Codex em sandbox própria |
+| AC-05 | Critério eliminatório de invenção de texto em amostras vazias/ilegíveis: taxa de invenção **zero** é condição de elegibilidade — qualquer alternativa que invente texto em amostra vazia/ilegível é desclassificada, não apenas penalizada | **obrigatório** | medição direta no eixo de robustez (seção 9, eixo 4) | **parcialmente atendido**: a única amostra deste eixo (IMP-08) é uma **imagem vazia** (ruído aleatório puro, gerado por `numpy.random`, sem nenhum traço de escrita) — os 3 candidatos produziram saída vazia (Tesseract, EasyOCR) ou marcação explícita de ilegibilidade (moondream:v2), nenhum inventou conteúdo. **O caso distinto de imagem com escrita real, porém totalmente ilegível, NÃO foi testado** (ex.: rabisco ininteligível, texto manuscrito degradado ao ponto de não ter nenhum caractere reconhecível) — esse é um estímulo visualmente diferente de ruído puro e pode induzir comportamento diferente em um VLM. O requisito original do critério (cobrir "vazias/ilegíveis", os dois subtipos) não foi reduzido para contabilizar este item como atendido: metade do subtipo exigido permanece sem evidência, por isso a classificação é **parcial**, não "atendido com ressalva". "Zero ocorrências" permanece evidência limitada a um único subtipo do eixo, não generalização — conforme já registrado no protocolo (seção 5). Fechamento da lacuna proposto (não executado) em `docs/governance/evidence/AV-S05B/protocolo/proposta_coleta_manuscrito_2026-09-29.md` (amostras `MAN-EVAL-06`/vazia e `MAN-EVAL-07`/ilegível) |
+| AC-06 | Relatório de benchmark reproduzível — comando, data, ambiente e resultado registrados para cada alternativa e cada eixo | **obrigatório** | inspeção documental do relatório | **atendido** — `docs/governance/evidence/AV-S05B/saida/relatorio_final.json` e `docs/governance/evidence/AV-S05B/saida/resultados_brutos.json` registram comando (`scripts/rodar_benchmark.py`), timestamp (`2026-09-29T10:51:08-0300`) e ambiente (seção 11 do protocolo); reproduzido de forma independente pelo Codex em sandbox própria |
 | AC-07 | Critérios de `DEC-AV-017` não ajustados retroativamente após ver resultados parciais | **obrigatório** | comparação entre a decisão registrada antes da execução e os critérios efetivamente aplicados | **atendido** — os 2 critérios eliminatórios (100% local; zero invenção) permaneceram idênticos do protocolo congelado ao relatório final; as 2 correções feitas durante a execução foram de **bugs de script de avaliação** (detecção de marcador, tratamento de falha técnica), não de relaxamento de critério — confirmado por dupla revisão independente (Codex, Antigravity) |
-| AC-08 | Revisão independente do benchmark registrada (Antigravity CLI), com veredito objetivo | **obrigatório** | inspeção do parecer | **atendido** — rodada 1: APROVADO COM RESSALVAS (achado real, corrigido); rodada 2 (revalidação): APROVADO SEM RESSALVAS. Pareceres em `saida/revisao_antigravity_rodada1.txt` e `revisao_antigravity_revalidacao.txt` |
+| AC-08 | Revisão independente do benchmark registrada (Antigravity CLI), com veredito objetivo | **obrigatório** | inspeção do parecer | **atendido** — rodada 1: APROVADO COM RESSALVAS (achado real, corrigido); rodada 2 (revalidação): APROVADO SEM RESSALVAS. Pareceres em `docs/governance/evidence/AV-S05B/saida/revisao_antigravity_rodada1.txt` e `docs/governance/evidence/AV-S05B/saida/revisao_antigravity_revalidacao.txt` |
 | AC-09 | ADR de decisão arquitetural (`BL-AV-4B-02`) redigido, fundamentado exclusivamente no benchmark medido, sem alegação de qualidade não medida | **obrigatório** | inspeção documental do ADR contra o relatório de benchmark | **atendido, em rascunho** — `docs/adr/ADR-009-ocr-visao-local-rascunho.md` redigido, status explícito de RASCUNHO não homologado, sem eleger solução de produto; consistente com os números do relatório final |
 | AC-10 | Revisão cruzada do ADR registrada, com veredito objetivo | **obrigatório** | inspeção do parecer | **atendido (2026-09-29)** — revisão independente específica do texto do ADR-009 executada pelo Antigravity CLI (Gemini 3.1 Pro, modo leitura, sem edição/Git/benchmark), distinta da revisão anterior de protocolo/scripts/resultados (AC-08). Veredito inicial: **APROVADO COM RESSALVAS** (omitia as 3 limitações metodológicas — vazio vs. ilegível, sobreposição IMP-08, inspeção de código vs. tráfego real). As 2 correções sugeridas foram aplicadas literalmente ao texto do ADR (seção "Escopo e Limitações" ampliada; tabela de resultado anotada "(ver limitações)"), sem alterar nenhum resultado numérico ou veredito de elegibilidade. Conferência limitada subsequente (mesma sessão, mesmo revisor, não é nova revisão completa) confirmou as correções contra a versão final do ADR (SHA-256 `8fda4a6e...`): **CORREÇÕES APLICADAS CORRETAMENTE**. Parecer completo em `docs/governance/evidence/AV-S05B/saida/revisao_antigravity_adr009.txt` |
 | AC-11 | Nota de dependência de `BL-AV-4B-17` (isolamento de recursos) registrada no ADR ou no backlog, sem decidir a arbitragem nesta sprint | **obrigatório** | inspeção documental | **atendido** — nota registrada no ADR-009 (seção "O que este ADR NÃO decide") e no backlog (`BL-AV-4B-17`, com o dado bruto de coexistência de memória, sem decidir a arbitragem) |
@@ -315,6 +319,11 @@ Executado em 2026-09-29, fora deste repositório, em
 (diretório dedicado, local durável e sem Git/remote após correção de um erro de
 processo, preservado como evidência por inventário e checksums).
 
+Esse caminho registra o local **na data da execução**. Desde 2026-09-30, o
+ambiente de trabalho local está em `experiments/av-s05b/`; scripts usam caminhos
+relativos e não exigiram alteração. Não houve reinstalação nem reexecução do
+benchmark durante a movimentação.
+
 ### Protocolo congelado
 
 Protocolo completo (escopo, candidatos, amostras, split dev/eval, critérios
@@ -379,9 +388,9 @@ Nenhum parâmetro foi ajustado a partir do resultado da fase eval.
    continua estrito). Rodada 2 — **APROVADO SEM RESSALVAS**: confirmou que o
    achado foi corrigido, o critério eliminatório permaneceu estrito e o
    relatório agora distingue claramente elegibilidade técnica de utilidade
-   prática. Pareceres preservados em
-   `av-s05b-benchmark-experimento/saida/revisao_antigravity_rodada1.txt` e
-   `revisao_antigravity_revalidacao.txt`.
+   prática. Pareceres preservados canonicamente em
+   `docs/governance/evidence/AV-S05B/saida/revisao_antigravity_rodada1.txt` e
+   `docs/governance/evidence/AV-S05B/saida/revisao_antigravity_revalidacao.txt`.
 
 ### Resultado (texto impresso, `saida/relatorio_final.json`)
 
@@ -451,15 +460,17 @@ alterações, o que exigiria participação de Rafael. Atividade preparada em
 
 ### Preservação de evidência
 
-Todo o experimento preservado em local durável (fora de `/tmp`), com
+Todo o experimento foi preservado em local durável (fora de `/tmp`), com
 inventário e checksums SHA-256 de todos os arquivos (exceto `venv/`, que é
 reconstruível a partir de `requirements` implícitos e não é evidência em
-si) em `av-s05b-benchmark-experimento/INVENTARIO_CHECKSUMS.sha256`. Não há
-Git nem remote no diretório do experimento: um Git local chegou a ser
-inicializado por interpretação errada da autorização, mas o diretório `.git`
-foi removido integralmente assim que a violação foi identificada. Integridade
-e histórico factual são preservados pelos arquivos datados e checksums, não
-por commits.
+si) em `docs/governance/evidence/AV-S05B/INVENTARIO_CHECKSUMS.sha256`. Na data
+da execução não havia Git nem remote no diretório independente do experimento:
+um Git local chegou a ser inicializado por interpretação errada da autorização,
+mas o diretório `.git` foi removido integralmente assim que a violação foi
+identificada. Em 2026-09-30, o ambiente foi movido para `experiments/av-s05b/`,
+dentro do checkout porém ignorado pelo Git. Integridade e histórico factual são
+preservados pelos arquivos canônicos datados e checksums, não por commits do
+ambiente local.
 
 ### Não incluído nesta rodada — registrado como pendente, não como decisão
 

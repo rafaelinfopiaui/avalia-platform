@@ -1,0 +1,111 @@
+root agent idle; waiting up to 8m0s for 1 background task(s)
+I have launched the full test suite run (run 1). I will wait for the execution to finish.
+I have launched the full test suite run (run 2) to verify test determinism and isolation. I will wait for it to finish.
+# Parecer de Revisão Cruzada Independente e Adversarial (3ª Rodada) — BL-AV-2-03
+
+**Data/Fuso**: 2026-09-28 16:17 (UTC-3)  
+**Agente Revisor**: Antigravity CLI (Modo estritamente Leitura / Somente Leitura)  
+**Worktree**: `/Users/rafaeloliveira/Projeto Estágio/avalia-plataform-worktrees/av-s03-work`  
+**Branch local**: `local/av-s03-recuperacao` (referência `origin/main` @ `66c9520`)  
+**Arquivos sob auditoria**:
+- [`core/app/routers/academic.py`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py)
+- [`core/app/main.py`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/main.py)
+- [`core/app/tests/test_academic_authorization.py`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/tests/test_academic_authorization.py)
+
+---
+
+## 1. Verificação Factual dos 3 Achados da 2ª Rodada
+
+### ACHADO A — `create_enrollment` / Oráculo de Existência de `Student`
+- **Diagnóstico da Implementação**: Em [`core/app/routers/academic.py#L428-L438`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L428-L438), a verificação de autorização de vínculo ativo com papel responsável (`require_active_class_link(db, user, payload.class_group_id, responsible=True)`) na linha 436 é executada **estritamente antes** de qualquer consulta ao aluno (`_get(db, Student, payload.student_id)` na linha 437).
+- **Diagnóstico do Teste**: Em [`core/app/tests/test_academic_authorization.py#L129-L148`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/tests/test_academic_authorization.py#L129-L148) (`test_collaborator_cannot_create_enrollment`), um professor com papel `COLLABORATOR` faz duas requisições `POST /v1/enrollments`:
+  1. Com `student_id = student.id` (aluno real existente);
+  2. Com `student_id = "missing-student"` (aluno inexistente).
+  O teste valida:
+  ```python
+  assert existing_student.status_code == missing_student.status_code == 403
+  assert existing_student.json() == missing_student.json()
+  ```
+  Confirmado: ambos retornam `403` com corpo idêntico (`{"detail": "Vínculo ativo com a turma é obrigatório."}`). O oráculo está totalmente eliminado.
+
+### ACHADO B — `GET /v1/professor-class-links/{resource_id}` / Oráculo Residual
+- **Diagnóstico da Implementação**: Em [`core/app/routers/academic.py#L377-L385`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L377-L385) (`get_link`):
+  ```python
+  query = db.query(ProfessorClassLink).filter(ProfessorClassLink.id == resource_id)
+  if user.role == Role.PROFESSOR:
+      query = query.filter(ProfessorClassLink.professor_id == user.id)
+  item = query.first()
+  if item is None:
+      raise HTTPException(status_code=404, detail="Recurso não encontrado.")
+  return item
+  ```
+  A cláusula `ProfessorClassLink.professor_id == user.id` é adicionada na própria query SQL antes da resolução. Recursos inexistentes ou pertencentes a outro professor colapsam no mesmo `404` (`"Recurso não encontrado."`).
+- **Diagnóstico do Teste**: Em [`core/app/tests/test_academic_authorization.py#L150-L174`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/tests/test_academic_authorization.py#L150-L174) (`test_professor_link_scope_hides_other_professor_link_and_admin_keeps_global_access`):
+  - Consulta de link de outro professor (`out_of_scope`): retorna `404`;
+  - Consulta de link inexistente (`missing`): retorna `404`;
+  - `assert out_of_scope.json() == missing.json()`: corpos idênticos;
+  - Consulta pelo professor titular (`own`): retorna `200`;
+  - Consulta pelo administrador (`admin`): retorna `200`.
+
+### ACHADO C — Cobertura de `academic_module_enabled`
+- **Diagnóstico da Implementação**:
+  - Em [`core/app/main.py#L146-L150`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/main.py#L146-L150), novas avaliações exigem turma apenas quando `settings.academic_module_enabled` está ativo (lançando `422`). Se desativada a flag, permite criação legada sem turma (`201`).
+  - Em mutações ([`core/app/routers/academic.py#L165-L172`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L165-L172), `require_assessment_mutation`), se a avaliação já possui turma vinculada (`assessment.class_group_id is not None`), `require_active_class_link` é chamado incondicionalmente, garantindo que a flag **não enfraqueça** a segurança de avaliações já vinculadas.
+- **Diagnóstico dos Testes Parametrizados**: Em [`core/app/tests/test_academic_authorization.py`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/tests/test_academic_authorization.py):
+  1. [`test_academic_module_flag_controls_creation_of_legacy_assessment_without_class`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/tests/test_academic_authorization.py#L176-L192): parametrizado `[(False, 201), (True, 422)]`;
+  2. [`test_linked_assessment_creation_is_allowed_with_flag_on_or_off`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/tests/test_academic_authorization.py#L194-L211): parametrizado `[False, True]`, ambos retornando `201`;
+  3. [`test_linked_assessment_mutation_requires_active_link_regardless_of_flag`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/tests/test_academic_authorization.py#L213-L235): parametrizado `[False, True]`, ambos barrando com `403` quando o professor não possui vínculo ativo.
+- **Isolamento e Determinismo**: Todos usam a fixture nativa `monkeypatch`, restaurando `main_module.settings` ao fim de cada teste. O isolamento foi comprovado rodando a suíte completa duas vezes consecutivas (ver seção de evidências).
+
+---
+
+## 2. Re-verificação de Regressão das Rodadas 1 e 2
+
+| Mecanismo Auditado | Localização no Código | Situação Atual | Regressão? |
+|---|---|---|:---:|
+| **Oráculo de enumeração nos 5 locais originais** | [`core/app/routers/academic.py#L248-L253`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L248-L253) (Org), [`L290-L296`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L290-L296) (Courses, Disciplines, CourseDisciplines, ClassGroups, Students), [`L378-L384`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L378-L384) (Links), [`L458-L463`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L458-L463) (Enrollments GET), [`L474-L486`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L474-L486) (Enrollments PATCH) | O escopo do usuário é aplicado antes da consulta. Recursos fora do escopo ou inexistentes colapsam uniformemente em `404` | **NÃO** |
+| **Bypass de vínculo em answers/corrections/reviews** | [`core/app/main.py#L307`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/main.py#L307) (`create_answer`), [`L374`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/main.py#L374) (`request_correction`), [`L482`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/main.py#L482) (`review_correction`) | Todos chamam obrigatoriamente `require_assessment_mutation(db, user, assessment)` | **NÃO** |
+| **Reatribuição de turma em avaliação** | [`core/app/routers/academic.py#L509`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L509) (`attach_assessment_class_group`) | Exige autorização de mutação sobre a turma atual antes de validar e atribuir a nova turma | **NÃO** |
+| **Acesso global de Administrador** | [`core/app/routers/academic.py#L148-L149`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L148-L149), [`L166-L167`](file:///Users/rafaeloliveira/Projeto%20Est%C3%A1gio/avalia-plataform-worktrees/av-s03-work/core/app/routers/academic.py#L166-L167), filtros de escopo | Bypass global para `Role.ADMIN` preservado em leitura, mutação e orquestração | **NÃO** |
+
+---
+
+## 3. Evidências de Execução Automatizada
+
+Comandos executados no ambiente do Core (`core/.venv`):
+
+1. **Linter e Formatação**:
+   ```bash
+   cd core && source .venv/bin/activate && ruff check app/
+   ```
+   **Resultado**: `All checks passed!` (0 erros).
+
+2. **Testes Focais de Autorização Acadêmica**:
+   ```bash
+   python -m pytest app/tests/test_academic_authorization.py -v
+   ```
+   **Resultado**: `collected 20 items` -> **20 passed**, 12 warnings em 8.27s.
+
+3. **Suíte Completa do Core — Execução 1**:
+   ```bash
+   python -m pytest app/tests -q
+   ```
+   **Resultado**: `.................................................................... [100%]` -> **68 passed**, 12 warnings em 36.92s.
+
+4. **Suíte Completa do Core — Execução 2 (Teste de Determinismo e Isolamento)**:
+   ```bash
+   python -m pytest app/tests -q
+   ```
+   **Resultado**: `.................................................................... [100%]` -> **68 passed**, 12 warnings em 36.80s.
+
+---
+
+## 4. Veredito Final para BL-AV-2-03
+
+# **APROVADO SEM RESSALVAS**
+
+### Justificativa:
+1. Todos os 3 achados apontados na 2ª rodada (Achado A: oráculo em `create_enrollment`; Achado B: oráculo residual em `GET /v1/professor-class-links/{id}`; Achado C: testes parametrizados com isolamento de `academic_module_enabled`) foram implementados com rigor técnico, fechando todas as superfícies de enumeração e fuga de contexto entre turmas/professores.
+2. Todas as correções das rodadas 1 e 2 permaneceram intactas, sem qualquer regressão funcional ou de segurança.
+3. A suíte focal atinge 20 testes dedicados de integração HTTP via `TestClient`, e a suíte completa do Core (68 testes) permanece 100% verde e determinística.
+4. Nenhuma alteração foi realizada nos arquivos durante esta revisão (modo estritamente somente leitura mantido). O código de BL-AV-2-03 encontra-se pronto para as etapas formais subsequentes da governança.

@@ -46,3 +46,7 @@ models/
 htmlcov/
 .coverage
 coverage.xml
+
+# Áreas locais não versionadas (consolidação 2026-09-30)
+/experiments/
+/local-nao-versionado/

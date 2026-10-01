@@ -9,6 +9,12 @@ consolidador: "Hermes"
 
 # EXEC-2026-09-29-04 — AV-S05B: benchmark experimental de OCR/visão local (texto impresso)
 
+> **Nota de localização (2026-09-30):** caminhos para
+> `av-s05b-benchmark-experimento` abaixo preservam o local histórico da
+> execução. O ambiente local foi movido para `experiments/av-s05b/`; a evidência
+> canônica continua em `docs/governance/evidence/AV-S05B/`. Nenhum benchmark foi
+> repetido nessa movimentação.
+
 ## 1. Objetivo e autorização
 
 Executar a `AV-S05B` como investigação experimental, sob `DEC-AV-017`
@@ -227,7 +233,7 @@ Em resposta a instruções adicionais de precisão metodológica, esta rodada:
    protocolo de medição de revisão humana) e proposta de 2 amostras novas
    e separadas para o eixo vazio/ilegível (`MAN-VAZIA`, `MAN-ILEGIVEL`),
    documentadas em
-   `docs/governance/evidence/AV-S05B/proposta_coleta_manuscrito_2026-09-29.md`.
+   `docs/governance/evidence/AV-S05B/protocolo/proposta_coleta_manuscrito_2026-09-29.md`.
    Nenhuma coleta, foto ou execução foi realizada nesta rodada; a
    ausência de amostras manuscritas não é tratada como reprovação de
    nenhum candidato.
@@ -270,7 +276,7 @@ revisão geral nem repetir benchmark:
    partir da foto (a única transcrição de referência válida) — para não
    presumir que um candidato deveria reconstruir conteúdo indisponível na
    imagem. Documento atualizado:
-   `docs/governance/evidence/AV-S05B/proposta_coleta_manuscrito_2026-09-29.md`.
+   `docs/governance/evidence/AV-S05B/protocolo/proposta_coleta_manuscrito_2026-09-29.md`.
 5. Nenhuma ação Git/remota, alteração em `avalia_dev`, código de
    produção, reinstalação de modelo ou repetição de benchmark foi
    realizada nesta rodada. A próxima dependência real do projeto é a
@@ -282,7 +288,7 @@ revisão geral nem repetir benchmark:
 Rafael autorizou a coleta das 9 amostras manuscritas propostas
 (`MAN-01` a `MAN-07`, `MAN-EVAL-06`, `MAN-EVAL-07`) e definiu, ANTES de
 qualquer fotografia, os seguintes pontos — agora congelados em
-`docs/governance/evidence/AV-S05B/proposta_coleta_manuscrito_2026-09-29.md`
+`docs/governance/evidence/AV-S05B/protocolo/proposta_coleta_manuscrito_2026-09-29.md`
 (seção 0):
 
 1. Split fixado: `MAN-01` = dev (verificação funcional); `MAN-02` a
