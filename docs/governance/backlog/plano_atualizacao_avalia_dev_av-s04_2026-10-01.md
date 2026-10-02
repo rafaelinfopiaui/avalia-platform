@@ -314,9 +314,11 @@ confiável se nada escrever no banco entre o backup e o fim da operação.
    FROM pg_stat_user_tables
    WHERE relname IN ('human_reviews','audit_events','questions','assessments','users');
    -- capturar um snapshot ANTES de iniciar a barreira (baseline) e comparar
-   -- a cada checagem, em intervalo curto (segundos, não minutos); qualquer
-   -- contador que mude durante a janela é escrita não autorizada e aborta
-   -- imediatamente a operação (ver seção 3.8, Estado 0).
+   -- a cada checagem, em intervalo curto. Contadores são agregados e podem
+   -- ter atraso: não identificam autor nem provam ausência de escrita.
+   -- Saneamento e migrações autorizados também alteram estes contadores.
+   -- Conciliar variações com as etapas e sessões autorizadas; variação
+   -- inesperada exige pausa e investigação (seção 3.8, Estado 0).
    ```
 
 6. Manter a barreira (processos parados e confirmadamente sem conexão +
@@ -544,7 +546,7 @@ atendida, ou se houver dúvida sobre a origem de algum dado presente,
 
 | Estado | Como diagnosticar | Ação testada | Precondição antes de downgrade | Quando usar restauração do backup em vez de script |
 |---|---|---|---|---|
-| **0. Escrita detectada durante a janela (barreira da seção 3.2 falhou)** | Monitoramento da seção 3.2, passo 5, acusa mudança em `n_tup_ins`/`n_tup_upd`/`n_tup_del` nas tabelas protegidas | Parar imediatamente toda e qualquer operação desta seção 3 em andamento; não prosseguir para backup/saneamento/migração até identificar a origem da escrita e confirmar que a barreira está efetivamente ativa (reconfirmar que os processos de aplicação estão parados e sem conexão — passos 2-3; se `REVOKE` foi usado, reconfirmar e reemitir conforme passo 4) | N/A — este estado é sempre tratado como incidente, nunca como recuperação automática | Sempre registrar como incidente; decisão de Rafael sobre se a escrita detectada invalida o backup já capturado |
+| **0. Escrita detectada durante a janela (barreira da seção 3.2 falhou)** | Atividade de escrita não autorizada confirmada, ou variação nos contadores sem explicação pelas operações autorizadas; contadores agregados isoladamente não identificam a origem | Parar imediatamente toda e qualquer operação desta seção 3 em andamento; não prosseguir para backup/saneamento/migração até identificar a origem da escrita e confirmar que a barreira está efetivamente ativa (reconfirmar que os processos de aplicação estão parados e sem conexão — passos 2-3; se `REVOKE` foi usado, reconfirmar e reemitir conforme passo 4) | N/A — este estado é sempre tratado como incidente, nunca como recuperação automática | Sempre registrar como incidente; decisão de Rafael sobre se a escrita detectada invalida o backup já capturado |
 | **1. Antes do saneamento (estado original)** | `SELECT version_num FROM alembic_version` = `e1b02279b1a5` **e** `human_reviews_superseded` não existe (ou existe vazia para o job) **e** `SELECT COUNT(*) FROM human_reviews WHERE job_id=...` = 3 | Estado seguro para iniciar ou reiniciar do zero. Nenhuma ação de recuperação necessária | — | Não aplicável (nada foi alterado ainda) |
 | **2. Falha durante o saneamento, antes do `COMMIT` da transação de saneamento** | A sessão psql que rodou `av_s02_saneamento_human_reviews.sql` terminou com erro e a conexão caiu antes de qualquer `COMMIT` visível no log | `ROLLBACK` automático do próprio PostgreSQL (nenhuma ação manual: `INSERT` em `human_reviews_superseded` e `DELETE` em `human_reviews` estavam na mesma transação, nunca commitada). Diagnosticar de novo com o Estado 1 para confirmar o retorno ao original | — | Não deveria ser necessária; se a reconfirmação do Estado 1 falhar de forma inesperada, tratar como incidente antes de prosseguir |
 | **3. Saneamento commitado, mas nenhuma migração aplicada ainda (`version_num = e1b02279b1a5`)** | `version_num` ainda `e1b02279b1a5` **e** `human_reviews_superseded` contém as 2 linhas nominais **e** `human_reviews` tem 1 linha ativa para o job | Rollback compensatório testado: `av_s02_recuperacao_saneamento.sql` (ensaiado `RECOVERY_AFTER_SANITATION_BEFORE_CONSTRAINT_GREEN`, idempotente em reexecução). Reinsere as 2 linhas a partir do arquivo, com prova de conteúdo campo a campo antes de remover do arquivo | Nenhuma migração aplicada ainda — não há downgrade envolvido neste estado | Alternativa se o script de recuperação falhar ou o estado não bater exatamente com a máquina de estados do script (ele aborta fail-closed em vez de "consertar"): restaurar o backup final em banco isolado, inspecionar manualmente, só então decidir |
@@ -934,3 +936,7 @@ P4 e P5 permanecem explicitamente **não autorizados** nesta rodada. Nenhum
 merge, escrita em `avalia_dev`, saneamento, migração, ativação, deploy ou
 promoção de baseline foi feito.
 
+
+## 9. Conferência limitada pré-integração em 2026-10-02
+
+Codex conferiu independentemente as ressalvas dos dois pareceres documentais contra o HEAD `6c20bb83ee1c9bee136dc1b74ff6c5bfe29a9dec`: sequência completa no restore final, alternativa de recuperação do índice, referências, REVOKE opcional, nota histórica, LEFT JOIN LATERAL e exemplo de restauração presentes. Nenhum ensaio foi repetido. Corrigida a interpretação dos contadores: operações autorizadas também os alteram; são sinais auxiliares, não prova de autoria ou ausência de escrita. P4/P5 seguem não autorizados. Qualquer uso futuro da camada opcional de ACL requer preservar também grantor, grant options e privilégios efetivos; o exemplo resumido não é um restaurador universal.
