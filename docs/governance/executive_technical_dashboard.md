@@ -10,7 +10,7 @@ O AvalIA possui uma demonstração experimental herdada, organizada em Core API,
 
 | Referência | Estado | Link |
 |---|---|---|
-| Última execução registrada | EXEC-2026-10-01-02, encerramento da execução local de `AV-S04` (revisão independente final **APROVADO**) | [ponteiro](snapshots/latest_execution.md) |
+| Última execução registrada | EXEC-2026-10-02-01, execução real de P4 contra `avalia_dev` (local): saneamento + 3 migrações aplicadas, todos os pós-checks confirmados, reconciliação de contagens concluída | [ponteiro](snapshots/latest_execution.md) |
 | PR #2 (`docs/av-s02-encerramento-planos-operacionais`) | **fechado sem merge**; conteúdo necessário preservado em `main` via PR #4 | [snapshot de reconciliação](snapshots/snapshot_RECONCILIACAO-2026-09-29-02_desvio-processo-2026-09-24.md) |
 | PR #4 (`docs/av-s03-encerramento-integracao`) | **integrado em `main`** via merge commit `a5974b1`, CI pós-merge verde | https://github.com/rafaelinfopiaui/avalia-platform/pull/4 |
 | Último baseline validado sob esta governança | nenhum promovido (explicitamente não promovido por esta homologação) | [ponteiro](snapshots/latest_validated_baseline.md) |
@@ -20,7 +20,7 @@ O AvalIA possui uma demonstração experimental herdada, organizada em Core API,
 | Sprint funcional encerrada | `AV-S03` — **homologada por Rafael em 2026-09-29** (`DEC-AV-027`), integrada a `main` via merge commit `c391865` (PR #3); `DEBT-AV-012` aceito como débito residual | [documento da sprint](sprints/sprint_AV-S03_estrutura_academica.md) |
 | Auditoria de governança encerrada | `GOV-006` — reconciliação do numerador (14/70) e publicação em pilha de Pacote B (AV-S05B, PR #5) e Pacote A (GOV-006, PR #6); ambos os PRs **integrados a `main`** em 2026-09-30 (merge commits `baa7ccb` e `ba6f407`), CI pós-merge verde em ambos | [documento GOV-006](sprints/sprint_GOV-006_auditoria_governanca.md) |
 | Execução local autorizada, sprint em andamento | `AV-S04` — múltiplas questões por avaliação; planejamento canônico publicado em 2026-09-30 (PR #7); execução LOCAL autorizada em 2026-10-01 (`DEC-AV-028`) em branch dedicada `feat/av-s04-multiplas-questoes`; implementação concluída e revisada LOCALMENTE em 2026-10-01 (revisão independente final **APROVADO**, 3ª rodada, após 2 rodadas de REPROVADO com correções objetivas); sem commit/push/merge — integração ao histórico Git pendente de autorização explícita separada | [documento da sprint](sprints/sprint_AV-S04_multiplas_questoes.md) |
-| Preparação operacional (planejamento + ensaio isolado), pronta para decisão | `AV-OPER-001` — atualização de `avalia_dev` (saneamento de duplicatas + 3 migrações pendentes + demonstração acadêmica); branch dedicada `chore/preparacao-avalia-dev-av-s04`; ensaio completo em PostgreSQL 16 isolado `ALL_DRY_RUN_SCENARIOS_GREEN` em 2026-10-01; revisão independente em 3 rodadas (REPROVADO → REPROVADO → **APROVADO** final, sem ressalvas); nenhuma escrita em `avalia_dev`. **P4 (execução real) e P5 (ativação de flags) permanecem pendentes da decisão de Rafael** | [plano consolidado](backlog/plano_atualizacao_avalia_dev_av-s04_2026-10-01.md) §7 |
+| Preparação operacional integrada, P4 executado e DEBT-AV-011 resolvido | `AV-OPER-001` — atualização de `avalia_dev`: saneamento de duplicatas + 3 migrações pendentes integrados a `main` via PR #10 (merge commit `9310b54`, CI pós-merge verde); **P4 (execução real) executado em 2026-10-02 contra a instância LOCAL de `avalia_dev`** — saneamento aplicado, 3 migrações aplicadas (`version_num=a9f4c2e71b06`), todos os pós-checks (a)-(g) confirmados, nenhuma falha; reconciliação de contagens e conservação de dados confirmadas; `DEBT-AV-011`/`BL-AV-1-10` **resolvidos** (numerador 14→15); **P5 (ativação de flags) permanece NÃO autorizado/NÃO executado** | [snapshot de execução real](snapshots/snapshot_EXEC-2026-10-02-01_execucao-real-p4-avalia-dev.md) |
 | Execução documental ativa | GOV-005 | [snapshot](snapshots/snapshot_EXEC-2026-09-23-02_GOV-005.md) |
 | Trilha proposta (não aprovada, exceto AV-S01) | "Operação de uma turma" (5 fases, com Etapa 4B — entrada por imagem priorizada sobre CSV) | [documento da trilha](backlog/trilha_operacao_de_turma.md) §11 |
 
@@ -50,7 +50,7 @@ O AvalIA possui uma demonstração experimental herdada, organizada em Core API,
 
 **Trilha proposta "Operação de uma turma":** 8 etapas + 1 sub-etapa (4B), 3 marcos, lidos em 5 fases de execução desde GOV-004 (§11 da trilha), 19 sprints propostas (AV-S01 a AV-S13 e AV-S05B a AV-S10B). `AV-S01`, `AV-S02` e `AV-S03` foram homologadas e integradas a `main`; `AV-S05B` parcialmente executada (investigação experimental, texto impresso medido, manuscrito pendente); `AV-S04` e `AV-S05` permanecem apenas planejadas, sem nenhuma evidência de execução localizada nas fontes inspecionadas (ver GOV-006); as demais 15 sprints permanecem não autorizadas.
 
-Progresso funcional desta trilha: **14 de 70 itens homologados e integrados** — o denominador é o backlog canônico em [`backlog/backlog_tecnico_avalia.md`](backlog/backlog_tecnico_avalia.md). Numerador nominal (cada item conta uma vez, homologação + integração comprovadas, sem inferir uma da outra):
+Progresso funcional desta trilha: **15 de 70 itens homologados e integrados** — o denominador é o backlog canônico em [`backlog/backlog_tecnico_avalia.md`](backlog/backlog_tecnico_avalia.md). Numerador nominal (cada item conta uma vez, homologação + integração comprovadas, sem inferir uma da outra):
 
 | # | ID | Homologação | Integração | Observação |
 |---|---|---|---|---|
@@ -64,24 +64,26 @@ Progresso funcional desta trilha: **14 de 70 itens homologados e integrados** �
 | 8 | `BL-AV-1-06` | `DEC-AV-022` (2026-09-24) | PR #1 (`main`) | `DEBT-AV-005` resolvido sem ressalva; CI remota 3/3 verde |
 | 9 | `BL-AV-1-09` | `DEC-AV-022` (2026-09-24) | PR #1 (`main`) | `DEBT-AV-009` resolvido |
 | 10 | `BL-AV-2-01` | `DEC-AV-027` (2026-09-29, entrega funcional completa da AV-S03) | PR #3 (`main`, merge `c391865`) | — |
-| 11 | `BL-AV-2-02` | `DEC-AV-027` (2026-09-29) | PR #3 (`main`) | migração `c4a8b2d91e37`, guard de downgrade testado |
+| 11 | `BL-AV-2-02` | `DEC-AV-027` (2026-09-29) | PR #3 (`main`) | migração `c4a8b2d91e37`, guard de downgrade testado; **aplicação operacional real a `avalia_dev` confirmada em 2026-10-02 (P4)**, ver linha 15 |
 | 12 | `BL-AV-2-03` | `DEC-AV-026` (2026-09-28, técnica) + `DEC-AV-027` (2026-09-29, integração) | PR #3 (`main`) | 3 rodadas de revisão adversarial, APROVADO SEM RESSALVAS |
 | 13 | `BL-AV-2-04` | `DEC-AV-027` (2026-09-29) | PR #3 (`main`) | `DEBT-AV-012` (dupla configuração de flag) aceito como débito residual — não bloqueia a homologação já concedida |
 | 14 | `BL-AV-2-05` | `DEC-AV-027` (2026-09-29, marco da sprint) | PR #3 (`main`) | 12/12 critérios de aceite da AV-S03 executados e confirmados |
+| 15 | `BL-AV-1-10` | Código: `DEC-AV-022` (2026-09-24). Migração operacional: Rafael (2026-10-02, autorização P4 explícita, execução exclusiva no banco local `avalia_dev`) | PR #1 (`main`, código); migração `7b1d6d853f20` aplicada operacionalmente em 2026-10-02 | **Movido do indicador de itens parciais para o numerador nesta rodada** — `DEBT-AV-011` resolvido: `UniqueConstraint uq_human_reviews_job_id` confirmada presente em `avalia_dev` por `pg_get_constraintdef` nesta sessão. Reconciliação de contagens e conservação de dados em `evidence/AV-OPER-001-avalia-dev-preparacao/P4-execucao-real-2026-10-02/06_reconciliacao_contagens.md`. Execução restrita à instância **local** de `avalia_dev` (não produção remota) |
 
-**Explicitamente excluído do numerador — `BL-AV-1-10`:** o código foi homologado e integrado a `main` (PR #1), mas seu débito vinculado `DEBT-AV-011` (migração operacional de `UniqueConstraint` em `avalia_dev`) permanece **aberto** — integração de código não comprova encerramento operacional. Este item aparece no indicador de itens parciais abaixo, não no numerador de concluídos.
+**Itens com migração de código integrada a `main` mas sem aplicação operacional confirmada nesta rodada — explicitamente NÃO incluídos no numerador:** `BL-AV-3-01` a `BL-AV-3-04` (AV-S04, migração `a9f4c2e71b06`). Embora a migração `a9f4c2e71b06` tenha sido **tecnicamente aplicada** a `avalia_dev` como parte da cadeia de P4 em 2026-10-02 (pré-requisito técnico para `c4a8b2d91e37`/`7b1d6d853f20` não se aplica aqui — `a9f4c2e71b06` depende de `c4a8b2d91e37`, então sua aplicação foi consequência direta da mesma cadeia), o numerador desta linha permanece fora do escopo desta reconciliação: o status de `BL-AV-3-01` a `04` no backlog canônico ainda registra "planejamento publicado; nenhuma implementação iniciada" — uma dessincronia pré-existente com o estado real do código (a implementação de AV-S04 foi homologada e integrada via PR #9 em 2026-10-01, `sprint_AV-S04_multiplas_questoes.md` §10-11). Esta dessincronia **não é corrigida nesta rodada** — está fora do escopo da autorização de P4 recebida, que tratava especificamente do saneamento de `human_reviews` e das 3 migrações pendentes, não de uma reconciliação geral do backlog de AV-S04. Fica registrada aqui para que o numerador publicado não seja mal interpretado como já contemplando AV-S04.
 
 **Indicador separado de itens parciais (fora do numerador, sem ponderação percentual):**
 
 | ID | Situação |
 |---|---|
-| `BL-AV-1-10` | código homologado e integrado a `main`; migração operacional em `avalia_dev` (`DEBT-AV-011`) permanece aberta |
 | `BL-AV-4B-01` | levantamento documental concluído (texto impresso e manuscrito); não homologado como decisão arquitetural |
 | `BL-AV-4B-20` | benchmark parcialmente executado (texto impresso medido; manuscrito pendente, sem evidência de coleta localizada) |
 
 Nenhum outro percentual de conclusão é publicado. Maturidade técnica: **não medida**; não existe rubrica AvalIA aprovada.
 
 *(Nota de reconciliação, 2026-09-30, auditoria GOV-006, segunda rodada: a contagem apresentada na primeira rodada desta auditoria (15/70) continha um erro aritmético — o numerador anterior à AV-S03 já havia sido corrigido de 7 para 9 em 2026-09-28 (ver §2 da GOV-006 sobre a origem dessa divergência entre checkouts), não 10; 9 + 5 itens da AV-S03 = **14**, não 15. Corrigido nesta rodada com a lista nominal acima, excluindo explicitamente `BL-AV-1-10` do numerador por seu débito operacional aberto. Base usada: worktree `avalia-plataform-worktrees/av-s03-work`, `main` HEAD `a5974b1`.)*
+
+*(Nota de reconciliação, 2026-10-02: `BL-AV-1-10` movido do indicador de itens parciais para o numerador — 14→15 — após a execução real e validada de P4 contra `avalia_dev` (autorização explícita de Rafael, execução restrita ao banco local). O número "15/70" desta nota coincide numericamente com o "15/70" citado como erro aritmético na nota de 2026-09-30, mas tem causa e composição inteiramente diferentes — não é uma repetição do erro anterior, é um novo total correto após a resolução genuína de `BL-AV-1-10` nesta data. IDs explicitamente listados acima; nenhum numerador presumido.)*
 
 ## 5. Entregas desta execução
 

@@ -1,0 +1,5 @@
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade e1b02279b1a5 -> 7b1d6d853f20, add unique human review job id
+INFO  [alembic.runtime.migration] Running upgrade 7b1d6d853f20 -> c4a8b2d91e37, add academic structure
+INFO  [alembic.runtime.migration] Running upgrade c4a8b2d91e37 -> a9f4c2e71b06, add question position and assessment clone provenance
