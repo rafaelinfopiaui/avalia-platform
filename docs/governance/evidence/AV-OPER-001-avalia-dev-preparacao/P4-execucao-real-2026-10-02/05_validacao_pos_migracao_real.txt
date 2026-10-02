@@ -1,0 +1,11 @@
+SET
+DO
+DO
+DO
+DO
+DO
+             result              
+---------------------------------
+ POST_MIGRATION_VALIDATION_GREEN
+(1 row)
+

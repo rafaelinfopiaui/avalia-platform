@@ -1,0 +1,22 @@
+SET
+psql:core/scripts/av_s02_saneamento_human_reviews.sql:32: NOTICE:  Guard avalia_dev + opt-in explícito OK
+DO
+                job_id                | review_count | distinct_reviewers | distinct_decisions | distinct_totals | distinct_scores | distinct_justifications 
+--------------------------------------+--------------+--------------------+--------------------+-----------------+-----------------+-------------------------
+ 4f56a10b-3a44-4df5-9047-adef7546a3c0 |            3 |                  1 |                  1 |               1 |               1 |                       1
+(1 row)
+
+BEGIN
+SET
+DO
+LOCK TABLE
+LOCK TABLE
+LOCK TABLE
+DO
+DO
+INSERT 0 2
+DO
+DELETE 2
+DO
+COMMIT
+SANITATION_APPLIED_GREEN

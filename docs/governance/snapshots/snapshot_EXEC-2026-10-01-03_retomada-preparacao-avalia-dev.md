@@ -117,6 +117,69 @@ sem introduzir novo bloqueador. Parecer completo arquivado em
 Com isso, a preparação (P1–P3) está tecnicamente concluída e pronta para a
 decisão de Rafael sobre P4 (execução real) e P5 (ativação de flags).
 
+> **Proveniência desta seção e da seguinte (2026-10-02):** o texto abaixo
+> ("Publicação do PR #10" e "Intervenção do Codex antes da integração")
+> foi originalmente escrito por Hermes em 2026-10-01/02, mas Rafael
+> instruiu explicitamente a não commitá-lo diretamente em `main` nem abrir
+> um PR só para isso. Ficou preservado como pacote local recuperável em
+> `~/avalia-local-packages/snapshot-update-pos-pr10-2026-10-02/`
+> (diff, conteúdo completo antes/depois, checksums SHA-256 verificados) até
+> esta incorporação, autorizada por Rafael junto com a publicação da
+> documentação de P4 (2026-10-02). Reaplicado via `git apply` do patch
+> preservado nesse pacote, contra a base `main@9310b54`, sem alteração de
+> conteúdo.
+
+## Publicação do PR #10 (2026-10-01)
+
+Commit `6c20bb83ee1c9bee136dc1b74ff6c5bfe29a9dec` publicado na branch
+`chore/preparacao-avalia-dev-av-s04`, PR #10 aberto em rascunho contra
+`main`. CI verde nos 3 jobs (Frontend, AI Engine, Core API).
+
+## Intervenção do Codex antes da integração (2026-10-02)
+
+Enquanto o PR #10 aguardava decisão de Rafael sobre P4/P5, Rafael
+interrompeu uma sessão do Codex CLI para preservar a centralização da
+execução no Hermes, mas uma intervenção já havia sido publicada
+diretamente por ele (Rafael, via commit do Codex) na branch:
+
+- commit `e8a994e89e0450986f0bdbcc9e696945caa44bbc`, autor Rafael Oliveira,
+  2026-10-02 09:00:16 -03:00;
+- único arquivo alterado:
+  `docs/governance/backlog/plano_atualizacao_avalia_dev_av-s04_2026-10-01.md`
+  (10 inserções, 4 remoções);
+- conteúdo verificado via `git show e8a994e` nesta sessão (não presumido):
+  (1) corrige a seção 3.2 — contadores agregados de `pg_stat_user_tables`
+  são sinais auxiliares com possível atraso, não identificam o autor da
+  escrita nem provam ausência dela; operações autorizadas de saneamento e
+  migração também alteram esses contadores, então variações devem ser
+  conciliadas com as etapas/sessões autorizadas, não tratadas como prova
+  automática de incidente; (2) o mesmo ajuste é propagado ao Estado 0 da
+  matriz de recuperação (seção 3.8); (3) nova seção 9 registra uma
+  conferência limitada das ressalvas das rodadas 4 e 5 de revisão
+  independente contra o HEAD `6c20bb83e`, confirmando que todas as
+  correções textuais anteriores (sequência completa no restore final,
+  alternativa de recuperação do índice, referências renumeradas, REVOKE
+  opcional, nota histórica, `LEFT JOIN LATERAL`, exemplo de restauração)
+  estavam de fato presentes, e acrescenta a ressalva de que qualquer uso
+  futuro da camada opcional de ACL precisa preservar também `grantor` e
+  grant options, não apenas grantee/privilege_type — o exemplo de `GRANT`
+  de restauração do documento é resumido, não um restaurador universal.
+- nenhum script SQL/Python em `core/scripts/` foi tocado por este commit;
+- nenhuma ação Git além deste commit documental (sem merge, sem push para
+  `main`, sem alteração de PR);
+- CI da rodada 37004155698 confirmada concluída nesta sessão (não
+  presumida): `gh run view 37004155698` e `gh pr checks 10` retornaram os
+  3 jobs (`AI Engine`, `Core API`, `Frontend`) com status `pass` sobre o
+  HEAD `e8a994e`.
+
+Avaliação desta sessão: a correção é tecnicamente válida e consistente com
+o restante do documento — não introduz enfraquecimento de guard nem
+contradição com as seções já revisadas independentemente. Não foi
+necessário reverter nem repetir o ensaio técnico (`ALL_DRY_RUN_SCENARIOS_GREEN`
+permanece válido — nenhum script executável foi alterado). A partir desta
+intervenção, toda execução (Git, CI, integração) voltou a ocorrer
+exclusivamente via Hermes, conforme instrução de Rafael.
+
 ## Disponibilidade de ferramentas de agente externas verificada nesta retomada
 
 - `claude` (Claude Code CLI): binário presente e funcional
