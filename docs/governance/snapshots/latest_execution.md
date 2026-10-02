@@ -1,27 +1,16 @@
 # Última execução registrada
 
-- execução: [EXEC-2026-10-02-01 — Execução real de P4 contra `avalia_dev`](snapshot_EXEC-2026-10-02-01_execucao-real-p4-avalia-dev.md);
-- tipo: execução operacional real, autorizada explicitamente por Rafael
-  (2026-10-02), exclusivamente contra a instância LOCAL de `avalia_dev`,
-  usando os scripts integrados em `main@9310b545cd332948104edf44e555eff5f2582e4c`
-  (PR #10);
-- status: saneamento das 3 duplicatas legadas em `human_reviews` aplicado
-  (2 arquivadas em `human_reviews_superseded`, vencedora e auditoria
-  preservadas); as 3 migrações pendentes (`7b1d6d853f20`, `c4a8b2d91e37`,
-  `a9f4c2e71b06`) aplicadas, `version_num=a9f4c2e71b06`; todos os
-  pós-checks (a)-(g) confirmados; nenhuma falha; reconciliação de
-  contagens (antes/depois, com evidência) concluída a pedido de Rafael;
-  `DEBT-AV-011`/`BL-AV-1-10` resolvidos;
+- execução: [EXEC-2026-10-02-02 (+ adendos 1 e 2) — GOV-007: distribuição de trabalho entre CLIs de IA (Claude Code, Antigravity, Codex)](snapshot_EXEC-2026-10-02-02_gov-007-distribuicao-clis.md);
+- tipo: execução de configuração (não funcional) do ambiente do agente orquestrador — não toca código, `avalia_dev`, P5 ou seed; autorizada explicitamente por Rafael (2026-10-02) como demanda exclusivamente de configuração;
+- status: remoção de Codex do fallback automático de provedor/modelo do Hermes confirmada e estável (configuração em disco); regras de distribuição de trabalho (Claude Code executor principal, Antigravity segundo executor/revisor cruzado, Codex uso pontual) registradas em `AGENTS.md`; autenticação da CLI `claude` no binário do PATH confirmada e funcional por chamada real (uso real de inferência, com `total_cost_usd` autorrelatado pela ferramenta — sem evidência de faturamento que classifique isso como cobrança adicional ou débito comprovado); sessão do Hermes confirmada como processo novo iniciado após a edição do `config.yaml` (configuração efetiva em memória durante a sessão não foi diretamente testada); mecanismo de cobrança do provider `anthropic` do Hermes documentado como **não comprovado**, pendência separada e não bloqueante, sem necessidade presumida de novo gasto para esclarecê-la;
 - baseline promovido: não;
-- ação Git/remota desta execução: nenhuma — documentação local (snapshot,
-  reconciliação, atualização de registros de débito/backlog/dashboard)
-  pendente de publicação em PR separado, conforme autorização específica
-  de Rafael;
-- P5 (ativação de `ACADEMIC_MODULE_ENABLED`/`VITE_ACADEMIC_MODULE_ENABLED`),
-  seed operacional, deploy e promoção de baseline permanecem
-  explicitamente **não autorizados**.
+- ação Git/remota desta execução: nenhuma — documentação local (snapshot, decisão, dashboard, nota de mecanismo de cobrança) pendente de revisão de Rafael antes de qualquer stage/commit;
+- **nota datada (2026-10-02T18:30:00-03:00):** a afirmação acima ("ação Git/remota: nenhuma") descreve o estado no momento em que este ponteiro foi originalmente escrito, antes da publicação autorizada por Rafael. Nesta mesma linha de trabalho, Rafael autorizou e a publicação foi concluída: commit único `0915d91d1169657bd36dea000b827c5ee6b2b4c0` na branch dedicada `docs/gov-007-distribuicao-clis`, PR draft #12 aberto para `main` (https://github.com/rafaelinfopiaui/avalia-platform/pull/12), 3/3 checks `pass`, sem merge. Esta nota não reescreve a afirmação original — apenas atualiza o estado para refletir a publicação ocorrida depois dela ser escrita;
+- P5, seed operacional, deploy e promoção de baseline permanecem explicitamente **não autorizados** e não tocados nesta execução.
 
-Execução imediatamente anterior: [EXEC-2026-10-01-03 — Retomada da
+Execução imediatamente anterior (mesma tarefa, rodada 1): [EXEC-2026-10-02-01 — Execução real de P4 contra `avalia_dev`](snapshot_EXEC-2026-10-02-01_execucao-real-p4-avalia-dev.md) — nota: o título desse snapshot refere-se à execução de P4; a rodada 1 desta tarefa de configuração de CLIs não gerou snapshot próprio e está documentada apenas na resposta em chat anterior a este registro; esta lacuna é reconhecida aqui e não será reaberta retroativamente, já que a rodada 2 (este snapshot) consolida e corrige o necessário.
+
+Execuções anteriores: [EXEC-2026-10-01-03 — Retomada da
 preparação de `avalia_dev` após interrupção de cota](snapshot_EXEC-2026-10-01-03_retomada-preparacao-avalia-dev.md),
 seguida da integração do PR #10 (merge commit `9310b545cd332948104edf44e555eff5f2582e4c`).
 
