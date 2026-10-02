@@ -232,6 +232,22 @@ frequentemente citado nos documentos) não foi resolvida por esta
 reconciliação e fica registrada como tal — sem atribuição de causa não
 comprovada. Nenhuma das 10 linhas de 2026-09-25 foi tocada por este P4.
 
+## 9c. Correção do indicador global (2026-10-02, 2ª rodada pós-integração do PR #11)
+
+Rafael apontou que a exclusão de `BL-AV-3-01` a `BL-AV-3-04` (AV-S04) do
+numerador na rodada anterior (seção 9b/dashboard antigo) estava incorreta:
+"fora do escopo desta rodada" não é motivo para excluir uma entrega já
+homologada do progresso global. Verificado nesta sessão, não presumido:
+PR #9 está de fato `MERGED` (`gh pr view 9` → `state: MERGED`, merge
+commit `9ab6e43`), a entrega funcional de AV-S04 foi homologada por
+`DEC-AV-029` (AC-01 a AC-18 cumpridos, `sprint_AV-S04...md` §10-11), e a
+migração operacional `a9f4c2e71b06` foi de fato aplicada a `avalia_dev`
+nesta mesma rodada de P4 (ela depende de `c4a8b2d91e37`, aplicada na
+mesma transação de `alembic upgrade head` — ver seção 4). Os 4 itens
+foram incluídos no numerador do dashboard executivo: **15/70 → 19/70**.
+`BL-AV-3-04` (contrato OpenAPI) não depende de migração operacional e já
+estava tecnicamente completo desde a integração do PR #9.
+
 ## Proveniência da atualização documental pendente (pós-PR #10)
 
 O pacote local `~/avalia-local-packages/snapshot-update-pos-pr10-2026-10-02/`
