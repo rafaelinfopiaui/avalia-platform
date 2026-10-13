@@ -1,6 +1,12 @@
 # Última execução registrada
 
-- execução: [EXEC-2026-10-02-02 (+ adendos 1 e 2) — GOV-007: distribuição de trabalho entre CLIs de IA (Claude Code, Antigravity, Codex)](snapshot_EXEC-2026-10-02-02_gov-007-distribuicao-clis.md);
+- execução: [EXEC-2026-10-13-01 — retomada do AvalIA após hiato: diagnóstico e planejamento de retomada, sem implementação](snapshot_EXEC-2026-10-13-01_retomada_diagnostico.md);
+- tipo: diagnóstico/planejamento (não funcional) — leitura de Git/governança/código, consultas somente-leitura a `avalia_dev`, inspeção de processos/portas; nenhuma escrita em `avalia_dev`, nenhum commit/push/merge, nenhuma mudança de configuração, nenhum reinício de serviço;
+- status: ambiente de demonstração (Core/AI Engine/Frontend/Chrome CDP dedicado) encontrado PARADO no início desta sessão — precisa ser religado antes de qualquer demo/validação visual nova; working tree com 2 arquivos modificados não staged, preexistentes e preservados (`AnswerPage.tsx`, fix de 2026-10-05 nunca registrado; `technical_debts.md` com `DEBT-AV-013` redigido em 2026-10-02 nunca staged); `avalia_dev` confirmado inalterado desde P4 (`a9f4c2e71b06`, 16 ativas/2 arquivadas); P5/seed/deploy/baseline permanecem não autorizados;
+- baseline promovido: não;
+- ação Git/remota desta execução: nenhuma — apenas leitura e um novo snapshot local.
+
+Execução imediatamente anterior: [EXEC-2026-10-02-02 (+ adendos 1 e 2) — GOV-007: distribuição de trabalho entre CLIs de IA (Claude Code, Antigravity, Codex)](snapshot_EXEC-2026-10-02-02_gov-007-distribuicao-clis.md);
 - tipo: execução de configuração (não funcional) do ambiente do agente orquestrador — não toca código, `avalia_dev`, P5 ou seed; autorizada explicitamente por Rafael (2026-10-02) como demanda exclusivamente de configuração;
 - status: remoção de Codex do fallback automático de provedor/modelo do Hermes confirmada e estável (configuração em disco); regras de distribuição de trabalho (Claude Code executor principal, Antigravity segundo executor/revisor cruzado, Codex uso pontual) registradas em `AGENTS.md`; autenticação da CLI `claude` no binário do PATH confirmada e funcional por chamada real (uso real de inferência, com `total_cost_usd` autorrelatado pela ferramenta — sem evidência de faturamento que classifique isso como cobrança adicional ou débito comprovado); sessão do Hermes confirmada como processo novo iniciado após a edição do `config.yaml` (configuração efetiva em memória durante a sessão não foi diretamente testada); mecanismo de cobrança do provider `anthropic` do Hermes documentado como **não comprovado**, pendência separada e não bloqueante, sem necessidade presumida de novo gasto para esclarecê-la;
 - baseline promovido: não;
