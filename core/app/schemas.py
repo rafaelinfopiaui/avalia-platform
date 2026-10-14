@@ -6,6 +6,8 @@ from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field, computed_field, model_validator
 
+from app.models import AnswerSource, TranscriptionStatus
+
 
 # ---- Auth ----
 class LoginRequest(BaseModel):
@@ -151,7 +153,10 @@ class AnswerOut(BaseModel):
     id: str
     question_id: str
     student_name_fake: str
-    text: str
+    # Nulo para resposta por imagem ainda sem transcrição (DEC-AV-037).
+    text: Optional[str] = None
+    source: AnswerSource
+    transcription_status: TranscriptionStatus
     created_at: datetime
 
     class Config:
@@ -171,6 +176,10 @@ class AnswerImageOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class AnswerWithImagesOut(AnswerOut):
+    images: list[AnswerImageOut]
 
 
 # ---- Correction / job ----
