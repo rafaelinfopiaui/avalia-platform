@@ -1,20 +1,39 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Alert } from '../components/Alert'
 import { Spinner } from '../components/Spinner'
-import { ApiError, createImageAnswer, downloadAnswerImage, listAnswerImages, listAssessments, listImageAnswers } from '../services/api'
+import { useAuth } from '../context/AuthContext'
+import {
+  ApiError,
+  confirmManualTranscription,
+  createImageAnswer,
+  downloadAnswerImage,
+  listAnswerImages,
+  listAssessments,
+  listImageAnswers,
+  requestCorrection,
+  saveManualTranscriptionDraft,
+} from '../services/api'
+import { writeWorkflow } from '../services/workflow'
 import type { AnswerImage, AnswerWithImages, Assessment } from '../types'
 
 // Resposta por imagem (AV-S06B, DEC-AV-037): a foto é a entrada inicial da
 // resposta, sem texto digitado. A resposta fica aguardando transcrição e NÃO é
 // encaminhada para correção nesta tela. Avaliação, questão e aluno são
 // escolhidos manualmente pelo professor (DEC-AV-021).
+// Transcrição manual (AV-S08B, DEC-AV-040): o professor digita o texto, salva
+// rascunhos e confirma explicitamente; a confirmação é definitiva e não inicia
+// a correção.
+// Após a confirmação, a análise da IA é solicitada por ação explícita, a partir
+// da MESMA resposta (POST /answers/{id}/corrections), usando o texto confirmado.
 
 // Mesmo limite do backend: 10 MiB = 10_485_760 bytes (base binária).
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png']
 const PENDING_TRANSCRIPTION_NOTICE =
   'Imagem recebida e armazenada. A resposta aguarda transcrição — ainda NÃO foi transcrita nem corrigida.'
+const CONFIRMATION_WARNING =
+  'Atenção: a confirmação é definitiva nesta versão. Depois de confirmar, a transcrição não poderá mais ser editada. Confira a imagem e o texto lado a lado antes de continuar.'
 
 function isPublished(assessment: Assessment) {
   return assessment.status === 'PUBLICADA' || assessment.status === 'PUBLISHED'
@@ -60,7 +79,50 @@ function validateFile(file: File | null): string {
   return ''
 }
 
-function ImageViewer({ image }: { image: AnswerImage }) {
+// Mensagens das ações de transcrição (mutação: exigem vínculo ativo).
+function transcriptionError(error: unknown, action: 'salvar' | 'confirmar'): string {
+  const fallback = `Não foi possível ${action} a transcrição. Tente novamente.`
+  if (!(error instanceof ApiError)) return fallback
+  switch (error.body.code) {
+    case 'TRANSCRIPTION_VERSION_CONFLICT': return 'Este texto foi alterado em outra sessão ou aba. Carregue a versão mais recente para continuar — o texto digitado aqui NÃO foi salvo (copie-o antes, se precisar).'
+    case 'TRANSCRIPTION_ALREADY_CONFIRMED': return 'Esta transcrição já foi confirmada (possivelmente em outra sessão) e não pode mais ser alterada.'
+    case 'ANSWER_TEXT_REQUIRED': return 'Digite o texto da transcrição antes de confirmar.'
+    case 'ANSWER_NOT_IMAGE_SOURCE': return 'Esta resposta não foi enviada por foto; não há transcrição manual a fazer.'
+  }
+  switch (error.status) {
+    case 0: return error.message
+    case 401: return 'Sua sessão expirou. Entre novamente para continuar a transcrição.'
+    case 403: return 'Você não tem permissão para alterar respostas desta avaliação. Verifique se você é o responsável pela avaliação e tem vínculo ativo com a turma.'
+    case 404: return 'Resposta não encontrada. Atualize a página e selecione novamente.'
+    default: return fallback
+  }
+}
+
+// Mensagens da solicitação de análise da IA a partir da resposta confirmada.
+function correctionError(error: unknown): string {
+  const fallback = 'Não foi possível solicitar a análise da IA. Tente novamente.'
+  if (!(error instanceof ApiError)) return fallback
+  switch (error.body.code) {
+    case 'ANSWER_NOT_TRANSCRIBED': return 'A transcrição desta resposta ainda não foi confirmada; confirme-a antes de solicitar a análise.'
+    case 'RUBRIC_NOT_PUBLISHED': return 'A questão desta resposta não possui rubrica publicada. Publique a rubrica da questão e tente novamente.'
+  }
+  switch (error.status) {
+    case 0: return error.message
+    case 401: return 'Sua sessão expirou. Entre novamente e solicite a análise outra vez.'
+    case 403: return 'Você não tem permissão para solicitar a análise desta resposta. Verifique se você é o responsável pela avaliação e tem vínculo ativo com a turma.'
+    case 404: return 'Resposta não encontrada. Atualize a página e selecione novamente.'
+    default: return fallback
+  }
+}
+
+// Em 409 o backend devolve o estado atual da resposta em details.current_answer.
+function conflictState(error: unknown): AnswerWithImages | null {
+  if (!(error instanceof ApiError) || error.status !== 409) return null
+  const current = error.body.details?.current_answer
+  return current && typeof current === 'object' ? (current as AnswerWithImages) : null
+}
+
+function ImageViewer({ image, autoLoad = false }: { image: AnswerImage; autoLoad?: boolean }) {
   const [url, setUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -79,6 +141,8 @@ function ImageViewer({ image }: { image: AnswerImage }) {
       setLoading(false)
     }
   }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (autoLoad) load() }, [autoLoad])
 
   return (
     <li className="panel" style={{ listStyle: 'none', marginBottom: '0.75rem' }}>
@@ -99,8 +163,200 @@ function ImageViewer({ image }: { image: AnswerImage }) {
   )
 }
 
-function SentAnswer({ answer, questionLabel }: { answer: AnswerWithImages; questionLabel: string }) {
-  const [images, setImages] = useState<AnswerImage[]>(answer.images)
+const sideBySide = { display: 'flex', gap: '1rem', flexWrap: 'wrap' } as const
+const sideBySideItem = { flex: '1 1 260px', minWidth: 0 } as const
+const transcriptBox = { whiteSpace: 'pre-wrap', margin: '0.5rem 0', padding: '0.75rem', border: '1px solid #ccc', borderRadius: '4px' } as const
+
+function ManualTranscription({ answer, images, onChange }: {
+  answer: AnswerWithImages
+  images: AnswerImage[]
+  onChange: (answer: AnswerWithImages) => void
+}) {
+  const { user } = useAuth()
+  const [text, setText] = useState(answer.manual_transcription_draft || '')
+  const [busy, setBusy] = useState<'' | 'salvar' | 'confirmar'>('')
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [reviewing, setReviewing] = useState(false)
+  // Estado mais recente devolvido por um conflito de versão, aplicado só a pedido.
+  const [latest, setLatest] = useState<AnswerWithImages | null>(null)
+
+  if (answer.transcription_status === 'TRANSCRICAO_CONFIRMADA') {
+    const by = answer.transcription_confirmed_by_id
+    const who = !by ? '' : by === user?.id ? ' por você' : ` pelo usuário ${by}`
+    const when = answer.transcription_confirmed_at ? ` em ${new Date(answer.transcription_confirmed_at).toLocaleString('pt-BR')}` : ''
+    return (
+      <section style={{ marginTop: '1rem' }}>
+        <strong>Transcrição confirmada</strong>
+        <p><small>Confirmada{who}{when}. A confirmação é definitiva nesta versão; o texto não pode mais ser editado.</small></p>
+        <div style={transcriptBox}>{answer.text}</div>
+      </section>
+    )
+  }
+
+  const savedDraft = answer.manual_transcription_draft || ''
+  const dirty = text !== savedDraft
+
+  const fail = (e: unknown, action: 'salvar' | 'confirmar') => {
+    setError(transcriptionError(e, action))
+    const current = conflictState(e)
+    if (current?.transcription_status === 'TRANSCRICAO_CONFIRMADA') {
+      setReviewing(false)
+      onChange(current)
+    } else if (current) {
+      setReviewing(false)
+      setLatest(current)
+    }
+  }
+
+  const saveDraft = async () => {
+    if (busy) return
+    setBusy('salvar')
+    setError('')
+    setNotice('')
+    try {
+      const updated = await saveManualTranscriptionDraft(answer.id, text, answer.transcription_version)
+      onChange(updated)
+      setText(updated.manual_transcription_draft || '')
+      setNotice(updated.manual_transcription_draft ? 'Rascunho salvo. Ele continua disponível se você recarregar a página.' : 'Rascunho limpo.')
+    } catch (e) {
+      fail(e, 'salvar')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const startReview = () => {
+    setNotice('')
+    if (!text.trim()) { setError('Digite o texto da transcrição antes de confirmar.'); return }
+    setError('')
+    setReviewing(true)
+  }
+
+  const confirm = async () => {
+    if (busy) return
+    setBusy('confirmar')
+    setError('')
+    try {
+      onChange(await confirmManualTranscription(answer.id, text, answer.transcription_version))
+    } catch (e) {
+      fail(e, 'confirmar')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const loadLatest = () => {
+    if (!latest) return
+    onChange(latest)
+    setText(latest.manual_transcription_draft || '')
+    setLatest(null)
+    setError('')
+    setNotice('Versão mais recente carregada.')
+  }
+
+  return (
+    <section style={{ marginTop: '1rem' }}>
+      <label className="form-stack">
+        <strong>Transcrição manual</strong>
+        <textarea
+          rows={8}
+          value={text}
+          onChange={e => { setText(e.target.value); setNotice('') }}
+          placeholder="Digite o texto da resposta exatamente como está na foto"
+          disabled={Boolean(busy) || reviewing}
+        />
+      </label>
+      <small>
+        {dirty ? 'Há alterações não salvas.' : savedDraft ? 'Rascunho salvo.' : 'Nenhum rascunho salvo.'} O rascunho não confirma a transcrição nem libera a correção.
+      </small>
+      {error && (
+        <Alert>
+          {error}{' '}
+          {latest && <button type="button" className="link-button" onClick={loadLatest}>Carregar versão mais recente</button>}
+        </Alert>
+      )}
+      {notice && <Alert type="success">{notice}</Alert>}
+      {!reviewing ? (
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+          <button type="button" className="button button--secondary" onClick={saveDraft} disabled={Boolean(busy) || !dirty || Boolean(latest)}>
+            {busy === 'salvar' ? 'Salvando rascunho…' : 'Salvar rascunho'}
+          </button>
+          <button type="button" className="button button--primary" onClick={startReview} disabled={Boolean(busy) || Boolean(latest)}>
+            Confirmar transcrição…
+          </button>
+        </div>
+      ) : (
+        <div className="panel" style={{ marginTop: '0.75rem' }}>
+          <h4 style={{ marginTop: 0 }}>Revisão final antes de confirmar</h4>
+          <Alert type="warning">{CONFIRMATION_WARNING}</Alert>
+          <div style={sideBySide}>
+            <div style={sideBySideItem}>
+              <strong>Imagem da resposta</strong>
+              <ul style={{ padding: 0, marginTop: '0.5rem' }}>
+                {images.map(image => <ImageViewer key={image.id} image={image} autoLoad />)}
+              </ul>
+            </div>
+            <div style={sideBySideItem}>
+              <strong>Texto que será confirmado</strong>
+              <div style={transcriptBox}>{text}</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <button type="button" className="button button--primary" onClick={confirm} disabled={Boolean(busy)}>
+              {busy === 'confirmar' ? 'Confirmando…' : 'Confirmar definitivamente'}
+            </button>
+            <button type="button" className="button button--secondary" onClick={() => setReviewing(false)} disabled={Boolean(busy)}>
+              Voltar à edição
+            </button>
+          </div>
+          <small>Confirmar não inicia a correção; a análise continua sendo uma ação separada.</small>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// Sem endpoint de leitura de jobs por resposta, o "já solicitada" só vale para
+// as solicitações feitas nesta tela, nesta sessão.
+function CorrectionRequest({ answer }: { answer: AnswerWithImages }) {
+  const navigate = useNavigate()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [requested, setRequested] = useState(false)
+
+  const request = async () => {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      const job = await requestCorrection(answer.id)
+      setRequested(true)
+      writeWorkflow({ answer, job })
+      navigate(`/correcoes/${job.id}`)
+    } catch (e) {
+      setError(correctionError(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section style={{ marginTop: '1rem' }}>
+      {error && <Alert>{error}</Alert>}
+      {requested && <Alert type="success">Análise da IA já solicitada para esta resposta. Uma nova solicitação gera uma nova tentativa.</Alert>}
+      <button type="button" className="button button--primary" onClick={request} disabled={busy}>
+        {busy ? 'Solicitando análise…' : requested ? 'Solicitar nova análise da IA' : 'Solicitar análise da IA'}
+      </button>
+      {busy && <Spinner label="Solicitando a análise da IA…" />}
+      <small style={{ display: 'block', marginTop: '0.5rem' }}>A análise usa exatamente o texto confirmado acima.</small>
+    </section>
+  )
+}
+
+function SentAnswer({ answer: initial, questionLabel }: { answer: AnswerWithImages; questionLabel: string }) {
+  const [answer, setAnswer] = useState(initial)
+  const [images, setImages] = useState<AnswerImage[]>(initial.images)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -131,6 +387,8 @@ function SentAnswer({ answer, questionLabel }: { answer: AnswerWithImages; quest
       <ul style={{ padding: 0, marginTop: '0.75rem' }}>
         {images.map(image => <ImageViewer key={image.id} image={image} />)}
       </ul>
+      <ManualTranscription answer={answer} images={images} onChange={setAnswer} />
+      {answer.transcription_status === 'TRANSCRICAO_CONFIRMADA' && <CorrectionRequest answer={answer} />}
     </article>
   )
 }
@@ -227,7 +485,7 @@ export function ImageAnswerPage() {
         <div>
           <p className="eyebrow">Avaliação publicada</p>
           <h1>Resposta por foto</h1>
-          <p>Envie a foto da resposta manuscrita de um aluno fictício. A foto é registrada como a resposta e fica aguardando transcrição.</p>
+          <p>Envie a foto da resposta manuscrita de um aluno fictício. A foto é registrada como a resposta e fica aguardando transcrição; depois, digite e confirme a transcrição manualmente.</p>
         </div>
       </div>
       {loadError && <Alert>{loadError} <button type="button" className="link-button" onClick={load}>Tentar novamente</button></Alert>}
