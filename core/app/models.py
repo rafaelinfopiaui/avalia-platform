@@ -287,6 +287,18 @@ class Answer(Base):
         default=TranscriptionStatus.TRANSCRICAO_CONFIRMADA,
         nullable=False,
     )
+    # Transcrição manual (AV-S08B, DEC-AV-040): rascunho atual, distinto de
+    # `text`, que só é preenchido na confirmação (definitiva nesta fatia).
+    manual_transcription_draft: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transcription_confirmed_by_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("users.id"), nullable=True
+    )
+    transcription_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Lock otimista (mesmo padrão incremental de Rubric.version): +1 a cada
+    # rascunho salvo ou confirmação bem-sucedida.
+    transcription_version: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
