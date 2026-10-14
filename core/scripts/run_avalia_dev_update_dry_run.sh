@@ -181,12 +181,18 @@ alembic_to "$DB_HAPPY" "a9f4c2e71b06" "MIGRATION_A9F"
 timed "POST_MIGRATION_VALIDATION" psql_db "$DB_HAPPY" -v ON_ERROR_STOP=1 \
   -f "$SCRIPTS_DIR/av_s02_validacao_pos_migracoes.sql"
 
-# Flags acadêmicas coerentes (backend true + frontend true) e seed demo.
+# Flag acadêmica do backend ligada e seed demo.
+# NOTA (2026-10-13, AV-S03B): VITE_ACADEMIC_MODULE_ENABLED=true foi REMOVIDA
+# das duas invocações abaixo. Ela nunca teve efeito aqui — o seed
+# `seed_academic_multi_question_demo.py` lê a flag exclusivamente do backend,
+# via `get_settings().academic_module_enabled` (ACADEMIC_MODULE_ENABLED), e
+# jamais consultou nenhuma variável VITE_*. Desde AV-S03B o frontend também
+# deixou de ler essa variável: a capacidade vem de GET /v1/config/capabilities
+# em runtime (DEBT-AV-012). A remoção é inerte para este dry-run.
 (
   cd "$ROOT_DIR"
   DATABASE_URL="postgresql+psycopg2://postgres@127.0.0.1:${PORT}/${DB_HAPPY}" \
   ACADEMIC_MODULE_ENABLED=true \
-  VITE_ACADEMIC_MODULE_ENABLED=true \
   JWT_SECRET="isolated-dry-run-secret" \
   AI_ENGINE_URL="http://127.0.0.1:9999" \
   PYTHONPATH="$CORE_DIR" \
@@ -194,7 +200,6 @@ timed "POST_MIGRATION_VALIDATION" psql_db "$DB_HAPPY" -v ON_ERROR_STOP=1 \
       "$SCRIPTS_DIR/seed_academic_multi_question_demo.py"
   DATABASE_URL="postgresql+psycopg2://postgres@127.0.0.1:${PORT}/${DB_HAPPY}" \
   ACADEMIC_MODULE_ENABLED=true \
-  VITE_ACADEMIC_MODULE_ENABLED=true \
   JWT_SECRET="isolated-dry-run-secret" \
   AI_ENGINE_URL="http://127.0.0.1:9999" \
   PYTHONPATH="$CORE_DIR" \

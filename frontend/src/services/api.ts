@@ -186,17 +186,18 @@ export const createEnrollment = (payload: {
 
 export const listProfessorClassLinks = () => request<ProfessorClassLink[]>('/professor-class-links')
 
-export function isAcademicModuleEnabled(): boolean {
-  const envVal = import.meta.env.VITE_ACADEMIC_MODULE_ENABLED
-  if (typeof envVal === 'string') {
-    return ['1', 'true', 'yes', 'on'].includes(envVal.toLowerCase())
-  }
-  // O backend (core/app/config.py) usa ACADEMIC_MODULE_ENABLED com default "false".
-  // O frontend precisa espelhar o MESMO default para não divergir do backend:
-  // sem configuração explícita em ambos os lados, o módulo acadêmico está
-  // DESLIGADO. Configure VITE_ACADEMIC_MODULE_ENABLED=true no ambiente do
-  // frontend sempre que ACADEMIC_MODULE_ENABLED=true estiver configurado no
-  // backend (ver frontend/.env.example).
-  return false
+// ---------------- Capacidades do backend (BL-AV-S03B-01/02) ----------------
+// NOTA (DEBT-AV-012, resolvido aqui): até AV-S03B o frontend decidia se o módulo
+// acadêmico estava ligado lendo sua PRÓPRIA variável de ambiente
+// (VITE_ACADEMIC_MODULE_ENABLED, via a antiga função isAcademicModuleEnabled()).
+// Isso eram duas configurações independentes que podiam divergir em operação.
+// A função foi REMOVIDA — não existe mais fonte de decisão de UI baseada em env
+// var estático. A fonte única de verdade é GET /v1/config/capabilities, exposta
+// à UI exclusivamente por useCapabilities() (src/context/CapabilitiesContext.tsx).
+// Não reintroduzir leitura de VITE_ACADEMIC_MODULE_ENABLED aqui.
+export interface Capabilities {
+  academic_module_enabled: boolean
 }
+
+export const getCapabilities = () => request<Capabilities>('/config/capabilities')
 

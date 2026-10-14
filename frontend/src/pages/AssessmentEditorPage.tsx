@@ -2,7 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Alert } from '../components/Alert'
 import { Spinner } from '../components/Spinner'
-import { attachAssessmentClassGroup, cloneAssessment, createAssessment, createQuestion, deleteQuestion, getAssessment, isAcademicModuleEnabled, listClassGroups, publishAssessment, reorderQuestions, saveRubric, updateAssessment, updateQuestion } from '../services/api'
+import { useCapabilities } from '../context/CapabilitiesContext'
+import { attachAssessmentClassGroup, cloneAssessment, createAssessment, createQuestion, deleteQuestion, getAssessment, listClassGroups, publishAssessment, reorderQuestions, saveRubric, updateAssessment, updateQuestion } from '../services/api'
 import { writeWorkflow } from '../services/workflow'
 import type { Assessment, ClassGroup, Criterion } from '../types'
 
@@ -23,7 +24,34 @@ export function AssessmentEditorPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const editing = Boolean(id)
-  const academicModuleEnabled = isAcademicModuleEnabled()
+  // Mesma semântica de antes (turma obrigatória quando o módulo acadêmico está
+  // ligado); muda apenas a FONTE do booleano: agora vem do backend via
+  // CapabilitiesContext, não de VITE_ACADEMIC_MODULE_ENABLED (DEBT-AV-012).
+  //
+  // ACHADO BLOQUEANTE DO CODEX (BL-AV-S03B-07), corrigido aqui: para o MENU e
+  // para a ROTA /academico, colapsar "desconhecido" em "desligado" é fail-closed
+  // (esconder a mais nunca é inseguro). Para ESTE editor, o mesmo colapso era
+  // fail-OPEN no caminho de ESCRITA: enquanto a consulta de capacidades estava
+  // em voo, `academicModuleEnabled === false` fazia a UI tratar o estado como
+  // "modo legado confirmado" e liberava salvar/publicar uma avaliação SEM TURMA.
+  // O backend continuava protegido (422 em main.py:149), mas a UI prometia algo
+  // que o servidor recusaria. Por isso o editor distingue os TRÊS estados:
+  // desconhecido (capabilitiesLoading) ≠ desligado ≠ ligado.
+  //
+  // SANEAMENTO (lacuna 1, 2026-10-13): a correção acima tratou só a janela de
+  // `loading`. Depois de uma falha DEFINITIVA (`error === true`, sem tentativa
+  // em curso) o `academicModuleEnabled` normalizado também vale `false`, e o
+  // editor voltava a abrir o formulário gravável como se o backend tivesse
+  // CONFIRMADO "módulo desligado / modo legado". Se o módulo estivesse de fato
+  // ligado, o usuário preencheria a avaliação inteira sem turma para só
+  // descobrir o 422 no salvar. São QUATRO estados distintos, e este arquivo
+  // trata os quatro: ligado, desligado (resposta real), carregando, falhou.
+  const {
+    academicModuleEnabled,
+    loading: capabilitiesLoading,
+    error: capabilitiesError,
+    retry: retryCapabilities,
+  } = useCapabilities()
 
   const [title, setTitle] = useState('')
   const [classGroupId, setClassGroupId] = useState<string>('')
@@ -40,13 +68,19 @@ export function AssessmentEditorPage() {
   const [success, setSuccess] = useState('')
 
   useEffect(() => {
+    // Só consulta turmas depois que a capacidade real é conhecida (item (1) do
+    // achado do Codex): antes disso não sabemos sequer se o seletor de turma é
+    // obrigatório, opcional ou irrelevante. O mesmo vale para falha definitiva
+    // (lacuna 1): nesse estado o formulário nem é renderizado, então listar
+    // turmas só produziria um segundo erro em cima do primeiro.
+    if (capabilitiesLoading || capabilitiesError) return
     listClassGroups()
       .then(setClassGroups)
       .catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : 'Não foi possível carregar as turmas.'
         setError(prev => (prev ? `${prev} | ${msg}` : msg))
       })
-  }, [])
+  }, [capabilitiesLoading, capabilitiesError])
 
   useEffect(() => {
     if (!id) return
@@ -90,11 +124,32 @@ export function AssessmentEditorPage() {
     )
   })
 
+  // ACH-01 (Antigravity), resolvido aqui: a avaliação JÁ EXISTENTE sem turma é
+  // uma avaliação legada no sentido de `DEC-AV-023` ("avaliações legadas
+  // nullable com acesso do proprietário/admin, e novas avaliações exigem turma
+  // a partir da ativação do módulo acadêmico"). O backend implementa exatamente
+  // essa distinção:
+  //   - `create_assessment` (core/app/main.py:153) exige `class_group_id` só na
+  //     CRIAÇÃO, e só com a flag ligada → 422 sem turma;
+  //   - `update_assessment` (core/app/main.py:253) e
+  //     `require_assessment_mutation` (core/app/routers/academic.py:165) NÃO
+  //     consultam a flag e NÃO exigem turma: para `class_group_id === null`
+  //     basta ser dono (ou admin) — editar/salvar/publicar um rascunho legado
+  //     continua permitido com o módulo ligado.
+  // A UI estava MAIS RESTRITIVA que o backend: exigia turma em qualquer
+  // salvamento com o módulo ligado, inclusive de um rascunho legado que o
+  // servidor aceitaria. Alinhamos a exigência à regra real do servidor.
+  //
+  // `assessment !== null` é deliberado: se a carga da avaliação falhou, não
+  // sabemos que é legada e mantemos a exigência (conservador).
+  const isLegacyAssessmentWithoutClass = Boolean(editing && assessment && !assessment.class_group_id)
+  const classGroupRequired = academicModuleEnabled && !isLegacyAssessmentWithoutClass
+
   const complete = Boolean(
     title.trim() &&
     localQuestions.length > 0 &&
     allQuestionsValid &&
-    (!academicModuleEnabled || Boolean(classGroupId))
+    (!classGroupRequired || Boolean(classGroupId))
   )
 
   const canPublish = complete
@@ -196,7 +251,23 @@ export function AssessmentEditorPage() {
   }
 
   async function persist(publish: boolean) {
-    if (academicModuleEnabled && !classGroupId) {
+    // Defesa em profundidade (item (3) do achado do Codex): mesmo que algum
+    // caminho futuro de UI chame persist() antes de a capacidade ser conhecida,
+    // nada é persistido. Hoje o formulário nem chega a ser renderizado nesse
+    // estado, mas a guarda fica aqui porque este é o ponto de ESCRITA.
+    if (capabilitiesLoading) {
+      setError('Aguarde: ainda estamos verificando a configuração do módulo acadêmico.')
+      return
+    }
+    // Defesa em profundidade para a falha DEFINITIVA (lacuna 1). Mesma razão do
+    // guarda acima: sem a configuração confirmada não sabemos se a turma é
+    // obrigatória, e escrever "no escuro" é exatamente o que o fail-closed
+    // precisa impedir. Hoje o formulário também não é renderizado neste estado.
+    if (capabilitiesError) {
+      setError('Não foi possível confirmar a configuração do módulo acadêmico. Tente novamente antes de salvar.')
+      return
+    }
+    if (classGroupRequired && !classGroupId) {
       setError('A seleção de uma turma vinculada é obrigatória no modo acadêmico.')
       return
     }
@@ -303,6 +374,51 @@ export function AssessmentEditorPage() {
   }
 
   if (loading) return <Spinner label="Carregando avaliação…" />
+  // Decisão de UX (correção do achado do Codex, itens (2) e (3)): enquanto a
+  // capacidade é DESCONHECIDA, substituímos o formulário inteiro por um
+  // Spinner, em vez de apenas desabilitar os botões. Três razões: (a) é o
+  // idioma já usado neste arquivo para "ainda não dá para editar"; (b) desabilitar
+  // só os botões ainda deixaria o usuário preencher a avaliação toda para só
+  // então descobrir que falta turma — pior UX que esperar alguns milissegundos;
+  // (c) com o formulário fora da árvore, `complete` e os handlers de submit
+  // ficam inalcançáveis, de modo que a janela de escrita simplesmente não
+  // existe, em vez de depender de um `disabled` correto em cada botão.
+  // Depois que capabilitiesLoading vira false, o comportamento é EXATAMENTE o
+  // de antes para os dois valores definitivos de academicModuleEnabled.
+  if (capabilitiesLoading) return <Spinner label="Verificando configuração do módulo acadêmico…" />
+
+  // SANEAMENTO (lacuna 1, 2026-10-13): falha DEFINITIVA ≠ "módulo desligado".
+  // Aqui a consulta já terminou e fracassou, então um spinner mentiria (nada
+  // mais está em curso) e abrir o formulário mentiria pior ainda (afirmaria
+  // "turma é opcional" sem nunca ter obtido a configuração real). Mostramos o
+  // que de fato aconteceu e oferecemos a única ação útil: tentar novamente.
+  if (capabilitiesError) {
+    return (
+      <>
+        <div className="page-heading">
+          <div>
+            <Link className="back-link" to="/avaliacoes">
+              ← Avaliações
+            </Link>
+            <p className="eyebrow">Configuração não confirmada</p>
+            <h1>Não foi possível verificar a configuração do módulo acadêmico</h1>
+          </div>
+        </div>
+        <Alert>
+          O servidor não respondeu à consulta de configuração do módulo acadêmico. Sem essa resposta não
+          sabemos se vincular uma turma é obrigatório nesta instalação, e por isso o editor não foi aberto:
+          você poderia preencher a avaliação inteira e ter o salvamento recusado no fim. Isto não significa
+          que o módulo acadêmico esteja desligado — significa que ainda não sabemos.
+        </Alert>
+        <section className="panel">
+          <p>Verifique sua conexão e se o servidor do AvalIA está disponível, e tente novamente.</p>
+          <button type="button" className="button button--primary" onClick={retryCapabilities}>
+            Tentar novamente
+          </button>
+        </section>
+      </>
+    )
+  }
 
   return (
     <>
@@ -330,17 +446,17 @@ export function AssessmentEditorPage() {
             <input required value={title} onChange={e => setTitle(e.target.value)} placeholder="Ex.: Estruturas de dados" disabled={isPublished} />
           </label>
           <label>
-            Turma vinculada{academicModuleEnabled ? ' (obrigatória)' : ' (opcional)'}
+            Turma vinculada{classGroupRequired ? ' (obrigatória)' : ' (opcional)'}
             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
               <select
-                required={academicModuleEnabled}
+                required={classGroupRequired}
                 value={classGroupId}
                 onChange={e => setClassGroupId(e.target.value)}
                 style={{ flex: 1 }}
                 disabled={isPublished}
               >
                 <option value="">
-                  {academicModuleEnabled ? 'Selecione uma turma obrigatória...' : 'Selecione uma turma (opcional)...'}
+                  {classGroupRequired ? 'Selecione uma turma obrigatória...' : 'Selecione uma turma (opcional)...'}
                 </option>
                 {classGroups.map(cg => (
                   <option key={cg.id} value={cg.id}>
@@ -359,9 +475,20 @@ export function AssessmentEditorPage() {
                 </button>
               )}
             </div>
-            {academicModuleEnabled && !classGroupId && (
+            {classGroupRequired && !classGroupId && (
               <small style={{ color: '#c53030', display: 'block', marginTop: '0.25rem' }}>
                 Turma é obrigatória para novas avaliações quando o módulo acadêmico está ativo.
+              </small>
+            )}
+            {/* ACH-01: avaliação criada antes do módulo acadêmico. O backend
+                permite continuar editando sem turma (DEC-AV-023); a UI explica
+                isso em vez de bloquear, e o botão "Vincular turma" acima segue
+                disponível para quem quiser regularizar. */}
+            {isLegacyAssessmentWithoutClass && academicModuleEnabled && !classGroupId && (
+              <small style={{ color: '#92400e', display: 'block', marginTop: '0.25rem' }}>
+                Esta avaliação foi criada antes da ativação do módulo acadêmico e não tem turma vinculada.
+                Você pode continuar editando sem turma; se quiser vinculá-la a uma turma, selecione acima e
+                use “Vincular turma”.
               </small>
             )}
             {assessment?.class_group_id && (
@@ -487,7 +614,7 @@ export function AssessmentEditorPage() {
                 <small className="action-hint">
                   {localQuestions.length === 0
                     ? 'Adicione ao menos uma questão.'
-                    : academicModuleEnabled && !classGroupId
+                    : classGroupRequired && !classGroupId
                       ? 'Selecione uma turma vinculada, preencha todos os campos e faça a soma da rubrica coincidir com o valor de cada questão.'
                       : 'Preencha todos os campos e faça a soma da rubrica coincidir com o valor de cada questão.'}
                 </small>

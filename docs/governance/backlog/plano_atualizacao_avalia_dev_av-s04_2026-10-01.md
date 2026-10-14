@@ -599,11 +599,23 @@ de `9ab6e43`, independentemente do estado de `avalia_dev`.
 
 ### 4.2 Funcionalidade disponível no ambiente — depende de 3 fatores independentes
 
+> **NOTA (2026-10-13, AV-S03B): o fator 3 desta tabela deixou de existir.** O
+> frontend não lê mais `VITE_ACADEMIC_MODULE_ENABLED` (variável removida de
+> `frontend/.env.example` e de todo o código — `isAcademicModuleEnabled()` não
+> existe mais em `frontend/src/services/api.ts`). A capacidade passou a ser
+> consultada em runtime pelo endpoint `GET /v1/config/capabilities`
+> (`core/app/routers/config.py`), consumido por
+> `frontend/src/context/CapabilitiesContext.tsx`. Hoje são **2 fatores**:
+> migrações aplicadas e `ACADEMIC_MODULE_ENABLED` no backend. A linha 3 e o
+> parágrafo de `DEBT-AV-012` abaixo ficam preservados como registro histórico
+> do que o plano exigia em 2026-10-01; o procedimento vigente de ativação está
+> na seção 4.4, também com nota datada.
+
 | Fator | Estado atual de `avalia_dev` | O que falta |
 |---|---|---|
 | **1. Migrações aplicadas** | `e1b02279b1a5` apenas | `7b1d6d853f20`, `c4a8b2d91e37`, `a9f4c2e71b06` pendentes (seção 1) — sem elas, as tabelas de estrutura acadêmica e as colunas `position`/`cloned_from_id` **não existem fisicamente no banco**; qualquer tentativa de usar essas funcionalidades contra `avalia_dev` hoje falharia com erro de coluna/tabela inexistente |
 | **2. Flag de backend `ACADEMIC_MODULE_ENABLED`** | Não configurada no ambiente de `avalia_dev` (default do código: `false`, `core/app/config.py:18-20`) | Definir `ACADEMIC_MODULE_ENABLED=true` no `.env`/ambiente do processo Core que aponta para `avalia_dev`, **depois** das migrações da seção 1 estarem aplicadas (a flag liga a exigência de `class_group_id`; sem as tabelas, ativá-la antes quebraria a criação de avaliação) |
-| **3. Flag de frontend `VITE_ACADEMIC_MODULE_ENABLED`** | Documentada em `frontend/.env.example` como `true`, mas é **build-time** (Vite) — precisa estar definida no ambiente de build do frontend que serve a demonstração, não apenas documentada | Build do frontend com `VITE_ACADEMIC_MODULE_ENABLED=true` no momento do `npm run build` (ou `.env` lido pelo `vite dev`, se a demonstração rodar em modo dev) |
+| **3. Flag de frontend `VITE_ACADEMIC_MODULE_ENABLED`** ~~(fator ativo)~~ — **obsoleto desde 2026-10-13 (AV-S03B)**, ver nota acima | Documentada em `frontend/.env.example` como `true`, mas é **build-time** (Vite) — precisa estar definida no ambiente de build do frontend que serve a demonstração, não apenas documentada | Build do frontend com `VITE_ACADEMIC_MODULE_ENABLED=true` no momento do `npm run build` (ou `.env` lido pelo `vite dev`, se a demonstração rodar em modo dev) |
 
 **Débito técnico já registrado e aceito** (`DEBT-AV-012`): as duas flags
 (`ACADEMIC_MODULE_ENABLED` no backend, `VITE_ACADEMIC_MODULE_ENABLED` no
@@ -615,6 +627,15 @@ manualmente, até que a solução estrutural recomendada (endpoint de
 capacidades consultado pelo frontend) seja implementada — não prioritária
 hoje, conforme `DEC-AV-027`.
 
+> **NOTA (2026-10-13, AV-S03B) sobre o parágrafo acima:** a solução estrutural
+> ali descrita como futura ("endpoint de capacidades consultado pelo frontend")
+> foi implementada e validada localmente em `AV-S03B`. Não há mais duas flags a
+> manter coerentes: a única flag é `ACADEMIC_MODULE_ENABLED` no backend. O
+> parágrafo é mantido como registro de como o débito foi diagnosticado e aceito
+> em 2026-10-01. Estado atual de `DEBT-AV-012`: ver
+> `docs/governance/registers/technical_debts.md` (resolvido tecnicamente,
+> aguardando publicação).
+
 ### 4.4 Ativação (P5) — procedimento separado de P4, detalhado
 
 **Revisão de 2026-10-01:** descrito aqui em detalhe operacional porque P5
@@ -623,6 +644,41 @@ conforme já estabelecido na seção 5. P5 só pode começar depois que P4
 estiver concluído e os pós-checks da seção 3.7 tiverem passado — as 4
 migrações precisam existir fisicamente antes de a flag de backend exigir
 `class_group_id`.
+
+> **NOTA (2026-10-13, AV-S03B) — o passo 3 deste procedimento não é mais
+> necessário.** Quando este procedimento foi escrito (2026-10-01), ativar o
+> módulo exigia configurar DUAS flags independentes: `ACADEMIC_MODULE_ENABLED`
+> no backend e `VITE_ACADEMIC_MODULE_ENABLED` em tempo de build do frontend.
+> Após `AV-S03B` isso mudou: o frontend obtém a capacidade do backend em
+> runtime, via `GET /v1/config/capabilities`
+> (`core/app/routers/config.py` → `frontend/src/context/CapabilitiesContext.tsx`),
+> e **não existe mais variável de build-time de módulo acadêmico no frontend**.
+> Consequências para P5, quando e se for autorizado:
+>
+> - passo 1 (definir `ACADEMIC_MODULE_ENABLED=true`) e passo 2 (reinício do
+>   Core) permanecem **exatamente** como descritos — continuam obrigatórios;
+> - passo 3 (rebuild do frontend) **não se aplica mais**: nenhum rebuild,
+>   redeploy de `dist/` ou invalidação de cache de CDN é necessário para que a
+>   UI passe a refletir a flag. Basta o reinício do Core do passo 2 e um
+>   recarregamento da página pelo usuário (o frontend consulta o endpoint a
+>   cada carga da aplicação);
+> - passo 4 (teste funcional) permanece, mas sem a cláusula "as duas flags
+>   confirmadamente coerentes" — não há duas flags. O teste de coerência
+>   UI↔backend que resta é confirmar que
+>   `GET /v1/config/capabilities` devolve `{"academic_module_enabled": true}` no
+>   host servido e que a UI, recarregada, mostra o item de menu "Gestão
+>   Acadêmica" e exige turma para avaliação NOVA;
+> - passo 6 (reversão) idem: basta `ACADEMIC_MODULE_ENABLED=false` + reinício
+>   do Core; nenhum rebuild de frontend.
+>
+> Atenção, ponto novo introduzido pela mudança: como a UI agora **depende** do
+> endpoint, se o Core estiver inacessível a UI é fail-closed (trata a capacidade
+> como desconhecida, esconde a área acadêmica e, no editor de avaliação, mostra
+> erro com "Tentar novamente" em vez de abrir formulário gravável). Isso é
+> intencional; não confundir com "módulo desligado" ao validar P5.
+>
+> O texto original dos passos abaixo é **preservado** como registro do
+> procedimento vigente em 2026-10-01, sem reescrita silenciosa.
 
 1. **Configuração do backend.** Definir `ACADEMIC_MODULE_ENABLED=true` no
    `.env` (ou variável de ambiente equivalente do processo gerenciado) do
@@ -643,7 +699,9 @@ migrações precisam existir fisicamente antes de a flag de backend exigir
    ser rejeitada se a flag exigir turma) para confirmar que o processo
    reiniciado está de fato lendo o novo valor, não apenas que subiu.
 
-3. **Rebuild do frontend com a flag de build-time.** `VITE_ACADEMIC_MODULE_ENABLED`
+3. **Rebuild do frontend com a flag de build-time.** **[PASSO OBSOLETO desde
+   2026-10-13 (AV-S03B) — não executar; ver nota datada acima.]**
+   `VITE_ACADEMIC_MODULE_ENABLED`
    é lida em tempo de build pelo Vite (`frontend/.env.example`) — definir
    em `.env`/ambiente do processo de build e **rebuildar** (não basta
    reiniciar um servidor estático servindo um build antigo):
@@ -659,7 +717,10 @@ migrações precisam existir fisicamente antes de a flag de backend exigir
    CDN/proxy do build antigo.
 
 4. **Teste funcional pós-ativação, com as duas flags confirmadamente
-   coerentes** (mesmo valor `true` em backend e frontend — `DEBT-AV-012`):
+   coerentes** (mesmo valor `true` em backend e frontend — `DEBT-AV-012`)
+   — **[a cláusula "duas flags coerentes" é obsoleta desde 2026-10-13
+   (AV-S03B): existe uma única flag, no backend; os três testes abaixo
+   permanecem válidos. Ver nota datada acima.]**:
    - criar uma avaliação com `class_group_id` preenchido via UI, confirmar
      que o backend aceita;
    - confirmar que uma avaliação com `class_group_id` ausente é rejeitada
@@ -684,7 +745,9 @@ migrações precisam existir fisicamente antes de a flag de backend exigir
 
 6. **Reversão, se necessário:** `ACADEMIC_MODULE_ENABLED=false` + reinício
    do backend; rebuild do frontend com `VITE_ACADEMIC_MODULE_ENABLED=false`
-   (ou ausente). As migrações permanecem aplicadas (não é necessário nem
+   (ou ausente) — **[a parte do rebuild do frontend é obsoleta desde
+   2026-10-13 (AV-S03B): a reversão é só backend + reinício. Ver nota datada
+   acima.]**. As migrações permanecem aplicadas (não é necessário nem
    desejável fazer downgrade só para desativar a flag — as colunas são
    nullable e retrocompatíveis, conforme já registrado na seção 5, bloco
    [P5]).
@@ -757,7 +820,13 @@ autorização necessária.
 [P5] AUTORIZAÇÃO NECESSÁRIA #4 — ativar ACADEMIC_MODULE_ENABLED=true
      (backend, com reinício do processo) + VITE_ACADEMIC_MODULE_ENABLED=true
      (rebuild do frontend) no ambiente de avalia_dev, seguido de teste
-     funcional (procedimento detalhado na seção 4.4). Só pode ocorrer
+     funcional (procedimento detalhado na seção 4.4).
+     NOTA (2026-10-13, AV-S03B): a segunda metade desta autorização
+     (VITE_ACADEMIC_MODULE_ENABLED + rebuild do frontend) não é mais
+     necessária — o frontend obtém a capacidade do backend em runtime via
+     GET /v1/config/capabilities. P5, se autorizado, passa a ser apenas
+     "ACADEMIC_MODULE_ENABLED=true no backend + reinício do processo +
+     teste funcional". Ver nota datada na seção 4.4. Só pode ocorrer
      depois de P4 concluído (as migrações precisam existir fisicamente
      antes da flag exigir class_group_id). Separada de P4 porque é uma
      decisão de produto (ligar o módulo acadêmico para demonstração), não
