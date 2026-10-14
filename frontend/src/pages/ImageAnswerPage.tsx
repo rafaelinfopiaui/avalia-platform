@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Alert } from '../components/Alert'
 import { Spinner } from '../components/Spinner'
-import { ApiError, createImageAnswer, downloadAnswerImage, listAnswerImages, listAssessments } from '../services/api'
+import { ApiError, createImageAnswer, downloadAnswerImage, listAnswerImages, listAssessments, listImageAnswers } from '../services/api'
 import type { AnswerImage, AnswerWithImages, Assessment } from '../types'
 
 // Resposta por imagem (AV-S06B, DEC-AV-037): a foto é a entrada inicial da
@@ -37,6 +37,18 @@ function humanError(error: unknown, action: 'enviar' | 'carregar'): string {
     default: return action === 'enviar'
       ? 'Não foi possível armazenar a imagem. Nenhuma resposta foi registrada; tente novamente.'
       : 'Não foi possível carregar a imagem. Tente novamente.'
+  }
+}
+
+// Mensagens da consulta (leitura): não falam em "registrar" nem exigem vínculo.
+function listError(error: unknown): string {
+  if (!(error instanceof ApiError)) return 'Não foi possível carregar as respostas por foto.'
+  switch (error.status) {
+    case 0: return error.message
+    case 401: return 'Sua sessão expirou. Entre novamente para consultar as respostas por foto.'
+    case 403: return 'Você não tem permissão para consultar as respostas desta avaliação.'
+    case 404: return 'Avaliação ou questão não encontrada. Atualize a página e selecione novamente.'
+    default: return 'Não foi possível carregar as respostas por foto.'
   }
 }
 
@@ -106,7 +118,7 @@ function SentAnswer({ answer, questionLabel }: { answer: AnswerWithImages; quest
 
   return (
     <article className="panel" style={{ marginBottom: '1rem' }}>
-      <p className="eyebrow">Aguardando transcrição</p>
+      <p className="eyebrow">{answer.transcription_status === 'TRANSCRICAO_CONFIRMADA' ? 'Transcrição confirmada' : 'Aguardando transcrição'}</p>
       <h3 style={{ marginTop: 0 }}>{answer.student_name_fake} — {questionLabel}</h3>
       <p><small>Resposta {answer.id}</small></p>
       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
@@ -134,7 +146,12 @@ export function ImageAnswerPage() {
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [sent, setSent] = useState<{ answer: AnswerWithImages; questionLabel: string }[]>([])
+  // Envios desta sessão + respostas já persistidas no backend (retomada, DEBT-AV-014).
+  const [sent, setSent] = useState<AnswerWithImages[]>([])
+  const [persisted, setPersisted] = useState<AnswerWithImages[]>([])
+  const [listLoading, setListLoading] = useState(false)
+  const [listLoadError, setListLoadError] = useState('')
+  const listRequest = useRef(0)
   const fileInput = useRef<HTMLInputElement>(null)
 
   const load = () => {
@@ -151,7 +168,35 @@ export function ImageAnswerPage() {
   const questions = assessment?.questions || []
   const questionIndex = questions.findIndex(q => q.id === questionId)
   const question = questionIndex >= 0 ? questions[questionIndex] : undefined
-  const questionLabel = question ? `Questão ${question.position || questionIndex + 1}` : ''
+  const selectedAssessmentId = assessment?.id || ''
+
+  const loadPersisted = () => {
+    // Limpa antes de buscar e descarta respostas de seleções anteriores.
+    const requestId = ++listRequest.current
+    setPersisted([])
+    setListLoadError('')
+    if (!selectedAssessmentId) { setListLoading(false); return }
+    setListLoading(true)
+    listImageAnswers(selectedAssessmentId, questionId || undefined)
+      .then(items => { if (requestId === listRequest.current) setPersisted(items) })
+      .catch(e => { if (requestId === listRequest.current) setListLoadError(listError(e)) })
+      .finally(() => { if (requestId === listRequest.current) setListLoading(false) })
+  }
+  useEffect(loadPersisted, [selectedAssessmentId, questionId])
+
+  const labelFor = (id: string) => {
+    const index = questions.findIndex(q => q.id === id)
+    return index >= 0 ? `Questão ${questions[index].position || index + 1}` : 'Questão'
+  }
+  // Só respostas da seleção atual; sem duplicar o que foi enviado nesta sessão.
+  const visibleAnswers = (() => {
+    const byId = new Map<string, AnswerWithImages>()
+    for (const item of [...sent, ...persisted]) {
+      const inSelection = questionId ? item.question_id === questionId : questions.some(q => q.id === item.question_id)
+      if (inSelection && !byId.has(item.id)) byId.set(item.id, item)
+    }
+    return [...byId.values()].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+  })()
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -164,7 +209,7 @@ export function ImageAnswerPage() {
     setError('')
     try {
       const answer = await createImageAnswer({ question_id: question.id, student_name: student.trim(), file })
-      setSent(previous => [{ answer, questionLabel }, ...previous])
+      setSent(previous => [answer, ...previous])
       setFile(null)
       setStudent('')
       if (fileInput.current) fileInput.current.value = ''
@@ -235,11 +280,17 @@ export function ImageAnswerPage() {
           </form>
 
           <section>
-            <h2>Respostas enviadas nesta sessão</h2>
-            {sent.length === 0 ? (
-              <p>Nenhuma resposta por foto enviada ainda.</p>
+            <h2>Respostas por foto desta seleção</h2>
+            {!assessment ? (
+              <p>Selecione uma avaliação para ver as respostas por foto já registradas.</p>
+            ) : listLoading ? (
+              <Spinner label="Carregando respostas por foto…" />
+            ) : listLoadError ? (
+              <Alert>{listLoadError} <button type="button" className="link-button" onClick={loadPersisted}>Tentar novamente</button></Alert>
+            ) : visibleAnswers.length === 0 ? (
+              <p>Nenhuma resposta por foto nesta seleção.</p>
             ) : (
-              sent.map(item => <SentAnswer key={item.answer.id} answer={item.answer} questionLabel={item.questionLabel} />)
+              visibleAnswers.map(item => <SentAnswer key={item.id} answer={item} questionLabel={labelFor(item.question_id)} />)
             )}
           </section>
         </div>

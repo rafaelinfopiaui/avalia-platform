@@ -705,6 +705,46 @@ async def create_image_answer(
     )
 
 
+# Retomada das respostas por imagem (DEBT-AV-014): leitura histórica, autorizada
+# só por propriedade (como get_assessment) — não exige vínculo ativo de turma.
+@app.get("/v1/assessments/{assessment_id}/image-answers", response_model=list[AnswerWithImagesOut])
+def list_image_answers(
+    assessment_id: str,
+    question_id: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
+    assessment = _get_owned_assessment(db, assessment_id, user)
+    query = (
+        db.query(Answer)
+        .join(Question, Answer.question_id == Question.id)
+        .filter(Question.assessment_id == assessment.id, Answer.source == AnswerSource.IMAGE)
+    )
+    if question_id is not None:
+        question = db.get(Question, question_id)
+        if question is None or question.assessment_id != assessment.id:
+            raise HTTPException(status_code=404, detail="Questão não encontrada nesta avaliação.")
+        query = query.filter(Answer.question_id == question.id)
+    answers = query.order_by(Answer.created_at, Answer.id).all()
+    images_by_answer: dict[str, list[AnswerImage]] = {answer.id: [] for answer in answers}
+    if answers:
+        images = (
+            db.query(AnswerImage)
+            .filter(AnswerImage.answer_id.in_(list(images_by_answer)))
+            .order_by(AnswerImage.created_at, AnswerImage.id)
+            .all()
+        )
+        for image in images:
+            images_by_answer[image.answer_id].append(image)
+    return [
+        AnswerWithImagesOut(
+            **AnswerOut.model_validate(answer).model_dump(),
+            images=[AnswerImageOut.model_validate(image) for image in images_by_answer[answer.id]],
+        )
+        for answer in answers
+    ]
+
+
 # ---------------- Corrections ----------------
 def _serialize_job(db: Session, job: CorrectionJob) -> CorrectionJobOut:
     latest_exec = (
