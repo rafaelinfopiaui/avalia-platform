@@ -123,3 +123,24 @@ Rodada isolada própria (banco `av_s06b_debt014_rev_hermes2`, Core `:8199`, Vite
 - Bancos protegidos intactos.
 - Próximo passo: decisão de Rafael sobre homologação/integração do PR #17
   (merge continua vedado até autorização explícita e nova rodada de revisão).
+
+## 8. Adendo — Homologação (2026-10-14, DEC-AV-039)
+
+Rafael homologou a solução técnica desta fatia e autorizou a integração do PR #17
+por merge commit (`DEC-AV-039`, ver `registers/decisions.md`). Correção de
+precisão registrada antes da conferência limitada: `core/local-nao-versionado/`
+não estava coberto pela regra `/local-nao-versionado/` do `.gitignore` (ancorada
+na raiz do repo) — o scratch de verificação (`seed_debt014_rev_hermes2.py`, nunca
+staged nem commitado) foi movido para `local-nao-versionado/` (raiz), onde a
+regra se aplica de fato; confirmado por `git check-ignore` e `git status`
+(working tree limpa). A contagem de "3 commits" do relatório anterior estava
+desatualizada — eram corretamente 4 no HEAD `d11852d` (um commit adicional de
+precisão registrando a publicação em si, feito após o relatório inicial);
+reconciliado aqui sem repetir testes já comprovados pela CI (2 execuções verdes
+no mesmo conjunto de mudanças de código).
+
+Integração (merge) — a ser preenchida após o merge efetivo:
+- HEAD homologado nesta rodada: __A_PREENCHER_APOS_COMMIT_DE_PRECISAO__
+- SHA integrado (merge commit em main): __A_PREENCHER_APOS_MERGE__
+- CI pós-merge: __A_PREENCHER_APOS_MERGE__
+- Checkout principal: __A_PREENCHER_APOS_MERGE__
