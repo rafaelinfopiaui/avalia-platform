@@ -1,0 +1,237 @@
+================================================================================
+RESUMO DA SESSÃO — PROJETO AvalIA
+Sessão: 20261013_200923_62e9e5  ("Concluir trilha Operação de uma turma no AvalIA")
+Período: 2026-10-13 20:09 às 23:57 (-03)
+Gerado por: Hermes (verificação feita direto no histórico da sessão, não de memória)
+================================================================================
+
+VISÃO GERAL
+-------------------------------------------------------------------------------
+A sessão teve dois grandes blocos de trabalho no AvalIA:
+
+  BLOCO 1 — AV-S03B (Módulo acadêmico coerente): levado de entrega preparada
+  até HOMOLOGADA e INTEGRADA em main (PR #14 mergeado), em 4 rodadas.
+
+  BLOCO 2 — AV-S06B (Recebimento/armazenamento de imagens): planejada,
+  governança de abertura registrada, mas a EXECUÇÃO ficou bloqueada por um
+  bug de autenticação OAuth do Claude Code. Nenhum código de produto foi
+  gerado nesta sprint ainda.
+
+Ao final, a sessão desviou para o diagnóstico do bug de auth do Claude Code
+(sem alterar nada — só diagnóstico).
+
+
+================================================================================
+BLOCO 1 — AV-S03B: MÓDULO ACADÊMICO COERENTE
+================================================================================
+
+RODADA 1 — Entrega e validação local
+-------------------------------------------------------------------------------
+Ponto de partida confirmado (sem reabrir nada homologado):
+  - AV-S01 a AV-S04 integradas em main; AV-S05B parcial inalterada.
+  - main limpo, HEAD 822570e (merge PR #13 — fix AnswerPage + DEBT-AV-013).
+  - avalia_dev: version_num=a9f4c2e71b06, 16 human_reviews ativas (preservado).
+  - avalia_apresentacao_demo_20261002: preservado, mesmo head.
+  - Backlog: 70 linhas BL-AV-*. Progresso 19/70 mantido (AV-S03B é resolução
+    de débito estrutural DEBT-AV-012/013, não item numerado do backlog).
+  - P5/seed operacional: não autorizados, não tocados.
+
+Matriz de linha de chegada (resumo):
+  - Obrigatório p/ versão utilizável: módulo acadêmico coerente, fluxo
+    imagem->transcrição mínimo, revisão/resultados básicos.
+  - Obrigatório p/ trilha completa: CSV, lote, avaliação formal da IA,
+    dashboard produto, E2E/carga/instalação reproduzível.
+  - Experimental/evolução: segunda revisão, embeddings nível 2, calibração.
+  - Decisão pendente de Rafael: ambiente-alvo da trilha, publicação da
+    entrega, sequência das próximas fatias.
+
+Implementado no ambiente isolado (branch feat/av-s03b-modulo-academico-coerente,
+sem commit nesta rodada):
+  - GET /v1/config/capabilities — fonte única de verdade (resolve DEBT-AV-012).
+  - CapabilitiesContext fail-closed no frontend — menu oculto, rota /academico
+    bloqueada, editor protegido (resolve DEBT-AV-013).
+  - Seed fictício idempotente (av_s03b_capacidades_*), que recusa por
+    construção escrever em avalia_dev e avalia_apresentacao_demo_20261002.
+
+Validação end-to-end: múltiplos restarts do Core (módulo ligado/desligado/
+com falha), AI Engine simulado e Vite — todos derrubados após os testes
+(ambiente limpo, sem porta/processo/banco residual confirmado).
+
+Entregue: relatório geral em texto puro (514 linhas, 13 seções) em
+  /Users/rafaeloliveira/avalia-local-packages/av-s03b-pacote-20261013_210023/
+  relatorio_geral_av_s03b.txt  (fora do repositório Git)
+
+
+RODADA 2 — Saneamento dirigido (4 lacunas)
+-------------------------------------------------------------------------------
+Executor principal: Claude Code. Revisão independente: Antigravity.
+Codex: NÃO foi dispachado (nenhum risco concreto justificou auditoria pontual).
+
+  Lacuna 1 — Configuração desconhecida vs. módulo desligado:
+    Achado confirmado: AssessmentEditorPage reabria o formulário gravável
+    após FALHA DEFINITIVA de GET /v1/config/capabilities, tratando erro como
+    "modo legado confirmado" (a correção anterior só tratava 'loading').
+    Correção: CapabilitiesContext passou a distinguir 'error' de 'loading',
+    com retry(); editor mostra tela de erro clara e bloqueia toda escrita
+    em 3 pontos (listagem de turmas, persist(), render).
+
+  Lacuna 2 — ACH-01 (edição de legado bloqueada indevidamente):
+    Confirmado por leitura do backend: update/publish_assessment nunca
+    exigiram turma; só create_assessment na criação. A UI exigia turma em
+    qualquer salvamento com módulo ligado, inclusive rascunho legado aceito
+    pelo servidor. Correção: isLegacyAssessmentWithoutClass/classGroupRequired
+    — exige turma apenas na criação nova. Sem migração/vínculo automático.
+
+  Lacuna 3 — Retirada de VITE_ACADEMIC_MODULE_ENABLED:
+    Removida de frontend/.env.example e das duas invocações do dry-run em
+    run_avalia_dev_update_dry_run.sh. Procedimento P5 atualizado com notas
+    datadas (histórico preservado). P5 não executado.
+
+  Lacuna 4 — Precisão das evidências:
+    Tabela de critérios de aceite reescrita mapeando cada AC à evidência
+    real (automatizada/integração/visual). AC-07 corrigido para "IA simulada
+    nesta rodada" (citação a Ollama real preservada como nota). Escopo do
+    bloqueio da amostra manuscrita restrito à decisão arquitetural
+    (BL-AV-4B-02), não à Fase 2 inteira.
+
+Revisão independente do Antigravity (limitada ao delta): execução própria —
+110 passed, tsc/eslint limpos. Confirmou algebricamente que nenhuma avaliação
+nova escapa da exigência de turma e que o erro definitivo bloqueia escrita.
+Classificou Q1 (publicar legado sem turma) como pergunta de produto genuína —
+corretamente não decidida pelo Claude Code. Veredito: APROVADO.
+
+Entregue: resumo da rodada em texto puro (426 linhas, 10 seções) em
+  /Users/rafaeloliveira/avalia-local-packages/av-s03b-pacote-20261013_223430/
+  resumo_secao_saneamento_rodada2.txt  (fora do repositório Git)
+
+
+RODADA 3 — Publicação em PR rascunho
+-------------------------------------------------------------------------------
+  - Q1 registrada como DECIDIDA: manutenção do comportamento vigente (legado
+    sem turma continua editável/publicável); mudança futura é proposta
+    separada, não bloqueante.
+  - Duas mensagens obsoletas corrigidas em seed_academic_multi_question_demo.py
+    (apenas texto; guards/lógica/dados intocados; confirmado por git diff +
+    py_compile). Suíte completa reexecutada: 110 passed.
+  - Conjunto conferido: sem credencial, banco, backup ou config local no diff.
+  - npm run build no estado final: build limpo, 34 módulos, dist/ gitignored.
+  - 5 commits organizados por finalidade (cada um com git diff --staged
+    conferido antes):
+      fb931c2  backend: endpoint de capacidades + teste de contrato legado
+      7273cd1  frontend: CapabilitiesContext + guardas fail-closed
+      679f913  seed isolado novo + testes de guarda
+      882cd70  retirada de VITE_ACADEMIC_MODULE_ENABLED
+      a809166  governança (sprint/snapshot/decisões/débitos/dashboard)
+  - Push: origin/feat/av-s03b-modulo-academico-coerente, verificado por
+    git fetch independente. SHA remoto = local = a8091669546a13e5f79f1f8b99bd12b6d913e253
+  - PR #14 (rascunho): github.com/rafaelinfopiaui/avalia-platform/pull/14
+    base main, head a8091669. Checks do HEAD: 3/3 SUCCESS (Core API, AI
+    Engine, Frontend). mergeStateStatus: CLEAN, mergeable: MERGEABLE.
+
+Precisão de estados mantida: aprovação técnica local != publicação em PR !=
+homologação != integração != ativação operacional (P5). Progresso: 19/70.
+
+
+RODADA 4 — Homologação e integração (merge em main)
+-------------------------------------------------------------------------------
+  - Diff documental da §15 da sprint conferido: só registra a publicação e
+    resultados, sem ampliar escopo nem declarar ativação. Homologação
+    registrada separadamente (Rodada 4 da sprint + DEC-AV-034), mantendo
+    distintos: entrega funcional homologada != integração != P5/ativação.
+  - HEAD reconfirmado antes do stage (a8091669, inalterado). Stage seletivo
+    de 2 arquivos (sprint...md, decisions.md).
+      Novo HEAD do commit documental: 73d0e1b2100788a7d65808dda578a999fa92d3b6
+    Checks próprios desse HEAD (run 38500861630): 3/3 SUCCESS.
+  - Integração: diff final reconfirmado contra main (25 arquivos, 6 commits).
+    PR retirado de rascunho e integrado por MERGE COMMIT (não squash/rebase),
+    branch preservada local e remota.
+      SHA integrado (merge commit): 6f8a526bb5fd5c6014e57cd869065755587b01f6
+    CI pós-merge (run 38501170615, SHA 6f8a526): 3/3 jobs success.
+  - Checkout principal atualizado para main por fast-forward puro
+    (822570e..6f8a526), working tree limpo, nada perdido. Sem branch/worktree
+    novos. Suíte reexecutada na main integrada: 110 passed.
+
+Estado final do Bloco 1:
+  - Git: main local = origin/main = 6f8a526, working tree limpo.
+  - DEBT-AV-012/013: solução técnica INTEGRADA a main. Ainda NÃO ativada
+    operacionalmente — P5 não autorizado, não executado; nada escrito em
+    avalia_dev.
+  - avalia_dev / avalia_apresentacao_demo_20261002: intactos
+    (version_num=a9f4c2e71b06, 16 human_reviews), confirmados antes e depois.
+  - Progresso: 19/70. AV-S05B: permanece parcial.
+
+
+================================================================================
+BLOCO 2 — AV-S06B: RECEBIMENTO E ARMAZENAMENTO DE IMAGENS (BL-AV-4B-03/04/05)
+================================================================================
+
+Autorização: DEC-AV-035 — planejamento detalhado e EXECUÇÃO LOCAL, preservando
+prioridade imagem > CSV (DEC-AV-016). Confirmado pela leitura do backlog que
+esta sub-entrega NÃO depende de BL-AV-4B-02 (decisão arquitetural de OCR).
+
+Preservado explicitamente: uma resposta por foto (DEC-AV-018), seleção manual
+pelo professor (DEC-AV-021), autorização por propriedade/vínculo, confirmação
+humana da transcrição antes de correção.
+
+NÃO autoriza: escolha de motor de OCR, benchmark concluído, OCR real/simulado,
+disparo automático de correção, imagem por URL pública, stage/commit/push/merge,
+P5, escrita em avalia_dev/banco de apresentação, seed operacional, deploy.
+
+Governança de abertura REGISTRADA (tudo preservado como untracked/modificado):
+  - Branch criada: feat/av-s06b-recebimento-armazenamento-imagens
+  - Snapshot de abertura:
+      docs/governance/snapshots/snapshot_EXEC-2026-10-14-01_abertura_av-s06b.md
+  - Sprint doc (escopo, mapa de impacto, matriz de decisões, AC-01..AC-10):
+      docs/governance/sprints/sprint_AV-S06B_recebimento_armazenamento_imagens.md
+  - DEC-AV-035 registrada em docs/governance/registers/decisions.md
+  - Prompt detalhado de execução preparado (195 linhas): /tmp/claude_prompt_av_s06b.md
+
+BLOQUEIO: os dois dispatches do Claude Code como executor principal FALHARAM
+com "Failed to authenticate: OAuth session expired and could not be refreshed".
+Confirmado por git status que NADA de código foi gerado — a falha ocorreu antes
+de qualquer edição. A execução da AV-S06B ficou pendente.
+
+Status desta sprint ao fim da sessão: PLANEJADA E ABERTA, execução NÃO iniciada.
+
+
+================================================================================
+DESVIO FINAL — DIAGNÓSTICO DO BUG DE AUTENTICAÇÃO DO CLAUDE CODE
+================================================================================
+(Somente diagnóstico; nada foi alterado/apagado/renomeado nesta sessão.)
+
+Causa provável: dois processos Claude Code concorrentes, de origens diferentes,
+disputando a mesma sessão OAuth e persistindo credenciais em backends
+diferentes (Keychain do macOS vs. arquivo ~/.claude/.credentials.json). Como o
+refresh token é rotativo, cada refresh de um processo invalida o do outro —
+explicando a queda intermitente de login.
+
+Evidências principais:
+  - Após um único login, Keychain e arquivo tinham tokens DIFERENTES
+    (refresh e access distintos), com ~66s de diferença de expiração.
+  - Processo PID 49429 (extensão Claude Code do Antigravity IDE, versão
+    2.1.292 desatualizada) rodando em segundo plano desde antes do login —
+    origem provável do refresh concorrente.
+  - Duas versões da extensão instaladas (2.1.292 e 2.1.296), rodando a antiga.
+  - CLI standalone separada e atualizada (2.1.299) em ~/.local/bin/claude.
+
+Correção recomendada (não executada nesta sessão): encerrar o processo zumbi,
+renomear .credentials.json para .bak, fazer claude auth login uma vez com tudo
+fechado, reabrir o Antigravity na versão nova, e monitorar se o arquivo
+reaparece. (Observação: esta correção foi efetivamente aplicada depois, já em
+sessão posterior.)
+
+
+================================================================================
+PENDÊNCIAS EM ABERTO AO FIM DA SESSÃO
+================================================================================
+  1. Executar a AV-S06B (bloqueada pela auth do Claude Code na época).
+  2. Decisões de produto ainda necessárias de Rafael para AV-S06B:
+     formatos, tamanho máximo, retenção e exclusão de imagens (propostas de
+     Hermes, não aprovadas — tratar como proposta restrita ao ambiente de teste).
+  3. AV-S05B: permanece parcial, aguardando amostra manuscrita.
+  4. P5 / seed operacional: não autorizados, não executados.
+  5. Ambiente-alvo da trilha completa (DEC-AV-006/007): decisão pendente.
+
+================================================================================
+FIM DO RESUMO
+================================================================================

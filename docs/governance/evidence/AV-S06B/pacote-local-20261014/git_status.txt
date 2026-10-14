@@ -1,0 +1,17 @@
+ M .gitignore
+ M core/app/config.py
+ M core/app/main.py
+ M core/app/models.py
+ M core/app/schemas.py
+ M core/requirements.txt
+ M docs/governance/executive_technical_dashboard.md
+ M docs/governance/registers/decisions.md
+ M docs/governance/snapshots/latest_execution.md
+?? core/alembic/versions/d5e3a7c19f42_add_answer_images.py
+?? core/app/routers/images.py
+?? core/app/tests/test_answer_images.py
+?? docs/governance/evidence/AV-S06B/
+?? docs/governance/evidence/resumo_sessao_2026-10-13_avalia.txt
+?? docs/governance/snapshots/snapshot_EXEC-2026-10-14-01_abertura_av-s06b.md
+?? docs/governance/snapshots/snapshot_EXEC-2026-10-14-02_execucao_av-s06b.md
+?? docs/governance/sprints/sprint_AV-S06B_recebimento_armazenamento_imagens.md

@@ -158,6 +158,21 @@ class AnswerOut(BaseModel):
         from_attributes = True
 
 
+class AnswerImageOut(BaseModel):
+    # storage_filename é interno e não é exposto.
+    id: str
+    answer_id: str
+    original_filename: str
+    content_type: str
+    size_bytes: int
+    sha256_hash: str
+    uploaded_by_id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # ---- Correction / job ----
 class CriterionScoreOut(BaseModel):
     criterion_id: str

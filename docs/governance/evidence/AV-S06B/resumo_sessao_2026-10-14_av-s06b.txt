@@ -1,0 +1,186 @@
+================================================================================
+RESUMO DA SESSÃO ATUAL — PROJETO AvalIA
+Tema: Correção de auth do Claude Code + Retomada e execução da AV-S06B
+Data: 2026-10-14 (-03)
+Gerado por: Hermes (tudo verificado por execução real, não por leitura de relatório)
+================================================================================
+
+VISÃO GERAL
+-------------------------------------------------------------------------------
+Esta sessão fez três coisas, em sequência:
+
+  A) Aplicou a correção do bug de autenticação OAuth do Claude Code que vinha
+     bloqueando a execução (diagnosticado na sessão anterior).
+  B) Retomou a AV-S06B (recebimento/armazenamento de imagens) conforme
+     DEC-AV-035 — Claude Code implementou; Hermes verificou independentemente;
+     Antigravity revisou independentemente.
+  C) Gerou os resumos em TXT solicitados.
+
+Resultado da AV-S06B: implementação APROVADA na revisão independente, com um bug
+real encontrado e corrigido pelo Hermes durante a verificação. Nada foi
+commitado/publicado — aguarda decisão de Rafael.
+
+
+================================================================================
+A) CORREÇÃO DA AUTENTICAÇÃO DO CLAUDE CODE
+================================================================================
+Com base no diagnóstico da sessão anterior (dois processos Claude Code
+concorrentes disputando a sessão OAuth; refresh token rotativo invalidando o do
+outro), foi aplicada a correção recomendada:
+
+  1. Encerrado o processo zumbi PID 49429 (extensão Antigravity v2.1.292).
+  2. Renomeado ~/.claude/.credentials.json para .bak-20261014-000024
+     (preservado, não apagado) para forçar o uso do Keychain como fonte única.
+
+Observação registrada: após novo login, o arquivo .credentials.json reapareceu
+e um novo processo da extensão 2.1.292 voltou a subir — ou seja, o padrão
+estrutural pode recorrer. Por ora a auth ficou funcional. A hipótese de refresh
+concorrente permanece como HIPÓTESE (não reaberta nem reconfirmada nesta rodada).
+
+Evidência de que a auth ficou OK: o próprio dispatch autorizado da AV-S06B rodou
+~9 minutos e concluiu (exit 0) — nas tentativas anteriores morria em segundos
+com "OAuth session expired".
+
+
+================================================================================
+B) AV-S06B — RECEBIMENTO E ARMAZENAMENTO DE IMAGENS (BL-AV-4B-03/04/05)
+================================================================================
+
+1. ESTADO RECUPERADO (sem reabrir AV-S03B, sem reiniciar planejamento)
+-------------------------------------------------------------------------------
+- Branch: feat/av-s06b-recebimento-armazenamento-imagens, HEAD 6f8a526
+  (merge do PR #14 da AV-S03B). Governança de abertura preservada; nada em stage.
+- Prompt de execução preservado, sanitizado (sem tokens/credenciais), em:
+    docs/governance/evidence/AV-S06B/prompt_execucao_av-s06b_claude_code.md
+
+2. IMPLEMENTAÇÃO — Claude Code (executor principal, modelo Opus)
+-------------------------------------------------------------------------------
+DELIMITAÇÃO: esta fatia entrega SOMENTE backend/API. NÃO inclui interface de
+upload no frontend (não implementada, sem validação visual). NÃO inclui exclusão
+de imagens (ver seção de decisões). Endpoints entregues: upload, listagem, download.
+
+Arquivos novos:
+  - core/app/routers/images.py           (3 endpoints: upload, listar, download)
+  - core/app/tests/test_answer_images.py (24 casos de teste)
+  - core/alembic/versions/d5e3a7c19f42_add_answer_images.py (tabela answer_images)
+Arquivos alterados:
+  - core/app/models.py     (classe AnswerImage)
+  - core/app/schemas.py    (AnswerImageOut — NÃO expõe storage_filename)
+  - core/app/config.py     (ANSWER_IMAGES_STORAGE_DIR; ANSWER_IMAGE_MAX_BYTES=10MB)
+  - core/app/main.py       (apenas registra o router)
+  - core/requirements.txt  (Pillow>=10.0)
+  - .gitignore             (/core/var/)
+
+Características de segurança implementadas: nome em disco gerado pelo servidor
+(uuid), nome do cliente só como metadado; validação de conteúdo real via Pillow;
+limite de tamanho em 2 camadas (Content-Length + streaming); escrita atômica
+com rollback (sem registro órfão); download só autenticado (sem rota estática
+pública); nenhum OCR, nenhuma correção automática; logs só com IDs/metadados.
+
+IMPORTANTE: o Claude Code NÃO conseguiu executar nada no ambiente dele
+(pip/pytest/ruff/banco bloqueados por permissão). Entregou o código com todos os
+10 critérios de aceite marcados honestamente como "NÃO VALIDADO NESTA RODADA".
+
+3. VERIFICAÇÃO INDEPENDENTE — Hermes (execução real, não leitura)
+-------------------------------------------------------------------------------
+BUG REAL ENCONTRADO E CORRIGIDO:
+  - O código passava "MPO" para Image.open(formats=[...]), o que dispara
+    KeyError('MPO') no Pillow 12.x e quebrava 100% dos uploads válidos (não só
+    fotos de câmera).
+  - Correção aplicada em core/app/routers/images.py: separei _OPEN_FORMATS
+    (["JPEG","PNG"], usado em Image.open) do dicionário _ALLOWED_FORMATS (que
+    mantém MPO->image/jpeg no resultado). Correção pontual de bug concreto do
+    executor.
+
+Resultados reais obtidos:
+  - Pillow 12.3.0 instalado no venv isolado do core.
+  - Suíte COMPLETA: 136 passed, 0 failed. Coleta confirma 136 = 110
+    pré-existentes + 26 novos da AV-S06B. Os 26 casos vêm de 24 funções
+    `def test_` (1 função parametrizada com 3 valores — random-bytes/pdf/
+    executable — expande em 3 casos, +2). "24 testes" conta funções; "26 casos"
+    é a coleta expandida do pytest. Sem regressão nos pré-existentes.
+    Ruff: `ruff check app` -> All checks passed (escopo do pacote app/ apenas;
+    a migração fica em core/alembic/versions/, fora desse escopo — ver achados).
+  - Validação em PostgreSQL ISOLADO novo (av_s06b_verif_hermes_20261014):
+    migração Alembic aplicada (tabela criada com FKs e índice corretos);
+    Core real rodando; 11/11 checks HTTP reais passando:
+      AC-01 upload válido dono -> 201 (sha256 presente, storage_filename oculto)
+      AC-02 outro professor -> 403
+      AC-03 sem auth -> 401
+      AC-04 conteúdo falso (content-type forjado) -> 422
+      AC-06 nome adversarial ../../../etc/passwd.png -> só metadado; arquivos em
+            disco com nome uuid seguro; nada escrito fora do storage
+      AC-08 download dono -> 200 (bytes idênticos); outro professor -> 403
+      AC-10 nenhum CorrectionJob criado pelo upload
+    AC-05 (limite) e AC-07 (falha de armazenamento/commit) confirmados por 5
+    testes específicos passando (evidência por AC, não generalizada).
+  - Teardown: banco isolado dropado, storage temporário removido, porta livre.
+  - Bancos protegidos intactos: avalia_dev e apresentação (a9f4c2e71b06,
+    16 human_reviews), confirmados antes e depois.
+
+4. REVISÃO INDEPENDENTE — Antigravity (Gemini 3.8 Flash High; família diferente
+   do executor, para diversidade real)
+-------------------------------------------------------------------------------
+Parecer salvo em:
+  docs/governance/evidence/AV-S06B/revisao_independente_antigravity.md
+
+VEREDITO: APROVADO.
+
+Execução PRÓPRIA e independente (não reutilizou meus resultados):
+  - Rodou a própria suíte: 136 passed (110 pré-existentes + 26 novos), ruff limpo.
+  - Subiu o próprio banco isolado (av_s06b_review_agy_20261014), aplicou migração,
+    testou upgrade/downgrade (inclusive recusa de downgrade com registros),
+    exercitou HTTP real (201/200/401/422), e dropou o banco ao final.
+  - Inspeção de segurança por dimensão — todas CONFIRMADO SEGURO: path traversal,
+    autorização/vínculo, validação de conteúdo real, limite de tamanho, registros
+    órfãos, exposição pública, OCR/correção (zero), privacidade de logs.
+  - Validou explicitamente a correção do bug MPO do Hermes como "correta,
+    completa e sem regressão".
+  - Confirmou AC-01 a AC-10 todos Aprovados.
+  - Bancos protegidos não tocados; nenhuma ação Git.
+
+Achados — apenas 2, ambos NÃO-BLOQUEANTES:
+  1. ruff I001 (ordenação de imports) na migração nova — padrão já presente nas
+     migrações históricas do projeto.
+  2. Deprecation de class Config (Pydantic V2) em AnswerImageOut — segue o padrão
+     pré-existente dos outros schemas do arquivo.
+
+
+================================================================================
+DECISÕES AINDA PENDENTES DE RAFAEL (propostas, NÃO aprovadas)
+================================================================================
+Conforme §7 da sprint — tratadas como proposta restrita ao ambiente isolado,
+nunca como política operacional aprovada:
+
+  - Formatos aceitos: proposta JPEG e PNG apenas.
+  - Tamanho máximo: proposta 10 MB por imagem.
+  - Retenção/exclusão: proposta sem expiração automática. ATENÇÃO: exclusão de
+    imagens NÃO foi implementada nesta rodada — não há endpoint nem procedimento
+    documentado de exclusão. "Exclusão só manual/administrativa" é proposta de
+    POLÍTICA, não funcionalidade entregue. Entregues apenas: upload, listagem e
+    download. (Ligado a DEC-AV-013, pendente em caráter geral.)
+  - Proteção de logs: proposta de nunca logar binário/caminho; só IDs/metadados.
+
+
+================================================================================
+ESTADO FINAL E LIMITES RESPEITADOS
+================================================================================
+- Git: branch feat/av-s06b-recebimento-armazenamento-imagens; NADA em stage.
+  Working tree com os arquivos da AV-S06B (código + testes + migração + docs
+  de governança + o fix do MPO). Nenhum commit/push/merge.
+- Bancos protegidos (avalia_dev, apresentação): intactos.
+- Nenhum worktree novo; sem P5, sem seed operacional, sem deploy, sem baseline,
+  sem novo benchmark OCR.
+- AV-S05B permanece parcial; progresso homologado permanece 19/70 (AV-S06B ainda
+  não homologada).
+
+PENDENTE NESTA SESSÃO (próximos passos do Hermes):
+  - Consolidar a documentação de governança com o estado real: §8 (ACs) e §15
+    (execução/review) da sprint, snapshot de execução, dashboard, latest_execution.
+  - Entregar a Rafael a tabela de decisões pendentes (com recomendação/impacto) e
+    o diff local revisado para decisão de publicação — sem stage/commit até a
+    revisão do diff exato por Rafael.
+
+================================================================================
+FIM DO RESUMO
+================================================================================

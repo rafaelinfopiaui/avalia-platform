@@ -10,7 +10,7 @@ O AvalIA possui uma demonstração experimental herdada, organizada em Core API,
 
 | Referência | Estado | Link |
 |---|---|---|
-| Última execução registrada | EXEC-2026-10-02-02 (+ adendos 1 e 2), GOV-007 — configuração da distribuição de trabalho entre CLIs de IA (Claude Code, Antigravity, Codex): fallback automático de Codex removido do Hermes; regras de orquestração registradas em AGENTS.md; autenticação da CLI `claude` no binário correto confirmada e funcional (uso real de inferência, custo autorrelatado pela ferramenta, sem evidência de faturamento); novo processo do Hermes iniciado após a edição do config.yaml (configuração em disco comprovada; configuração efetiva em memória não testada); mecanismo de cobrança do provider `anthropic` do Hermes continua pendência separada e não comprovada (não bloqueante) | [ponteiro](snapshots/latest_execution.md) |
+| Última execução registrada | EXEC-2026-10-14-02 — AV-S06B: recebimento/armazenamento de imagens (backend/API). Aprovação técnica local concluída: suíte 136 passed, AC-01 a AC-10 com evidência real (HTTP em PostgreSQL isolado + testes + inspeção), bug real do Pillow (`KeyError('MPO')`) corrigido pelo Hermes, revisão independente do Antigravity APROVADO. Somente backend/API (sem interface de upload; sem exclusão de imagens). Não publicado; branch local sem commit/push; decisões de produto, publicação e homologação pendentes. Bancos protegidos intactos. Progresso homologado permanece 19/70; AV-S05B parcial. (execuções anteriores — AV-S03B 2026-10-13/14, GOV-007 2026-10-02 — na cadeia do ponteiro) | [ponteiro](snapshots/latest_execution.md) |
 | Configuração de orquestração de agentes (não funcional) | `GOV-007` — distribuição de trabalho entre Claude Code (executor principal), Antigravity (segundo executor/revisor cruzado) e Codex (auditorias pontuais); ver `DEC-AV-031`; documentação publicada em PR draft #12 (https://github.com/rafaelinfopiaui/avalia-platform/pull/12), sem merge | [documentação de evidência](evidence/GOV-007-distribuicao-clis/mecanismo_cobranca_hermes_claude_code.md) |
 | PR #2 (`docs/av-s02-encerramento-planos-operacionais`) | **fechado sem merge**; conteúdo necessário preservado em `main` via PR #4 | [snapshot de reconciliação](snapshots/snapshot_RECONCILIACAO-2026-09-29-02_desvio-processo-2026-09-24.md) |
 | PR #4 (`docs/av-s03-encerramento-integracao`) | **integrado em `main`** via merge commit `a5974b1`, CI pós-merge verde | https://github.com/rafaelinfopiaui/avalia-platform/pull/4 |
@@ -213,3 +213,51 @@ do backlog canônico `BL-AV-*`. Resumo:
   [`sprint_AV-S03B_modulo_academico_coerente.md`](sprints/sprint_AV-S03B_modulo_academico_coerente.md),
   [`snapshot_EXEC-2026-10-13-02_abertura_av-s03b.md`](snapshots/snapshot_EXEC-2026-10-13-02_abertura_av-s03b.md)
   (Adendo 2 descreve a rodada 2), `evidence/AV-S03B/`.
+
+## 11. AV-S06B — recebimento/armazenamento de imagens (2026-10-14, execução local, backend/API)
+
+**Não altera o numerador de 19/70** — entrega técnica local, ainda não
+homologada. Escopo: itens `BL-AV-4B-03/04/05` (recebimento, armazenamento
+privado e recuperação autorizada de imagens de resposta), **somente
+backend/API**. Resumo:
+
+- **Implementação (Claude Code, executor principal):** modelo `AnswerImage`,
+  migração `answer_images`, router com 3 endpoints (upload, listar, download),
+  validação de conteúdo real via Pillow, nome em disco gerado pelo servidor
+  (UUID), escrita atômica com rollback, download sempre autenticado, nenhum OCR,
+  nenhuma correção automática, logs só com IDs/metadados. O executor não
+  conseguiu rodar nada no ambiente dele (permissões) — entregou com os AC
+  marcados como "não validado".
+- **Correção pontual de defeito real (Hermes):** `KeyError('MPO')` no Pillow
+  12.x (passar `"MPO"` em `Image.open(formats=[...])`) quebrava 100% dos uploads
+  válidos. Corrigido separando a lista de formatos de abertura do dicionário de
+  MIME. Validado e revisado como correto/sem regressão.
+- **Verificação independente (Hermes, execução real):** suíte **136 passed, 0
+  failed** (110 pré-existentes + 26 novos = 24 funções, 1 parametrizada ×3);
+  `ruff check app` limpo; validação real em PostgreSQL isolado + Core via HTTP —
+  11/11 checks reais (AC-01 a AC-10 com evidência distinguida por critério na §8
+  da sprint: HTTP real / teste automatizado / inspeção).
+- **Revisão independente (Antigravity, Gemini 3.8 Flash High — família diferente
+  do executor):** **APROVADO**. Execução própria (não reutilizou resultados do
+  Hermes): 136 passed, banco isolado próprio, HTTP real, inspeção de segurança
+  CONFIRMADO SEGURO em todas as dimensões (path traversal, autorização,
+  validação de conteúdo, limite, órfãos, exposição pública, OCR zero, logs).
+- **Não entregue nesta fatia:** interface de upload no frontend (backend/API
+  apenas; sem validação visual); exclusão de imagens (proposta de política, não
+  funcionalidade — sem endpoint nem procedimento).
+- **Achados não-bloqueantes (registrados, não tratados para não ampliar escopo):**
+  ruff I001 na migração (padrão preexistente em 4 migrações do projeto);
+  deprecation de `class Config` no Pydantic V2 (padrão dos schemas existentes).
+- **Decisões pendentes de Rafael:** formato/tamanho/retenção/exclusão — propostas
+  restritas ao ambiente isolado, não aprovações (ver tabela em `evidence/AV-S06B/`).
+- `avalia_dev` e `avalia_apresentacao_demo_20261002` verificados intactos
+  (`a9f4c2e71b06`, 16 human_reviews) antes e depois; bancos isolados de
+  verificação dropados ao final.
+- **Ainda não publicado** — branch local
+  `feat/av-s06b-recebimento-armazenamento-imagens`, sem commit/push, pendente de
+  decisão de produto + publicação + homologação.
+- evidência completa:
+  [`sprint_AV-S06B_recebimento_armazenamento_imagens.md`](sprints/sprint_AV-S06B_recebimento_armazenamento_imagens.md),
+  [`snapshot_EXEC-2026-10-14-02_execucao_av-s06b.md`](snapshots/snapshot_EXEC-2026-10-14-02_execucao_av-s06b.md),
+  `evidence/AV-S06B/` (prompt de execução, parecer independente do Antigravity,
+  tabela de decisões, pacote recuperável com checksums).
