@@ -262,6 +262,22 @@ class Answer(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class AnswerImage(Base):
+    __tablename__ = "answer_images"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    answer_id: Mapped[str] = mapped_column(
+        String, ForeignKey("answers.id"), nullable=False, index=True
+    )
+    # Gerado pelo servidor; o nome enviado pelo cliente nunca entra em path.
+    storage_filename: Mapped[str] = mapped_column(String, nullable=False)
+    original_filename: Mapped[str] = mapped_column(String, nullable=False)  # só metadado
+    content_type: Mapped[str] = mapped_column(String, nullable=False)  # detectado pelo Pillow
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256_hash: Mapped[str] = mapped_column(String, nullable=False)
+    uploaded_by_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class CorrectionJob(Base):
     __tablename__ = "correction_jobs"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from pathlib import Path
+
+_CORE_DIR = Path(__file__).resolve().parents[1]
 
 
 class Settings:
@@ -19,6 +22,20 @@ class Settings:
             "ACADEMIC_MODULE_ENABLED", "false"
         ).lower() in {"1", "true", "yes", "on"}
         self.cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
+        # AV-S06B: imagens de resposta ficam fora do Git (ver .gitignore) e só são
+        # servidas pelo endpoint autenticado de download, nunca como estático.
+        self.answer_images_storage_dir = os.getenv(
+            "ANSWER_IMAGES_STORAGE_DIR", str(_CORE_DIR / "var" / "answer_images")
+        )
+        # Limite de tamanho por imagem de resposta. Valor exato implementado:
+        # 10 * 1024 * 1024 = 10_485_760 bytes = 10 MiB (base binária 1024).
+        # ATENÇÃO à unidade: são 10 MiB (10_485_760 bytes), NÃO 10 MB decimais
+        # (10_000_000 bytes). Aprovado por Rafael (2026-10-14) como LIMITE
+        # FUNCIONAL desta primeira versão — não é capacidade comprovada sob carga.
+        # Configurável por env ANSWER_IMAGE_MAX_BYTES (valor em bytes).
+        self.answer_image_max_bytes = int(
+            os.getenv("ANSWER_IMAGE_MAX_BYTES", str(10 * 1024 * 1024))  # 10_485_760 bytes (10 MiB)
+        )
         # NOTA (bug corrigido): "professor@avalia.local" NUNCA funciona como e-mail de
         # login porque o schema LoginRequest usa pydantic.EmailStr, cuja biblioteca
         # email_validator rejeita domínios "special-use" da IANA (local/test/invalid/
