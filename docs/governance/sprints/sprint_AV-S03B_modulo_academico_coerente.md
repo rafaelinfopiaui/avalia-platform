@@ -392,12 +392,39 @@ rascunho, sem merge e sem ativação operacional, com 4 condições:
    quebrou.
 3. **Build de produção do frontend executado no estado final** —
    pendência explícita apontada por Rafael (rodadas anteriores só
-   confirmaram `tsc --noEmit`/`eslint`, não `npm run build`). Ver §15
-   para o resultado real.
-4. **Publicação**: stage seletivo por paths, commits organizados por
-   finalidade, push da branch, PR rascunho contra `main`, checks do HEAD
-   publicado acompanhados. Ver §15 para URL do PR, SHA e resultado dos
-   checks.
+   confirmaram `tsc --noEmit`/`eslint`, não `npm run build`). Executado:
+   `npm run build` (`tsc -b && vite build`) — build limpo, 34 módulos
+   transformados, `dist/index.html` + assets gerados sem erros (`dist/`
+   gitignored, não entra em nenhum commit).
+4. **Publicação executada:**
+   - correção textual das duas mensagens residuais de
+     `seed_academic_multi_question_demo.py` conferida por `git diff` e
+     `python -m py_compile` (sintaticamente válida), guards/lógica/dados
+     intocados, evidências arquivadas preservadas;
+   - conjunto conferido sem credenciais/bancos/backups/configs locais
+     (`frontend/.env.example` é template, não `.env` real; nenhum arquivo
+     de ambiente, banco ou backup no diff);
+   - **5 commits organizados por finalidade**, cada um com `git diff
+     --staged` conferido antes do commit:
+     1. `fb931c2` — backend: endpoint de capacidades + teste de contrato
+        de legado;
+     2. `7273cd1` — frontend: `CapabilitiesContext` + guardas fail-closed;
+     3. `679f913` — seed isolado novo + testes de guarda de banco;
+     4. `882cd70` — retirada de `VITE_ACADEMIC_MODULE_ENABLED`;
+     5. `a809166` — governança (sprint, snapshot, decisões, débitos,
+        dashboard, `latest_execution`, plano de P5);
+   - `git push -u origin feat/av-s03b-modulo-academico-coerente` —
+     verificado por `git fetch` + comparação de SHA independente (não só
+     lendo o ref local que o próprio push escreveu):
+     `origin/feat/av-s03b-modulo-academico-coerente` = HEAD local =
+     `a8091669546a13e5f79f1f8b99bd12b6d913e253`;
+   - `gh pr create --draft --base main` — **PR #14**,
+     https://github.com/rafaelinfopiaui/avalia-platform/pull/14, `draft`,
+     base `main`, head `a8091669546a13e5f79f1f8b99bd12b6d913e253`;
+   - checks do HEAD publicado acompanhados até conclusão: **3/3 `SUCCESS`**
+     (Core API/FastAPI+Postgres, AI Engine/FastAPI, Frontend/Vite+React+TS),
+     `mergeStateStatus: CLEAN`, `mergeable: MERGEABLE` — nenhuma falha,
+     nenhuma correção necessária.
 
 **Precisão de P5 (precondição explícita de Rafael, registrada aqui):** o
 procedimento de P5 atualizado nas rodadas anteriores (ver
@@ -413,14 +440,37 @@ procedimento; P5 não foi executado nesta rodada.
 `avalia_dev` e `avalia_apresentacao_demo_20261002` verificados intactos
 ao final de todas as 3 rodadas (mesmas contagens e `version_num`).
 
+### Rodada 4 — homologação e integração (2026-10-14, mesma sessão)
+
+Rafael revisou o PR #14 (diff final, 5 commits, 3/3 checks `SUCCESS`,
+`mergeStateStatus: CLEAN`) e **homologou a entrega funcional da AV-S03B**,
+autorizando a integração do PR #14 por merge commit, com 3 distinções
+mantidas explicitamente separadas:
+
+- **Entrega funcional homologada**: Rafael confirma que a implementação
+  (endpoint de capacidades, guardas fail-closed, seed isolado, retirada
+  da configuração duplicada, preservação do comportamento legado) atende
+  ao objetivo da sprint e pode ser integrada a `main`.
+- **Integração**: distinta da homologação — só se concretiza com o merge
+  efetivo do PR #14, verificado por evidência real (não presumida) na
+  seção de integração abaixo.
+- **P5 e ativação operacional**: a homologação desta entrega **não**
+  autoriza P5, seed operacional, nem qualquer ativação em `avalia_dev` —
+  permanecem explicitamente não autorizados, como em todas as rodadas
+  anteriores.
+
+Esta homologação é documental, registrada aqui e em `DEC-AV-034`
+(`registers/decisions.md`), antes da execução da integração.
+
 ## 16. Closure gate
 
 Referenciar o fechamento criado a partir de
 [sprint_closure_template.md](../templates/sprint_closure_template.md) ao
 encerrar esta sprint. **Esta sprint está tecnicamente concluída, validada
-localmente e publicada em PR rascunho** (ver §15, rodada 3, para URL/SHA),
-mas segue sem homologação, sem merge e sem integração — essas três
-distinções permanecem exclusivamente a cargo de Rafael. A publicação em
-PR rascunho NÃO constitui homologação nem integração; são estados
-diferentes e registrados separadamente nesta seção e em
-`registers/decisions.md`.
+localmente, publicada em PR rascunho e HOMOLOGADA por Rafael** (ver §15,
+rodadas 3 e 4, para URL/SHA e `DEC-AV-034`). A **integração** (merge do
+PR #14) é autorizada mas, no momento do registro desta frase, ainda não
+executada — ver §15 rodada 4 para o SHA do merge commit e a CI pós-merge
+assim que concretizados. Homologação e integração permanecem estados
+distintos; nenhum dos dois implica ativação operacional (P5 continua não
+autorizado).
