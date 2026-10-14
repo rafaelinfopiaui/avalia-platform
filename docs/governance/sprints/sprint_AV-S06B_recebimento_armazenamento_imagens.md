@@ -348,6 +348,31 @@ o numerador. `AV-S05B` permanece parcial. O fechamento formal a partir de
 [sprint_closure_template.md](../templates/sprint_closure_template.md) só marcará a
 Etapa 4B como concluída quando interface + decisões pendentes forem resolvidas.
 
+### 16.1 Homologação do complemento de resposta por imagem (DEC-AV-038, 2026-10-14)
+
+A **entrega funcional do complemento de resposta por imagem** (DEC-AV-037, PR #16)
+foi **homologada por Rafael (`DEC-AV-038`)** e autorizada a integrar por merge
+commit, **com a ressalva explícita de `DEBT-AV-014`**. HEAD homologado:
+`78a7b069957b6058ad5dac94b90907b9bc8d496b`, checks próprios 3/3 PASS, CLEAN.
+
+Alcance: homologa o complemento entregue, **não** o encerramento integral da
+AV-S06B. Ressalvas preservadas (não encerradas por esta homologação):
+- **ACI-08**: permanece **validado com ressalva** (interface mostra só os envios da
+  sessão; ver §17.3/§17.5).
+- **DEBT-AV-014**: **aberto** — reexibição/retomada após recarregar/nova sessão
+  ainda não existe na UI (dados preservados no backend). Fatia de resolução
+  autorizada em seguida (local, branch dedicada).
+- **Transcrição/confirmação**: **não implementadas** (a resposta por imagem termina
+  legitimamente em "aguardando transcrição").
+- **Retenção/exclusão operacional**: pendentes (`BL-AV-4B-05` **não** encerrado).
+- **Migrações**: **não aplicadas aos bancos protegidos** (`avalia_dev`/apresentação
+  intactos).
+
+Integração (merge) registrada no Adendo 2 do snapshot
+`snapshot_EXEC-2026-10-14-04_encerramento_resposta_por_imagem.md` (SHA integrado +
+CI pós-merge). Progresso homologado permanece **19/70** até avaliação explícita dos
+critérios canônicos.
+
 ## 17. Complemento — Resposta por imagem (sub-fatia, 2026-10-14)
 
 Autorização: `DEC-AV-037`. Rodada local (sem publicação). Resolve a lacuna

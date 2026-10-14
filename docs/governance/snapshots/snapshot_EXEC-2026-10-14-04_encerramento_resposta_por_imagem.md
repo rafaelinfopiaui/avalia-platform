@@ -125,3 +125,24 @@ removido. Evidência: `evidence/AV-S06B/validacao_visual_resposta_por_imagem.md`
 Precisão de pendências e distinção do débito de multipart: ver sprint §17.5.
 Progresso homologado permanece **19/70**; `BL-AV-4B-05` pendente. Sem git nesta
 rodada.
+
+### Adendo 2 — Homologação do complemento (DEC-AV-038, 2026-10-14)
+
+Rafael homologou a **entrega funcional do complemento de resposta por imagem**
+(PR #16, DEC-AV-037) e autorizou a integração por merge commit, **com a ressalva
+explícita de `DEBT-AV-014`**. Verificação limitada reconfirmada antes do merge:
+HEAD `78a7b069957b6058ad5dac94b90907b9bc8d496b` (local == remoto); diff dentro do
+escopo revisado (nenhum artefato proibido); checks próprios 3/3 PASS
+(Core API 2m32s, AI Engine 19s, Frontend 16s); mergeStateStatus CLEAN; sem
+bloqueantes.
+
+Alcance: homologa o complemento entregue, **não** o encerramento integral da
+AV-S06B. Ressalvas preservadas (não encerradas): ACI-08 validado com ressalva;
+DEBT-AV-014 aberto; transcrição/confirmação não implementadas; retenção/exclusão
+operacional pendentes (BL-AV-4B-05); migrações não aplicadas aos bancos protegidos.
+Progresso homologado permanece **19/70**; AV-S05B parcial.
+
+Integração (merge) — preenchido após o merge:
+- SHA integrado (merge commit em main): __A_PREENCHER__
+- PR #16 state: __A_PREENCHER__ (merge commit preservando a branch)
+- CI pós-merge: __A_PREENCHER__
