@@ -177,3 +177,39 @@ Destaques atuais: pendência regulatória impede uso com dados reais; estado fun
 ## 9. Política de atualização
 
 Atualizar este dashboard ao fim de cada execução/fatia. Todo resultado deve apontar para sprint, snapshot ou evidência. Implementação e validação permanecem separadas; indicadores sem método e denominador ficam “não medido”.
+
+## 10. AV-S03B — módulo acadêmico coerente (2026-10-13/14, execução local em 2 rodadas)
+
+**Não incluído no numerador de 19/70** — `AV-S03B` é um item de robustez
+estrutural (resolução de `DEBT-AV-012`/`DEBT-AV-013`), não um item numerado
+do backlog canônico `BL-AV-*`. Resumo:
+
+- **Rodada 1 (2026-10-13):** implementado e validado localmente — endpoint
+  de capacidades (fonte única de verdade), guardas fail-closed em
+  menu/rota/editor, seed fictício idempotente, fluxo completo
+  estrutura→avaliação→resposta→correção→revisão em banco isolado (IA
+  simulada). 10/10 critérios de aceite avaliados; achado real BLOQUEANTE
+  encontrado pela auditoria pontual do Codex (janela de `loading` tratada
+  como "desligado") e corrigido na mesma sessão; revisão independente do
+  Antigravity: APROVADO COM RESSALVAS (ACH-01, não bloqueante).
+- **Rodada 2 (2026-10-14, saneamento dirigido):** Rafael apontou 4 lacunas
+  após revisão do relatório da rodada 1 — (1) distinguir "configuração
+  desconhecida" de "erro definitivo" (a correção do Codex na rodada 1
+  cobriu só a janela de `loading`, não a falha definitiva); (2) resolver
+  ACH-01 (UI bloqueava edição/publicação de rascunho legado quando o
+  backend não exigia); (3) concluir a retirada de
+  `VITE_ACADEMIC_MODULE_ENABLED`; (4) corrigir a precisão das evidências e
+  do planejamento registrados. Todas as 4 lacunas saneadas, com evidência
+  de integração real (não só leitura de código) e validação visual em
+  navegador real. Suíte final: **110 passed** (108 + 2 parametrizados do
+  teste de legado). Revisão independente — rodada 2 (Antigravity, escopo
+  limitado ao delta): **APROVADO**, zero achados bloqueantes. Codex não
+  dispachado nesta rodada (nenhum risco concreto novo).
+- `avalia_dev` e `avalia_apresentacao_demo_20261002` verificados intactos
+  ao final de ambas as rodadas (mesmas contagens e `version_num`).
+- **Ainda não publicado** — branch local `feat/av-s03b-modulo-academico-coerente`,
+  sem commit/push, pendente de decisão de Rafael.
+- evidência completa:
+  [`sprint_AV-S03B_modulo_academico_coerente.md`](sprints/sprint_AV-S03B_modulo_academico_coerente.md),
+  [`snapshot_EXEC-2026-10-13-02_abertura_av-s03b.md`](snapshots/snapshot_EXEC-2026-10-13-02_abertura_av-s03b.md)
+  (Adendo 2 descreve a rodada 2), `evidence/AV-S03B/`.
