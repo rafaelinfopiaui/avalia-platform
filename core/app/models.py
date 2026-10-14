@@ -7,6 +7,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -57,6 +58,16 @@ class EnrollmentStatus(str, enum.Enum):
 class ProfessorRole(str, enum.Enum):
     RESPONSIBLE = "responsible"
     COLLABORATOR = "collaborator"
+
+
+class AnswerSource(str, enum.Enum):
+    TEXT = "TEXT"
+    IMAGE = "IMAGE"
+
+
+class TranscriptionStatus(str, enum.Enum):
+    AGUARDANDO_TRANSCRICAO = "AGUARDANDO_TRANSCRICAO"
+    TRANSCRICAO_CONFIRMADA = "TRANSCRICAO_CONFIRMADA"
 
 
 class User(Base):
@@ -255,10 +266,27 @@ class RubricCriterion(Base):
 
 class Answer(Base):
     __tablename__ = "answers"
+    # Invariante de origem (DEC-AV-037): resposta textual sempre tem texto;
+    # resposta por imagem nasce sem texto (NULL, nunca "" nem placeholder).
+    __table_args__ = (
+        CheckConstraint(
+            "(source = 'TEXT' AND text IS NOT NULL) OR (source = 'IMAGE')",
+            name="ck_answers_source_text",
+        ),
+    )
     id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
     question_id: Mapped[str] = mapped_column(String, ForeignKey("questions.id"), nullable=False)
     student_name_fake: Mapped[str] = mapped_column(String, nullable=False)
-    text: Mapped[str] = mapped_column(Text, nullable=False)
+    text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[AnswerSource] = mapped_column(
+        Enum(AnswerSource), default=AnswerSource.TEXT, nullable=False
+    )
+    # Correção só é permitida com TRANSCRICAO_CONFIRMADA e texto não-vazio.
+    transcription_status: Mapped[TranscriptionStatus] = mapped_column(
+        Enum(TranscriptionStatus),
+        default=TranscriptionStatus.TRANSCRICAO_CONFIRMADA,
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

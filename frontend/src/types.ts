@@ -66,7 +66,12 @@ export interface Criterion { id?: string; name: string; description: string; max
 export interface Rubric { id?: string; question_id?: string; version?: number; is_published?: boolean; criteria: Criterion[] }
 export interface Question { id?: string; statement: string; reference_answer: string; max_score: number; position?: number; rubrics?: Rubric[]; rubric?: { criteria: Criterion[] } }
 export interface Assessment { id: string; title: string; status: AssessmentStatus; class_group_id?: string | null; cloned_from_id?: string | null; assessment_max_score?: number; question?: Question; questions?: Question[]; created_at?: string; updated_at?: string }
-export interface Answer { id: string; question_id: string; student_name?: string; text: string }
+export type AnswerSource = 'TEXT' | 'IMAGE'
+export type TranscriptionStatus = 'AGUARDANDO_TRANSCRICAO' | 'TRANSCRICAO_CONFIRMADA'
+// text é null na resposta por imagem ainda sem transcrição (DEC-AV-037).
+export interface Answer { id: string; question_id: string; student_name?: string; student_name_fake?: string; text?: string | null; source?: AnswerSource; transcription_status?: TranscriptionStatus; created_at?: string }
+export interface AnswerImage { id: string; answer_id: string; original_filename: string; content_type: string; size_bytes: number; sha256_hash: string; uploaded_by_id: string; created_at: string }
+export interface AnswerWithImages extends Answer { images: AnswerImage[] }
 // Alinhado ao schema real do Core (app/schemas.py CriterionScoreOut / AIExecutionOut / CorrectionJobOut)
 export interface CriterionSuggestion { criterion_id: string; criterion_name?: string; score: number; max_score: number; reason?: string; evidence?: string; confidence?: number; was_clamped?: boolean }
 export interface AIExecutionResult { id: string; engine_mode?: 'real' | 'simulated'; model?: string; confidence_method_version?: string; overall_confidence?: number; review_recommendation?: string; duration_ms?: number; flags?: string[]; criterion_scores: CriterionSuggestion[] }

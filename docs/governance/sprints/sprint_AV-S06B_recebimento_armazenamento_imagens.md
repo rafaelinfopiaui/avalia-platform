@@ -347,3 +347,112 @@ Progresso homologado permanece **19/70**; a integração do backend **não** aum
 o numerador. `AV-S05B` permanece parcial. O fechamento formal a partir de
 [sprint_closure_template.md](../templates/sprint_closure_template.md) só marcará a
 Etapa 4B como concluída quando interface + decisões pendentes forem resolvidas.
+
+### 16.1 Homologação do complemento de resposta por imagem (DEC-AV-038, 2026-10-14)
+
+A **entrega funcional do complemento de resposta por imagem** (DEC-AV-037, PR #16)
+foi **homologada por Rafael (`DEC-AV-038`)** e autorizada a integrar por merge
+commit, **com a ressalva explícita de `DEBT-AV-014`**. HEAD homologado:
+`78a7b069957b6058ad5dac94b90907b9bc8d496b`, checks próprios 3/3 PASS, CLEAN.
+
+Alcance: homologa o complemento entregue, **não** o encerramento integral da
+AV-S06B. Ressalvas preservadas (não encerradas por esta homologação):
+- **ACI-08**: permanece **validado com ressalva** (interface mostra só os envios da
+  sessão; ver §17.3/§17.5).
+- **DEBT-AV-014**: **aberto** — reexibição/retomada após recarregar/nova sessão
+  ainda não existe na UI (dados preservados no backend). Fatia de resolução
+  autorizada em seguida (local, branch dedicada).
+- **Transcrição/confirmação**: **não implementadas** (a resposta por imagem termina
+  legitimamente em "aguardando transcrição").
+- **Retenção/exclusão operacional**: pendentes (`BL-AV-4B-05` **não** encerrado).
+- **Migrações**: **não aplicadas aos bancos protegidos** (`avalia_dev`/apresentação
+  intactos).
+
+Integração (merge) registrada no Adendo 2 do snapshot
+`snapshot_EXEC-2026-10-14-04_encerramento_resposta_por_imagem.md` (SHA integrado +
+CI pós-merge). Progresso homologado permanece **19/70** até avaliação explícita dos
+critérios canônicos.
+
+## 17. Complemento — Resposta por imagem (sub-fatia, 2026-10-14)
+
+Autorização: `DEC-AV-037`. Rodada local (sem publicação). Resolve a lacuna
+contratual identificada na homologação do backend (§16): o upload exigia uma
+`Answer` pré-existente, mas toda `Answer` exigia `text` não-vazio — não havia
+como a foto ser a entrada inicial da resposta. Desenho técnico (revisado de
+forma independente pelo Antigravity, APROVADO COM AJUSTES) em
+`evidence/AV-S06B/desenho_resposta_por_imagem.md` (v2).
+
+### 17.1 Direção de produto (aprovada)
+A foto pode ser a entrada inicial da resposta, sem texto digitado/vazio/fictício.
+Resposta por imagem nasce "aguardando transcrição"; correção bloqueada até
+transcrição confirmada pelo professor. Fluxo textual existente inalterado.
+Nesta fatia NÃO há OCR — a resposta por imagem termina legitimamente em
+"aguardando transcrição". `DEC-AV-018` preservada ("uma resposta de uma questão
+por foto"; sem unicidade de foto nem proibição de reenvio).
+
+### 17.2 Mudança de contrato (menor coerente)
+`Answer.text` -> nullable; novos `Answer.source` (TEXT|IMAGE) e
+`Answer.transcription_status` (AGUARDANDO_TRANSCRICAO|TRANSCRICAO_CONFIRMADA);
+CheckConstraint `(source='TEXT' AND text IS NOT NULL) OR (source='IMAGE')`;
+backfill determinístico (existentes -> TEXT/CONFIRMADA). Novo endpoint
+transacional `POST /v1/answers/image` (reuso da validação/gravação homologada de
+`routers/images.py`, com o endpoint e o guard em `main.py` para respeitar o teste
+AST de isolamento). Guard de correção em `request_correction` (422
+`ANSWER_NOT_TRANSCRIBED`) + defesa em profundidade em `run_correction_job`.
+Frontend: tela de resposta por foto + listagem/visualização + estados + aviso de
+"aguarda transcrição, não corrigida".
+
+### 17.3 Critérios de aceite (resposta por imagem)
+
+| ID | Critério | Método previsto | Estado |
+|---|---|---|---|
+| ACI-01 | Criar resposta por imagem (JPEG/PNG <=10 MiB) sem texto -> 201; Answer `source=IMAGE`, `transcription_status=AGUARDANDO_TRANSCRICAO`, 1 `AnswerImage` vinculada | integração real | **validado** — HTTP real (Hermes: 201, source=IMAGE/text=None/AGUARDANDO/1 imagem; Antigravity confirmou, arquivo em disco 0600 com nome UUID) + teste `test_image_answer_is_created_without_text_awaiting_transcription` |
+| ACI-02 | Pedir correção de resposta por imagem não transcrita -> 422 `ANSWER_NOT_TRANSCRIBED`, nenhum `CorrectionJob` criado | integração real + teste | **validado** — HTTP real (Hermes e Antigravity: 422 + 0 jobs confirmado por consulta ao banco) + teste `test_correction_of_untranscribed_image_answer_is_blocked` |
+| ACI-03 | Fluxo textual existente inalterado (criar resposta textual -> 201 `source=TEXT`; pedir correção -> 202) | integração real + regressão | **validado** — HTTP real (201 TEXT/CONFIRMADA; correção 202) + suíte histórica sem regressão (158 passed = 136 + 22) |
+| ACI-04 | Autorização no novo endpoint: professor sem vínculo -> 403; sem token -> 401 | integração real | **validado** — HTTP real (Hermes e Antigravity: 401 sem token, 403 sem vínculo) + testes `test_image_answer_without_token_returns_401`, `test_image_answer_by_unrelated_professor_returns_403`, `test_admin_can_create_image_answer` |
+| ACI-05 | Falha de commit após gravar arquivo no fluxo transacional -> nenhuma Answer/AnswerImage órfã, nenhum arquivo solto | teste (falha induzida) | **validado por teste** — `test_commit_failure_leaves_no_answer_image_or_file` (monkeypatch commit), `test_file_finalize_failure_leaves_no_records` (monkeypatch os.replace) |
+| ACI-06 | Reenvio em `/answers/{id}/images` continua criando nova imagem, preservando anteriores (DEC-AV-018) | teste | **validado por teste** — `test_resend_on_existing_image_answer_preserves_previous` |
+| ACI-07 | Migração aplica + backfill determinístico em banco isolado; linhas existentes viram TEXT/CONFIRMADA, nenhuma com text NULL; CheckConstraint ativo | integração real (banco isolado) | **validado** — PostgreSQL isolado (Hermes e Antigravity, bancos próprios dropados): upgrade + backfill (legadas -> TEXT/CONFIRMADA, texto preservado); CheckConstraint ativo (bloqueia TEXT sem texto, permite IMAGE sem texto); downgrade protegido recusa com dados IMAGE sem texto; downgrade limpo + re-upgrade idempotente (Antigravity) |
+| ACI-08 | Frontend: estados carregando/sucesso/erro; aviso explícito "aguarda transcrição, não corrigida"; nenhuma menção a nota/IA no upload | validação visual | **validado com ressalva** — validação visual em navegador real (Chromium/CDP) contra ambiente isolado descartável, 9 de 10 cenários PASS (seleção manual + cascata; JPEG e PNG válidos com carregando/sucesso; listagem + visualização por download autenticado via blob, imagem renderizada; ausência de ação de correção na tela de foto vs. textual; rejeição de inválido 422 e >10 MiB no cliente, com mensagem compreensível; troca de avaliação/questão limpa seleção/arquivo; fluxo textual utilizável). **Ressalva (cenário "estado após recarregar"):** o estado "aguardando transcrição" está preservado no **backend** (verificado no banco após reload: `source=IMAGE`/`AGUARDANDO_TRANSCRICAO`/`text` NULL), mas a tela de Resposta por Foto não reexibe as respostas persistidas após F5 (lista "nesta sessão", volátil). Por decisão de Rafael, registrado como **débito de UX** (ver §17.5), sem alteração de código nesta rodada — exigiria endpoint `GET` de listagem inexistente. Evidência: `evidence/AV-S06B/validacao_visual_resposta_por_imagem.md` |
+| ACI-09 | Defesa em profundidade: `run_correction_job` com `answer.text` nulo/vazio falha explicitamente antes de chamar o AI Engine | teste | **validado por teste** — `test_run_correction_job_fails_fast_without_calling_ai_engine` (parametrizado; cliente httpx substituído por classe que falha se instanciada) |
+
+### 17.4 Limites desta sub-fatia
+Sem OCR, sem transcrição simulada, sem confirmação fictícia, sem exclusão
+(BL-AV-4B-05 permanece pendente), sem retenção operacional, sem stage/commit/
+push/merge nesta rodada, sem migração operacional em bancos protegidos, sem P5/
+seed/deploy/baseline/novo benchmark OCR. Numerador homologado permanece 19/70.
+
+### 17.5 Débito de UX e precisão das pendências (pós-validação visual, 2026-10-14)
+
+**Débito de UX (reexibição após recarregar) — `DEBT-AV-014`.** A tela de Resposta por Foto não
+reexibe, após recarregar (F5), as respostas por imagem já persistidas (em estado
+"aguardando transcrição") de uma avaliação/questão — a lista é rotulada "enviadas
+nesta sessão" (estado volátil). O estado em si **está preservado no backend**
+(verificado no banco: `source=IMAGE`/`transcription_status=AGUARDANDO_TRANSCRICAO`/
+`text` NULL após reload). Reexibir na UI exigiria um endpoint `GET` de listagem de
+respostas por imagem por avaliação/questão, hoje **inexistente**. Decisão de Rafael
+(2026-10-14): registrar como débito, **sem alterar código** nesta rodada; a
+reexibição fica como pendência para fatia futura. Não afeta recebimento,
+armazenamento, autorização nem o bloqueio de correção (todos validados).
+
+**Precisão das pendências.**
+- **Confirmação de transcrição:** *não implementada nesta fatia*. A resposta por
+  imagem termina legitimamente em "aguardando transcrição".
+- **Dependência de OCR (conferida no backlog, não presumida):** a **extração
+  automática** de texto (`AV-S07B`, `BL-AV-4B-06..09`) depende da decisão
+  arquitetural de OCR (`BL-AV-4B-02`). A atividade de **conferência/confirmação**
+  (`AV-S08B`) **não está globalmente bloqueada pelo motor de OCR**: o backlog prevê
+  `BL-AV-4B-13` (transcrição manual quando a extração falhar — mesmo princípio de
+  RN-017: IA indisponível → entrada manual), um caminho de confirmação que não
+  depende tecnicamente do OCR. O planejamento da conferência pode avançar; apenas
+  os itens que consomem a saída automática do OCR dependem de `AV-S07B`.
+- **Limitação do parsing multipart (distinção precisa):** no endpoint
+  `POST /v1/answers/image`, por usar campos declarativos do FastAPI/Starlette, o
+  corpo multipart é lido **antes** da checagem de autorização. Isso é **consumo de
+  recursos** (buffer temporário do Starlette, em disco do sistema) — **não** é
+  gravação no armazenamento persistente da aplicação nem escrita no banco: nenhum
+  byte entra no diretório privado de imagens nem em `answer_images` antes da
+  autorização. Débito arquitetural não-bloqueante para hardening futuro (ex.:
+  checagem de `Content-Length`/limite no proxy); **esta rodada não amplia para
+  hardening geral**.
+- **`BL-AV-4B-05`** (retenção/exclusão operacional): permanece **pendente**.

@@ -98,6 +98,7 @@ export function AnswerPage() {
           <h1>Inserir resposta</h1>
           <p>Registre a resposta digital de um aluno fictício para solicitar a análise assistida.</p>
         </div>
+        <Link className="button button--secondary" to={id ? `/respostas/foto?avaliacao=${id}` : '/respostas/foto'}>Enviar resposta por foto</Link>
       </div>
       {error && <Alert>{error}</Alert>}
       {loadError && <Alert>{loadError}</Alert>}

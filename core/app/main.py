@@ -4,7 +4,7 @@ import json
 from decimal import Decimal
 
 import httpx
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import update
@@ -18,6 +18,8 @@ from app.logging_utils import log_event, new_correlation_id
 from app.models import (
     AIExecution,
     Answer,
+    AnswerImage,
+    AnswerSource,
     Assessment,
     AssessmentStatus,
     AuditEvent,
@@ -30,7 +32,9 @@ from app.models import (
     Role,
     Rubric,
     RubricCriterion,
+    TranscriptionStatus,
     User,
+    gen_uuid,
 )
 from app.routers.academic import (
     require_active_class_link,
@@ -43,12 +47,23 @@ from app.routers.config import (
     router as config_router,
 )
 from app.routers.images import (
+    _MULTIPART_OVERHEAD,
+    _STORAGE_ERROR,
+    _normalize_declared_type,
+    _sanitize_original_filename,
+    _storage_dir,
+    _too_large,
+    _write_validated_file,
+)
+from app.routers.images import (
     router as images_router,
 )
 from app.schemas import (
     AIExecutionOut,
+    AnswerImageOut,
     AnswerInput,
     AnswerOut,
+    AnswerWithImagesOut,
     AssessmentCreate,
     AssessmentOut,
     AssessmentSummaryOut,
@@ -575,19 +590,119 @@ def create_rubric(
 @app.post("/v1/answers", response_model=AnswerOut, status_code=201)
 def create_answer(
     payload: AnswerInput,
+    request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require_role("professor", "admin")),
 ):
+    correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
     question = db.get(Question, payload.question_id)
     if question is None:
         raise HTTPException(status_code=404, detail="Questão não encontrada.")
     assessment = _get_owned_assessment(db, question.assessment_id, user)
     require_assessment_mutation(db, user, assessment)
-    answer = Answer(question_id=payload.question_id, student_name_fake=payload.student_name_fake, text=payload.text)
+    # Invariante 1 (DEC-AV-037): resposta textual exige texto não-vazio.
+    if not payload.text.strip():
+        return error_response(
+            422, "ANSWER_TEXT_REQUIRED", "O texto da resposta não pode ser vazio.", correlation_id
+        )
+    answer = Answer(
+        question_id=payload.question_id,
+        student_name_fake=payload.student_name_fake,
+        text=payload.text,
+        source=AnswerSource.TEXT,
+        transcription_status=TranscriptionStatus.TRANSCRICAO_CONFIRMADA,
+    )
     db.add(answer)
     db.commit()
     db.refresh(answer)
     return answer
+
+
+# Resposta por imagem (DEC-AV-037): a foto é a entrada inicial, sem texto. Fica
+# aqui, e não em routers/images.py, porque aquele módulo não pode referenciar
+# correção (teste AST de isolamento); dele só reutilizamos validação e gravação.
+@app.post("/v1/answers/image", response_model=AnswerWithImagesOut, status_code=201)
+async def create_image_answer(
+    request: Request,
+    file: UploadFile = File(...),
+    question_id: str = Form(...),
+    student_name_fake: str = Form(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
+    correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
+    # Fail-fast: autorização e campos antes de gravar qualquer byte no storage.
+    question = db.get(Question, question_id)
+    if question is None:
+        raise HTTPException(status_code=404, detail="Questão não encontrada.")
+    assessment = _get_owned_assessment(db, question.assessment_id, user)
+    require_assessment_mutation(db, user, assessment)
+    student_name = student_name_fake.strip()
+    if not student_name:
+        return error_response(
+            422, "STUDENT_NAME_REQUIRED", "A identificação do aluno é obrigatória.", correlation_id
+        )
+
+    max_bytes = get_settings().answer_image_max_bytes
+    declared_length = request.headers.get("content-length")
+    if declared_length is not None and declared_length.isdigit():
+        if int(declared_length) > max_bytes + _MULTIPART_OVERHEAD:
+            log_event("image_answer_rejected", correlation_id, question_id=question_id, reason="too_large")
+            raise _too_large(max_bytes)
+    declared_type = _normalize_declared_type(file.content_type)
+    if declared_type is None:
+        raise HTTPException(status_code=422, detail="Apenas imagens JPEG ou PNG são aceitas.")
+    original_filename = _sanitize_original_filename(file.filename)
+
+    answer_id = gen_uuid()
+    storage_filename, content_type, size, sha256_hash = await _write_validated_file(
+        file, declared_type, max_bytes, correlation_id, answer_id
+    )
+
+    answer = Answer(
+        id=answer_id,
+        question_id=question.id,
+        student_name_fake=student_name,
+        text=None,
+        source=AnswerSource.IMAGE,
+        transcription_status=TranscriptionStatus.AGUARDANDO_TRANSCRICAO,
+    )
+    image = AnswerImage(
+        answer_id=answer_id,
+        storage_filename=storage_filename,
+        original_filename=original_filename,
+        content_type=content_type,
+        size_bytes=size,
+        sha256_hash=sha256_hash,
+        uploaded_by_id=user.id,
+    )
+    # Answer e AnswerImage são commitados juntos, por último; se falhar, nada
+    # fica no banco e o arquivo já finalizado é removido (sem órfãos).
+    try:
+        db.add(answer)
+        db.flush()
+        db.add(image)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        (_storage_dir() / storage_filename).unlink(missing_ok=True)
+        log_event("image_answer_storage_failed", correlation_id, answer_id=answer_id, stage="commit")
+        raise HTTPException(status_code=500, detail=_STORAGE_ERROR) from exc
+    db.refresh(answer)
+    db.refresh(image)
+    log_event(
+        "image_answer_created",
+        correlation_id,
+        answer_id=answer_id,
+        image_id=image.id,
+        user_id=user.id,
+        content_type=content_type,
+        size_bytes=size,
+    )
+    return AnswerWithImagesOut(
+        **AnswerOut.model_validate(answer).model_dump(),
+        images=[AnswerImageOut.model_validate(image)],
+    )
 
 
 # ---------------- Corrections ----------------
@@ -650,6 +765,18 @@ async def request_correction(
         raise HTTPException(status_code=404, detail="Questão não encontrada.")
     assessment = _get_owned_assessment(db, question.assessment_id, user)
     require_assessment_mutation(db, user, assessment)
+    # Guard após a autorização, para não revelar o estado da resposta a quem
+    # não tem acesso; antes de qualquer CorrectionJob (DEC-AV-037).
+    if (
+        answer.transcription_status != TranscriptionStatus.TRANSCRICAO_CONFIRMADA
+        or not (answer.text or "").strip()
+    ):
+        return error_response(
+            422,
+            "ANSWER_NOT_TRANSCRIBED",
+            "A resposta por imagem ainda não tem transcrição confirmada; não pode ser corrigida.",
+            correlation_id,
+        )
     rubric = next((r for r in question.rubrics if r.is_published), None)
     if rubric is None:
         return error_response(422, "RUBRIC_NOT_PUBLISHED", "A questão não possui rubrica publicada.", correlation_id)

@@ -17,6 +17,7 @@ from app.models import (
     JobStatus,
     Rubric,
     RubricCriterion,
+    TranscriptionStatus,
 )
 
 settings = get_settings()
@@ -44,6 +45,23 @@ async def run_correction_job(job_id: str, session_factory) -> None:
         db.commit()
 
         answer = db.get(Answer, job.answer_id)
+        # Defesa em profundidade (DEC-AV-037): o bloqueio principal está em
+        # request_correction; aqui nunca enviamos ao AI Engine resposta sem
+        # texto confirmado (ex.: resposta por imagem aguardando transcrição).
+        if (
+            answer is None
+            or answer.transcription_status != TranscriptionStatus.TRANSCRICAO_CONFIRMADA
+            or not (answer.text or "").strip()
+        ):
+            job.status = JobStatus.FALHA
+            job.error_message = (
+                "Resposta sem transcrição confirmada (texto ausente ou vazio); "
+                "a análise não foi solicitada ao AI Engine."
+            )
+            db.commit()
+            log_event("correction_job_rejected_answer_not_transcribed", correlation_id, job_id=job_id)
+            return
+
         rubric = db.get(Rubric, job.rubric_id)
         question = rubric.question
         criteria: list[RubricCriterion] = rubric.criteria

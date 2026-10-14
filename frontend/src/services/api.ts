@@ -2,6 +2,8 @@ import type {
   ApiErrorBody,
   Assessment,
   Answer,
+  AnswerImage,
+  AnswerWithImages,
   ClassGroup,
   CorrectionJob,
   Course,
@@ -39,10 +41,18 @@ function getToken() { return sessionStorage.getItem(ACCESS_TOKEN_KEY) }
 export function hasSession() { return Boolean(getToken()) }
 export function clearSession() { sessionStorage.removeItem(ACCESS_TOKEN_KEY); sessionStorage.removeItem(REFRESH_TOKEN_KEY) }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+function parseJson(text: string): unknown {
+  if (!text) return undefined
+  try { return JSON.parse(text) } catch { return undefined }
+}
+
+// Envia a requisição autenticada e lança ApiError se a resposta não for 2xx.
+// FormData (upload multipart) segue sem Content-Type explícito: o navegador
+// define o boundary.
+async function send(path: string, init: RequestInit = {}): Promise<Response> {
   const token = getToken()
   const headers = new Headers(init.headers)
-  if (init.body) headers.set('Content-Type', 'application/json')
+  if (init.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')
   if (token) headers.set('Authorization', `Bearer ${token}`)
   let response: Response
   try {
@@ -50,10 +60,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   } catch {
     throw new ApiError(0, { message: 'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.' })
   }
-  const text = await response.text()
-  let data: unknown = undefined
-  if (text) { try { data = JSON.parse(text) } catch { data = undefined } }
   if (!response.ok) {
+    const data = parseJson(await response.text())
     const raw = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>
     const detailObj = raw.detail && typeof raw.detail === 'object' && !Array.isArray(raw.detail)
       ? (raw.detail as Record<string, unknown>)
@@ -94,7 +102,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     }
     throw new ApiError(response.status, body)
   }
-  return data as T
+  return response
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await send(path, init)
+  return parseJson(await response.text()) as T
 }
 
 export async function login(email: string, password: string) {
@@ -133,6 +146,23 @@ export async function requestCorrection(answerId: string): Promise<Pick<Correcti
   return { id, status: result.status }
 }
 export const getCorrectionJob = (id: string) => request<CorrectionJob>(`/correction-jobs/${id}`)
+
+// ---------------- Resposta por imagem (AV-S06B, DEC-AV-037) ----------------
+// A foto é a entrada inicial da resposta: não há texto, e a resposta nasce
+// aguardando transcrição (não pode ser corrigida até ter transcrição confirmada).
+export const createImageAnswer = (payload: { question_id: string; student_name: string; file: File }) => {
+  const form = new FormData()
+  form.append('question_id', payload.question_id)
+  form.append('student_name_fake', payload.student_name)
+  form.append('file', payload.file)
+  return request<AnswerWithImages>('/answers/image', { method: 'POST', body: form })
+}
+export const listAnswerImages = (answerId: string) => request<AnswerImage[]>(`/answers/${answerId}/images`)
+// Download autenticado (Bearer): a imagem nunca é servida por URL pública.
+export async function downloadAnswerImage(imageId: string): Promise<Blob> {
+  const response = await send(`/answer-images/${imageId}/download`)
+  return response.blob()
+}
 
 export interface CorrectionJobContext {
   job: CorrectionJob;
