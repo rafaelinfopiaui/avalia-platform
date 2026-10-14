@@ -1,6 +1,6 @@
 ---
 id: "AV-S08B"
-status: "aprovação técnica local — concluída, aguardando decisão de publicação de Rafael"
+status: "publicada em PR rascunho #18, sem merge — aguardando homologação de Rafael"
 objetivo_aprovado_por: Rafael (2026-10-14, nesta conversa)
 consolidador: "Hermes"
 baseline_entrada: "main HEAD e8b08646cfee5e9fea70d8e9bbcb4cf39f5a3d2d (merge PR #17, DEBT-AV-014 integrada)"
@@ -182,6 +182,14 @@ regressão; revisão independente do Antigravity concluída (aprovado ou
 aprovado com ressalvas registradas); governança atualizada; diff local e
 pacote recuperável apresentados a Rafael para decisão de publicação em
 rodada futura (não incluída aqui).
+
+**Atualização (2026-10-14, publicação autorizada por Rafael):** os
+critérios acima foram cumpridos; Rafael autorizou publicar em PR rascunho,
+sem merge. Publicação concluída — PR
+[#18](https://github.com/rafaelinfopiaui/avalia-platform/pull/18), SHA
+`92edce4013ba5688be4e4ff99fdf249a677636f3`, CI 3/3 checks pass, sem merge.
+Ver `snapshot_EXEC-2026-10-14-10_publicacao_av-s08b.md` para o detalhamento
+completo da publicação. Homologação permanece decisão de Rafael.
 
 ## 14. Ajustes de percurso
 

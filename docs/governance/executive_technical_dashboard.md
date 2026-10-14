@@ -10,7 +10,7 @@ O AvalIA possui uma demonstração experimental herdada, organizada em Core API,
 
 | Referência | Estado | Link |
 |---|---|---|
-| Última execução registrada | EXEC-2026-10-14-04 — AV-S06B (complemento): resposta por imagem (backend + frontend, rodada local). `DEC-AV-037`: a foto é a entrada inicial da resposta sem texto fictício; correção bloqueada até transcrição confirmada. Aprovação técnica local: suíte 158 passed (136 + 22, zero regressão), ruff app limpo, build+eslint frontend limpos, validação em PostgreSQL isolado (migração/backfill/CheckConstraint/downgrade protegido) e HTTP real; revisão independente do Antigravity do desenho (APROVADO COM AJUSTES) e da implementação (APROVADO). Resposta por imagem termina em "aguardando transcrição" (sem OCR). Validação visual em navegador real concluída: 9/10 cenários PASS; 1 ressalva (reexibição após recarregar) registrada como débito de UX, sem alteração de código. Sem git nesta rodada. Bancos protegidos intactos. Progresso homologado permanece 19/70; AV-S05B parcial; BL-AV-4B-05 pendente. (anteriores: AV-S06B backend integrado em main b818961, AV-S03B, GOV-007 — na cadeia do ponteiro) | [ponteiro](snapshots/latest_execution.md) |
+| Última execução registrada | EXEC-2026-10-14-10 — AV-S08B: publicação da fatia MANUAL (transcrição manual e confirmação humana) em PR rascunho #18, sem merge. CI 3/3 checks pass (Core API, AI Engine, Frontend); SHA `92edce4013ba5688be4e4ff99fdf249a677636f3`. Progresso homologado permanece 19/70; AV-S05B parcial; BL-AV-4B-05 pendente; BL-AV-4B-10/11 permanecem parciais (falta a parte de OCR). Ver §12 abaixo para o detalhamento completo da sprint (anteriores: AV-S06B backend integrado em main b818961, DEBT-AV-014 integrado em e8b0864 via PR #17, AV-S03B, GOV-007 — na cadeia do ponteiro) | [ponteiro](snapshots/latest_execution.md) |
 | Configuração de orquestração de agentes (não funcional) | `GOV-007` — distribuição de trabalho entre Claude Code (executor principal), Antigravity (segundo executor/revisor cruzado) e Codex (auditorias pontuais); ver `DEC-AV-031`; documentação publicada em PR draft #12 (https://github.com/rafaelinfopiaui/avalia-platform/pull/12), sem merge | [documentação de evidência](evidence/GOV-007-distribuicao-clis/mecanismo_cobranca_hermes_claude_code.md) |
 | PR #2 (`docs/av-s02-encerramento-planos-operacionais`) | **fechado sem merge**; conteúdo necessário preservado em `main` via PR #4 | [snapshot de reconciliação](snapshots/snapshot_RECONCILIACAO-2026-09-29-02_desvio-processo-2026-09-24.md) |
 | PR #4 (`docs/av-s03-encerramento-integracao`) | **integrado em `main`** via merge commit `a5974b1`, CI pós-merge verde | https://github.com/rafaelinfopiaui/avalia-platform/pull/4 |
@@ -349,3 +349,67 @@ backend/API**. Resumo:
   (§5 veredito do Antigravity, §5.1 verificação adicional independente do Hermes);
   `evidence/AV-S06B/` (desenho `desenho_debt_014_retomada.md`, prompt de execução,
   verificação do Hermes, parecer do Antigravity).
+
+## 12. AV-S08B — transcrição manual e confirmação humana (2026-10-14, fatia MANUAL, publicada em PR rascunho)
+
+**Não altera o numerador de 19/70** — entrega técnica publicada em PR
+rascunho, ainda não homologada. Escopo: parte MANUAL (sem OCR) de
+`BL-AV-4B-13`/`14` (cobertos integralmente) e `BL-AV-4B-10`/`11`/`15`
+(cobertos parcialmente — falta a parte de OCR). Resumo:
+
+- decisões de produto aprovadas em `DEC-AV-040`: rascunho único atual
+  (DP-1), confirmação definitiva nesta fatia sem reabertura (DP-2),
+  idempotência/conflito sem disparo automático de correção (DP-3), e
+  controle de concorrência explícito por versão;
+- backend: migração aditiva (`f2a9c4e6b1d3`, +4 colunas nullable/default em
+  `Answer`, downgrade bloqueado se houver dado não-default); 2 endpoints de
+  mutação (`PATCH .../manual-transcription/draft`,
+  `POST .../manual-transcription/confirm`), lock otimista por
+  `transcription_version` via UPDATE condicional em transação (mesmo padrão
+  de `Rubric.version`); histórico via `AuditEvent` preservando autoria e
+  origem MANUAL; nunca dispara `request_correction` nem cria
+  `CorrectionJob` a partir destes 2 endpoints;
+- delta posterior, dentro do mesmo escopo autorizado (sem nova decisão de
+  produto): botão "Solicitar análise da IA" na tela de resposta por foto,
+  visível só após confirmação, reaproveitando `requestCorrection` já
+  existente (zero endpoint novo);
+- validação: suíte **204 passed, 5 skipped** (zero regressão; os 5 skipped
+  são testes de concorrência real contra PostgreSQL — **executados
+  localmente pelo autor e por 2 rodadas de revisão independente; a CI atual
+  deste repositório não define `AVALIA_TEST_POSTGRES_URL` e os pula**,
+  candidato a melhoria de infraestrutura, fora de escopo); `ruff`/`tsc`/
+  `build`/`lint` limpos; identidade de conteúdo integral do texto enviado à
+  IA comprovada por teste automatizado (comparação exata, não por
+  coincidência de tamanho); validação de integração completa (foto →
+  rascunho → confirmação → correção → revisão humana final) com **AI
+  Engine real em modo simulado explícito**, distinto de inferência real;
+- revisão independente: **Antigravity — 4 rodadas** — plano técnico (2x,
+  APROVADO COM RESSALVAS cada), implementação completa (APROVADO COM
+  RESSALVAS DOCUMENTAIS, sem achado bloqueante), delta de correção
+  (APROVADO, sem ressalva bloqueante — revisão restrita ao delta, sem
+  reabrir a auditoria geral);
+- integridade: `avalia_dev` (a9f4c2e71b06, 16 `human_reviews`) e
+  `avalia_apresentacao_demo_20261002` (a9f4c2e71b06) auditados intactos
+  antes e depois de toda a execução, em múltiplas rodadas de verificação
+  independente;
+- NÃO entregue nesta fatia: OCR, extração automática, reabertura
+  pós-confirmação, múltiplos rascunhos concorrentes selecionáveis, qualquer
+  ativação operacional;
+- Git: **publicado em PR rascunho, sem merge** — branch
+  `feat/av-s08b-transcricao-manual`, 4 commits organizados por finalidade
+  (backend, testes, frontend, governança), SHA
+  `92edce4013ba5688be4e4ff99fdf249a677636f3`, push confirmado por `git
+  fetch` independente, PR [#18](https://github.com/rafaelinfopiaui/avalia-platform/pull/18)
+  aberto contra `main` (`isDraft=true`, `mergeable=MERGEABLE`,
+  `mergeStateStatus=CLEAN`), **CI 3/3 checks pass** (run `38581948805`,
+  confirmado via API de check-runs, não apenas pela saída do comando);
+- progresso homologado: permanece **19/70** (esta publicação não altera o
+  numerador; homologação/merge pendente de decisão de Rafael);
+- evidência: `sprint_AV-S08B_transcricao_manual_confirmacao_humana.md`;
+  `evidence/AV-S08B/` (plano técnico, 2 pareceres de revisão do plano,
+  prompts de execução, 2 pareceres de revisão da implementação/delta);
+  [`snapshot_EXEC-2026-10-14-07`](snapshots/snapshot_EXEC-2026-10-14-07_abertura_av-s08b.md),
+  [`snapshot_EXEC-2026-10-14-08`](snapshots/snapshot_EXEC-2026-10-14-08_encerramento_av-s08b.md),
+  [`snapshot_EXEC-2026-10-14-09`](snapshots/snapshot_EXEC-2026-10-14-09_conclusao_escopo_av-s08b.md)
+  e [`snapshot_EXEC-2026-10-14-10`](snapshots/snapshot_EXEC-2026-10-14-10_publicacao_av-s08b.md)
+  (detalhamento completo da publicação).
