@@ -103,9 +103,23 @@ Rodada isolada própria (banco `av_s06b_debt014_rev_hermes2`, Core `:8199`, Vite
 
 ## 7. Estado final
 
-- Rodada LOCAL: branch `feat/av-s06b-debt-014-retomada-respostas-imagem` (base
-  cf81109); working tree não-staged; nenhuma ação remota.
+- Rodada LOCAL concluída e **publicada**: branch
+  `feat/av-s06b-debt-014-retomada-respostas-imagem` (base `cf81109`), 3 commits
+  (`feat`, `test`, `docs(governance)`), HEAD final `da793bae9b2dfb95fffdde2463c737d6b5007ffb`.
+- Push confirmado por `git fetch` independente (SHA remoto == SHA local).
+- PR rascunho aberto contra `main`: [#17](https://github.com/rafaelinfopiaui/avalia-platform/pull/17)
+  — estado `OPEN`, `isDraft=true`, `mergeable=MERGEABLE`. **Sem merge nesta
+  rodada**, por instrução explícita de Rafael.
+- CI (run [38560858897](https://github.com/rafaelinfopiaui/avalia-platform/actions/runs/38560858897))
+  no SHA `da793ba`: **3/3 checks `pass`** — Core API (FastAPI + Postgres) 2m38s,
+  AI Engine (FastAPI) 16s, Frontend (Vite + React + TS) 19s. `conclusion=success`
+  confirmado via API (`gh run view --json conclusion,headSha`), não apenas pela
+  CLI de checks.
 - Diff de código: `core/app/main.py` (+40), `frontend/src/pages/ImageAnswerPage.tsx`
-  (+69/-9), `frontend/src/services/api.ts` (+6), testes novos.
+  (+69/-9), `frontend/src/services/api.ts` (+6), teste novo
+  `core/app/tests/test_image_answers_listing.py` (+311, 13 casos).
 - Progresso homologado permanece **19/70**; AV-S05B parcial; BL-AV-4B-05 pendente.
+  Esta publicação **não** encerra automaticamente a AV-S06B nem promove baseline.
 - Bancos protegidos intactos.
+- Próximo passo: decisão de Rafael sobre homologação/integração do PR #17
+  (merge continua vedado até autorização explícita e nova rodada de revisão).
