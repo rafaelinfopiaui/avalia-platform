@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { Navigate } from 'react-router-dom'
 import { Alert } from '../components/Alert'
 import { Spinner } from '../components/Spinner'
 import { useAuth } from '../context/AuthContext'
+import { useCapabilities } from '../context/CapabilitiesContext'
 import {
   createClassGroup,
   createCourse,
@@ -33,6 +35,10 @@ type AcademicTab = 'classes' | 'students' | 'enrollments' | 'courses' | 'discipl
 
 export function AcademicPage() {
   const { user } = useAuth()
+  // DEBT-AV-013 / AC-02: a página era acessível mesmo com o módulo desligado,
+  // inclusive por URL direta. A guarda abaixo vale para qualquer forma de
+  // acesso à rota /academico, não só para a navegação pelo menu.
+  const { academicModuleEnabled, loading: capabilitiesLoading } = useCapabilities()
   const isAdmin = user?.role === 'admin'
   const isProfessor = user?.role === 'professor'
 
@@ -155,8 +161,13 @@ export function AcademicPage() {
   }
 
   useEffect(() => {
+    // Fail-closed também no acesso a dados: enquanto a capacidade é desconhecida
+    // (carregando) ou está desligada, a página não dispara NENHUMA chamada aos
+    // endpoints acadêmicos — evita que a tela bloqueada ainda assim consulte o
+    // backend durante o redirecionamento.
+    if (capabilitiesLoading || !academicModuleEnabled) return
     void loadData()
-  }, [])
+  }, [capabilitiesLoading, academicModuleEnabled])
 
   // Lookup helpers
   const getOrgName = (id: string) => organizations.find(o => o.id === id)?.name || id
@@ -312,6 +323,16 @@ export function AcademicPage() {
       setBusy(false)
     }
   }
+
+  // Guarda de rota (AC-02/AC-04). Decisão de UX: enquanto a capacidade é
+  // desconhecida mostramos um estado de carregamento neutro, sem revelar
+  // conteúdo acadêmico; assim que se confirma que o módulo está desligado (ou
+  // que a consulta falhou), redirecionamos para /avaliacoes com `replace` em
+  // vez de exibir uma mensagem de erro — a rota simplesmente não existe para o
+  // usuário quando o módulo está desligado, e `replace` evita que o botão
+  // "voltar" reentre em /academico em loop.
+  if (capabilitiesLoading) return <Spinner label="Verificando módulos disponíveis…" />
+  if (!academicModuleEnabled) return <Navigate to="/avaliacoes" replace />
 
   return (
     <>
