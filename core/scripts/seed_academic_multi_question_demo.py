@@ -88,10 +88,14 @@ def require_isolated_database(database_url: str) -> None:
 def require_academic_flags() -> None:
     settings = get_settings()
     if not settings.academic_module_enabled:
+        # NOTA (2026-10-14, AV-S03B): mensagem corrigida — o frontend não lê
+        # mais VITE_ACADEMIC_MODULE_ENABLED (removida em AV-S03B). A
+        # capacidade do frontend é consultada em runtime via
+        # GET /v1/config/capabilities (core/app/routers/config.py). Esta
+        # alteração é exclusivamente textual: guards, lógica, dados e
+        # critérios de validação deste script permanecem inalterados.
         raise RuntimeError(
-            "ACADEMIC_MODULE_ENABLED must be true for this demonstration. "
-            "Frontend must also be started/built with "
-            "VITE_ACADEMIC_MODULE_ENABLED=true."
+            "ACADEMIC_MODULE_ENABLED must be true for this demonstration."
         )
 
 
@@ -314,7 +318,13 @@ def run() -> None:
             raise RuntimeError("Committed demo assessment questions are not exactly ordered 1,2")
         print("DEMO_SEED_CREATED_AND_VALID")
         print(f"DEMO_ASSESSMENT_ID={IDS['assessment']}")
-        print("DEMO_ACADEMIC_FLAGS_REQUIRED=ACADEMIC_MODULE_ENABLED=true,VITE_ACADEMIC_MODULE_ENABLED=true")
+        # NOTA (2026-10-14, AV-S03B): saída corrigida — a execução passada
+        # (que produziu "ACADEMIC_MODULE_ENABLED=true,VITE_ACADEMIC_MODULE_
+        # ENABLED=true", preservada em evidências arquivadas como registro
+        # histórico daquela execução) exigia as duas variáveis. Hoje só
+        # ACADEMIC_MODULE_ENABLED é necessária; o frontend obtém a
+        # capacidade em runtime. Alteração exclusivamente textual.
+        print("DEMO_ACADEMIC_FLAGS_REQUIRED=ACADEMIC_MODULE_ENABLED=true")
 
 
 if __name__ == "__main__":
