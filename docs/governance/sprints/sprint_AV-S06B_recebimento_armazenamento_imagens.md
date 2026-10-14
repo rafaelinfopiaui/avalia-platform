@@ -312,22 +312,38 @@ não estava autorizado nesta rodada e não foi feito.
 
 ## 16. Closure gate
 
-Estado em 2026-10-14 (-03): **aprovação técnica local concluída** (executor
-Claude Code + verificação independente Hermes + revisão independente Antigravity,
-veredito APROVADO), **pendente de decisão de produto, publicação e homologação**.
+Estado em 2026-10-14 (-03): **backend/API homologado por Rafael (`DEC-AV-036`)**
+e autorizado a integrar por merge commit; **integração registrada abaixo após o
+merge**. Verificação independente do Hermes + revisão independente do Antigravity
+(APROVADO) concluídas antes da homologação.
+
+Classificação do gate: **concluída com débitos** — o backend/API foi entregue,
+validado e homologado, mas a Etapa 4B (recebimento por imagem utilizável de ponta
+a ponta) permanece aberta por depender da interface e de decisões ainda pendentes.
 
 Distinções de estado (não confundir):
-- **Aprovação técnica local**: concluída (AC-01 a AC-10 com evidência real; 136
-  passed; revisão independente APROVADO).
-- **Decisões de produto** (formato/tamanho/retenção/exclusão): pendentes de
-  Rafael (ver tabela de decisões no pacote de entrega / §7).
-- **Interface de upload**: não entregue nesta fatia (§15.1) — só backend/API.
-- **Exclusão de imagens**: não implementada (§15.7).
-- **Publicação (PR)**: não ocorreu — sem stage/commit/push/merge.
-- **Homologação por Rafael**: não ocorreu.
-- **Integração/ativação operacional**: não ocorreu.
+- **Backend/API**: homologado (`DEC-AV-036`).
+- **Integração (merge)**: ver Adendo de integração no snapshot
+  `snapshot_EXEC-2026-10-14-02_execucao_av-s06b.md` (SHA integrado + CI pós-merge).
+- **Interface de upload**: NÃO entregue (§15.1) — fica como complemento frontend
+  da AV-S06B, planejado para próxima autorização.
+- **Uso operacional**: migração em bancos protegidos e ativação NÃO autorizados.
+- **Retenção/exclusão operacional**: pendentes (`BL-AV-4B-05` em aberto).
 
-Progresso homologado permanece **19/70**; `AV-S05B` permanece parcial. Esta
-sprint **não** altera o numerador até eventual homologação. O fechamento formal a
-partir de [sprint_closure_template.md](../templates/sprint_closure_template.md)
-será preenchido se/quando Rafael homologar.
+Encerramento de backlog (critérios canônicos — não marcar completo item que ainda
+exija interface ou requisito ausente):
+- `BL-AV-4B-03` (recebimento/armazenamento): backend homologado; **não encerrado**
+  — o fluxo só é utilizável com a interface de upload (ainda ausente).
+- `BL-AV-4B-04` (controle de acesso/preservação/metadados): backend homologado;
+  **não encerrado** pelo mesmo motivo.
+- `BL-AV-4B-05` (retenção/exclusão/proteção de logs): **pendente** — só a proteção
+  de logs foi entregue; retenção e exclusão operacional não decididas.
+
+`DEC-AV-018` preservada como "uma resposta de uma questão por foto" — não é
+unicidade de foto por questão nem proibição de reenvio (o backend permite reenvio;
+cada upload cria novo registro, preservando o anterior).
+
+Progresso homologado permanece **19/70**; a integração do backend **não** aumenta
+o numerador. `AV-S05B` permanece parcial. O fechamento formal a partir de
+[sprint_closure_template.md](../templates/sprint_closure_template.md) só marcará a
+Etapa 4B como concluída quando interface + decisões pendentes forem resolvidas.

@@ -115,4 +115,36 @@ diff exato por Rafael.
 
 ## 10. Adendos
 
-Nenhum ainda.
+### Adendo 1 — Publicação em PR rascunho (2026-10-14, autorizada por Rafael)
+
+Rafael aprovou as decisões de produto desta rodada (formatos JPEG/PNG; limite
+10_485_760 bytes = 10 MiB como limite funcional; retenção/exclusão operacional
+seguem pendentes; exclusão não implementada; proteção de logs mantida como
+requisito técnico) e autorizou publicar a entrega backend/API em PR rascunho,
+sem merge nem ativação.
+
+- Ajuste pré-publicação: comentário do limite em `config.py` tornado exato
+  (10_485_760 bytes = 10 MiB, não 10 MB decimais). Só comentário; suíte de
+  imagens reexecutada (26 passed) e ruff `app` limpo após o ajuste.
+- Pacote recuperável enxugado: removidas as cópias redundantes de código
+  (`arquivos-novos/`) e o diff recortado; mantidos README, `git_status.txt` e
+  `INVENTARIO_CHECKSUMS.sha256` (o código oficial são os arquivos versionados;
+  o diff oficial é o do PR).
+- Stage seletivo por finalidade, com `git diff --cached` conferido antes de cada
+  commit. **4 commits**:
+  - `5bed52e` feat(core): modelo AnswerImage, migração, config
+  - `d3a607d` feat(core): endpoints upload/listagem/download
+  - `8860282` test(core): suíte de imagens + Pillow
+  - `875af61` docs(governance): sprint/snapshots/dashboard/evidências
+- Push verificado por `git fetch` independente: remoto == local ==
+  **`875af61337f8e50cad878f6ca87cf840fcb84b42`**.
+- **PR #15** (rascunho): https://github.com/rafaelinfopiaui/avalia-platform/pull/15
+  — base `main`, head `875af61`, `isDraft: true`, `mergeable: MERGEABLE`,
+  `mergeStateStatus: CLEAN`.
+- **Checks do HEAD publicado (run 38512003394): 3/3 PASS** — Core API
+  (FastAPI+Postgres) 2m12s, AI Engine, Frontend.
+- Checagens de segurança antes do push: nenhum segredo/credencial, nenhuma
+  imagem de teste/storage/banco/backup no conjunto; `/core/var/` ignorado;
+  relatório do executor em `local-nao-versionado/` (ignorado) não versionado.
+- Sem merge, sem ativação operacional, sem migração em bancos protegidos, sem
+  P5/deploy/baseline. **Não** há homologação nem integração declaradas.
