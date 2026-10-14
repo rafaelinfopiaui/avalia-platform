@@ -47,6 +47,9 @@ htmlcov/
 .coverage
 coverage.xml
 
+# Armazenamento local de imagens de resposta (AV-S06B) — nunca versionar
+/core/var/
+
 # Áreas locais não versionadas (consolidação 2026-09-30)
 /experiments/
 /local-nao-versionado/
