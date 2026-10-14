@@ -158,6 +158,12 @@ export const createImageAnswer = (payload: { question_id: string; student_name: 
   return request<AnswerWithImages>('/answers/image', { method: 'POST', body: form })
 }
 export const listAnswerImages = (answerId: string) => request<AnswerImage[]>(`/answers/${answerId}/images`)
+// Retomada (DEBT-AV-014): respostas por imagem já persistidas da avaliação,
+// opcionalmente restritas a uma questão. Somente leitura.
+export const listImageAnswers = (assessmentId: string, questionId?: string) => {
+  const query = questionId ? `?question_id=${encodeURIComponent(questionId)}` : ''
+  return request<AnswerWithImages[]>(`/assessments/${encodeURIComponent(assessmentId)}/image-answers${query}`)
+}
 // Download autenticado (Bearer): a imagem nunca é servida por URL pública.
 export async function downloadAnswerImage(imageId: string): Promise<Blob> {
   const response = await send(`/answer-images/${imageId}/download`)
