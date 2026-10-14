@@ -1,6 +1,6 @@
 ---
 id: "AV-S08B"
-status: "publicada em PR rascunho #18, sem merge — aguardando homologação de Rafael"
+status: "homologada (DEC-AV-041, 2026-10-14) — fatia MANUAL; integração por merge commit em andamento"
 objetivo_aprovado_por: Rafael (2026-10-14, nesta conversa)
 consolidador: "Hermes"
 baseline_entrada: "main HEAD e8b08646cfee5e9fea70d8e9bbcb4cf39f5a3d2d (merge PR #17, DEBT-AV-014 integrada)"
@@ -190,6 +190,21 @@ sem merge. Publicação concluída — PR
 `92edce4013ba5688be4e4ff99fdf249a677636f3`, CI 3/3 checks pass, sem merge.
 Ver `snapshot_EXEC-2026-10-14-10_publicacao_av-s08b.md` para o detalhamento
 completo da publicação. Homologação permanece decisão de Rafael.
+
+**Atualização (2026-10-14, homologação autorizada por Rafael, `DEC-AV-041`):**
+Rafael homologou a fatia MANUAL no HEAD
+`ea512099cb26e760712c239be5106b960f09ed3c` (3/3 checks pass, `mergeStateStatus`
+CLEAN, reconfirmado de forma independente via API/fetch, sem repetir
+suíte/auditoria geral já válida) e autorizou a integração por merge commit,
+preservando a branch, com atualização do checkout principal para `main` por
+fast-forward. Distinções explícitas na homologação: fatia MANUAL homologada
+≠ integração (só completa após o merge efetivo) ≠ OCR (NÃO entregue,
+`BL-AV-4B-10`/`11`/`15` permanecem parciais) ≠ ativação operacional (NÃO
+autorizada). Ressalvas preservadas sem encerramento: 5 testes de
+concorrência real fora da CI atual (executados localmente); rótulo "nova
+análise da IA" é estado local de sessão. Ver
+`snapshot_EXEC-2026-10-14-11_homologacao_integracao_av-s08b.md` para SHA
+integrado, CI pós-merge e estado final do checkout.
 
 ## 14. Ajustes de percurso
 
