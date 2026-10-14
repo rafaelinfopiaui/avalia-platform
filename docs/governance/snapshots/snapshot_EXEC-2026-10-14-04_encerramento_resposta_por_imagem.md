@@ -142,7 +142,8 @@ DEBT-AV-014 aberto; transcrição/confirmação não implementadas; retenção/e
 operacional pendentes (BL-AV-4B-05); migrações não aplicadas aos bancos protegidos.
 Progresso homologado permanece **19/70**; AV-S05B parcial.
 
-Integração (merge) — preenchido após o merge:
-- SHA integrado (merge commit em main): __A_PREENCHER__
-- PR #16 state: __A_PREENCHER__ (merge commit preservando a branch)
-- CI pós-merge: __A_PREENCHER__
+Integração (merge) — registrada na branch da fatia DEBT-AV-014 (sem commit direto em main):
+- SHA integrado (merge commit em main): `cf81109655713fac856aab0b26ba36e1bb5f15bc`
+- PR #16 state: MERGED (merge commit preservando a branch `feat/av-s06b-resposta-por-imagem`); mergedAt 2026-10-14T08:25:53Z; mergedBy rafaelinfopiaui
+- CI pós-merge (run 38535053070, SHA cf81109, em main): conclusion **success** (avisos não-bloqueantes: Node 20→24; ubuntu-latest→26 em 19/10)
+- Checkout principal atualizado para `main` por fast-forward puro (b818961 → cf81109); working tree limpo; bancos protegidos intactos (`avalia_dev` a9f4c2e71b06, 16 human_reviews; apresentação a9f4c2e71b06)

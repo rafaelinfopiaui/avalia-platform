@@ -1,0 +1,133 @@
+================================================================================
+RESUMO DA EXECUÇÃO — HOMOLOGAÇÃO/INTEGRAÇÃO DO PR #16 (resposta por imagem) +
+ABERTURA DA FATIA DEBT-AV-014
+Projeto AvalIA · 2026-10-14
+================================================================================
+
+AUTORIZAÇÃO (Rafael)
+--------------------------------------------------------------------------------
+Homologar a entrega funcional do PR #16 com ressalva explícita de DEBT-AV-014 e
+integrá-la (sem merge posterior/ativação). A homologação abrange o complemento de
+"resposta por imagem" entregue, NÃO o encerramento integral da AV-S06B. Em seguida,
+autorizado planejamento + implementação LOCAL da fatia DEBT-AV-014 (recuperação de
+envios persistidos), sem stage/commit/push nesta rodada.
+
+
+================================================================================
+PARTE A — HOMOLOGAÇÃO E INTEGRAÇÃO DO PR #16  [CONCLUÍDA]
+================================================================================
+
+1. VERIFICAÇÃO LIMITADA (reconfirmada antes do merge)
+- HEAD: 78a7b069957b6058ad5dac94b90907b9bc8d496b (local == remoto == esperado).
+- Diff dentro do escopo revisado; nenhum artefato proibido (sem credenciais/
+  imagens/banco/storage/backup).
+- Checks próprios do HEAD: 3/3 PASS. mergeStateStatus CLEAN. Sem bloqueantes.
+- Não repeti auditoria geral nem ensaios já válidos.
+
+2. REGISTRO DA HOMOLOGAÇÃO (DEC-AV-038)
+- DEC-AV-038 registrada na branch, PRESERVANDO explicitamente:
+  * ACI-08 = "validado com ressalva" (não aprovação integral);
+  * DEBT-AV-014 = ABERTO;
+  * transcrição/confirmação NÃO implementadas;
+  * retenção/exclusão operacional PENDENTES (BL-AV-4B-05 não encerrado);
+  * migrações NÃO aplicadas aos bancos protegidos.
+- Alcance: homologa o complemento entregue, NÃO encerra a AV-S06B.
+- Atualizados: sprint §16.1 (closure gate — homologação do complemento),
+  snapshot EXEC-2026-10-14-04 (Adendo 2 — homologação).
+- Commit documental: bfc710c88c00d0204121bfd73f7c010d0615a3ef
+  (stage seletivo só de governança; diff staged conferido).
+- Push verificado por fetch independente (remoto == local == bfc710c).
+- Checks próprios do HEAD documental bfc710c: 3/3 PASS
+  (Core API 2m15s, AI Engine 22s, Frontend 16s).
+
+3. INTEGRAÇÃO
+- PR #16 retirado de rascunho ("ready for review").
+- Merge por MERGE COMMIT, preservando a branch:
+  * PR #16 state = MERGED;
+  * merge commit = cf81109655713fac856aab0b26ba36e1bb5f15bc;
+  * mergedAt = 2026-10-14T08:25:53Z; mergedBy = rafaelinfopiaui.
+- Branch feat/av-s06b-resposta-por-imagem PRESERVADA no remoto (aponta p/ bfc710c).
+- CI pós-merge (run 38535053070, SHA cf81109, em main): conclusion = SUCCESS.
+  (avisos não-bloqueantes conhecidos: Node 20 -> forçado 24; ubuntu-latest -> 26
+   a partir de 19/10/2026).
+- Checkout principal atualizado para main por FAST-FORWARD PURO
+  (b818961 -> cf81109); working tree limpo; arquivos da entrega presentes em main.
+- Não criei worktrees nem outro PR apenas para registrar o merge.
+
+4. INTEGRIDADE
+- Bancos protegidos INTACTOS: avalia_dev (version_num=a9f4c2e71b06, 16
+  human_reviews) e avalia_apresentacao_demo_20261002 (a9f4c2e71b06). Migração não
+  aplicada a eles.
+
+NOTA DE PROCESSO (SHA do merge)
+- O registro do SHA integrado (cf81109) no Adendo 2 ficou como placeholder "a
+  preencher" e será gravado junto da publicação da fatia B (em branch/PR normal) —
+  para NÃO commitar direto em main nem abrir PR só para registrar o merge
+  (consistente com o precedente do backend AV-S06B, cujo SHA de merge também não foi
+  gravado por commit direto em main).
+
+
+================================================================================
+PARTE B — FATIA DEBT-AV-014 (retomada de respostas por imagem)  [EM ANDAMENTO]
+================================================================================
+Rodada LOCAL: SEM stage/commit/push nesta fatia (ordem de Rafael).
+
+B1. PLANEJAMENTO REGISTRADO ANTES DO CÓDIGO  [concluído]
+- Branch dedicada criada a partir de main (sem worktree):
+  feat/av-s06b-debt-014-retomada-respostas-imagem (base cf81109).
+- Desenho + critérios de aceite ACD-01..10:
+  docs/governance/evidence/AV-S06B/desenho_debt_014_retomada.md
+- Snapshot de abertura: EXEC-2026-10-14-05.
+- REGRA DE AUTORIZAÇÃO fixada conforme instrução de Rafael: a listagem é LEITURA
+  HISTÓRICA por PROPRIEDADE (padrão homologado list_assessments/get_assessment/
+  _get_owned_assessment = owner_id == user.id; admin vê tudo). NÃO introduzir
+  exigência de vínculo ativo de turma para leitura (confirmado no código que os GET
+  de leitura usam propriedade, não require_active_class_link).
+
+ESCOPO DA FATIA
+- Backend: endpoint SOMENTE LEITURA
+  GET /v1/assessments/{assessment_id}/image-answers?question_id=<opcional>
+  retornando list[AnswerWithImagesOut] (schema já homologado), filtrado a
+  source=IMAGE, sem expor storage_filename; imagem só por download autenticado.
+- Frontend: a tela de resposta por foto passa a buscar e reexibir as respostas por
+  imagem persistidas da avaliação/questão ao carregar, após RELOAD e em NOVA SESSÃO
+  (não só os envios da sessão), com estados de carregando/vazio/erro, e limpando a
+  seleção anterior ao trocar avaliação/questão.
+FORA DE ESCOPO: transcrição manual, confirmação, OCR, exclusão/retenção, qualquer
+correção/IA sobre resposta por imagem (bloqueio permanece).
+
+B2. IMPLEMENTAÇÃO  [em andamento]
+- Claude Code (executor principal) disparado com o prompt sanitizado
+  (docs/governance/evidence/AV-S06B/prompt_debt_014_claude_code.md). Em execução no
+  momento da geração deste resumo.
+
+PRÓXIMOS PASSOS DA PARTE B (ainda não executados)
+- Verificação independente do Hermes em ambiente ISOLADO descartável: acessos
+  autorizados/negativos, LEITURA HISTÓRICA sem vínculo ativo, retomada em navegador
+  real (após reload e nova sessão), troca de seleção sem dados anteriores, bloqueio
+  de correção mantido, fluxo textual preservado. Dados fictícios; bancos protegidos
+  não tocados.
+- Revisão independente do Antigravity; Codex só diante de risco concreto.
+- Entrega do diff local + revisão. SEM stage/commit/push nesta fatia.
+
+
+================================================================================
+ESTADO FINAL / LIMITES
+================================================================================
+- main @ cf81109 (merge do PR #16). Branch da fatia B: feat/av-s06b-debt-014-
+  retomada-respostas-imagem (base cf81109), implementação em curso, nada commitado.
+- Progresso homologado PRESERVADO em 19/70 (DEC-AV-038 não aumenta o numerador;
+  aguarda avaliação explícita dos critérios canônicos). AV-S05B parcial.
+  BL-AV-4B-05 pendente.
+- Continuam NÃO autorizados e não realizados: alterações nos bancos protegidos,
+  migração operacional, P5, seed operacional, deploy, promoção de baseline, OCR,
+  transcrição manual.
+
+ENTREGÁVEIS (caminhos)
+- DEC-AV-038: docs/governance/registers/decisions.md
+- Sprint AV-S06B §16.1: docs/governance/sprints/sprint_AV-S06B_recebimento_armazenamento_imagens.md
+- Snapshot EXEC-04 (Adendo 2): docs/governance/snapshots/snapshot_EXEC-2026-10-14-04_encerramento_resposta_por_imagem.md
+- Fatia DEBT-014: docs/governance/evidence/AV-S06B/desenho_debt_014_retomada.md
+  e docs/governance/snapshots/snapshot_EXEC-2026-10-14-05_abertura_debt_014.md
+- PR #16: https://github.com/rafaelinfopiaui/avalia-platform/pull/16 (MERGED)
+================================================================================

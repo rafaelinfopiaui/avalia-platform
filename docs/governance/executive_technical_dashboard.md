@@ -298,3 +298,54 @@ backend/API**. Resumo:
   e [`snapshot_EXEC-2026-10-14-04`](snapshots/snapshot_EXEC-2026-10-14-04_encerramento_resposta_por_imagem.md);
   `evidence/AV-S06B/` (desenho, pareceres de revisão do desenho e da implementação,
   prompt de execução).
+
+### 11.2 Fatia DEBT-AV-014 — Retomada de respostas por imagem (rodada local)
+
+- escopo: resolver o débito registrado em `technical_debts.md` (`DEBT-AV-014`) e a
+  ressalva do cenário 5 de `validacao_visual_resposta_por_imagem.md` — a tela de
+  resposta por foto passa a retomar/listar, após recarregar (F5) e em nova sessão,
+  as respostas por imagem já persistidas no backend, sem exigir reenvio;
+- contrato: `GET /v1/assessments/{id}/image-answers?question_id=<opcional>`,
+  SOMENTE leitura, autorizado por **propriedade** (`_get_owned_assessment`, mesmo
+  padrão de `get_assessment`/`list_assessments`) — explicitamente SEM
+  `require_assessment_mutation` nem `require_active_class_link`, porque é leitura
+  histórica e o professor dono deve continuar consultando mesmo sem vínculo ativo
+  de turma; questão inexistente ou de outra avaliação -> 404; não-dono -> 403; sem
+  token -> 401; `storage_filename` nunca exposto (reuso de `AnswerImageOut`);
+- interface: `ImageAnswerPage.tsx` busca os persistidos ao selecionar/trocar
+  avaliação ou questão (inclusive ao montar com `?avaliacao=`), une com os envios
+  da sessão sem duplicar (dedupe por `answer.id`), limpa a seleção anterior antes
+  de buscar (guard de corrida com contador de requisição), e trata estados de
+  carregando/vazio/erro-com-repetir; nenhuma ação de correção/nota/IA introduzida;
+- validação: suíte **171 passed** (158 + 13 novos; zero regressão), `ruff app`
+  limpo, build+tsc do frontend limpos; HTTP real em PostgreSQL isolado cobrindo
+  ACD-01 a ACD-05 e ACD-09 (incluindo **ACD-04 leitura histórica**: avaliação com
+  `class_group_id` e dono com ZERO `ProfessorClassLink` -> 200); navegador real em
+  **2 rodadas independentes com ambientes isolados próprios distintos** (Hermes e
+  Antigravity) cobrindo os 5 pontos pedidos por Rafael: retomada em nova sessão,
+  retomada após reload, bloqueio 403 para outro professor (inclusive contra
+  sondagem por `question_id`), troca de avaliação/questão sem reter dados
+  anteriores, e correção ainda bloqueada (422 `ANSWER_NOT_TRANSCRIBED`; para a
+  resposta histórica sem vínculo de turma ativo, mutação continua barrada por 403);
+- revisão independente: **Antigravity — APROVADO (2026-10-14T08:45), sem defeitos
+  bloqueantes**, execução 100% própria em ambiente isolado descartável distinto do
+  usado pelo Claude Code e pelo Hermes (parecer completo em
+  `evidence/AV-S06B/revisao_debt_014_antigravity.md`);
+- integridade: `avalia_dev` (a9f4c2e71b06, 16 `human_reviews`, 29 `answers`) e
+  `avalia_apresentacao_demo_20261002` (a9f4c2e71b06, 10 `answers`) auditados
+  intactos antes e depois, em ambas as rodadas de verificação independente;
+- NÃO entregue nesta fatia: OCR, transcrição manual ou automática, confirmação,
+  exclusão/retenção (`BL-AV-4B-05` segue pendente), qualquer ativação operacional;
+- Git: rodada LOCAL — sem stage/commit/push/merge; branch
+  `feat/av-s06b-debt-014-retomada-respostas-imagem` (base `main` em
+  `cf81109655713fac856aab0b26ba36e1bb5f15bc`, SHA do merge do PR #16/DEC-AV-038,
+  incorporado ao registro documental desta branch — ver Adendo 2 em
+  `snapshot_EXEC-2026-10-14-04` — sem qualquer commit direto em `main`);
+- progresso homologado: permanece **19/70** (esta rodada não altera o numerador;
+  homologação/publicação pendente de decisão de Rafael);
+- evidência: `DEBT-AV-014` em [`technical_debts.md`](registers/technical_debts.md);
+  [`snapshot_EXEC-2026-10-14-05`](snapshots/snapshot_EXEC-2026-10-14-05_abertura_debt_014.md)
+  e [`snapshot_EXEC-2026-10-14-06`](snapshots/snapshot_EXEC-2026-10-14-06_encerramento_debt_014.md)
+  (§5 veredito do Antigravity, §5.1 verificação adicional independente do Hermes);
+  `evidence/AV-S06B/` (desenho `desenho_debt_014_retomada.md`, prompt de execução,
+  verificação do Hermes, parecer do Antigravity).
