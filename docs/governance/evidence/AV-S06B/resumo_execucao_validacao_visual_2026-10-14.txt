@@ -1,0 +1,157 @@
+================================================================================
+RESUMO DA EXECUÇÃO — VALIDAÇÃO VISUAL DA RESPOSTA POR IMAGEM (AV-S06B / DEC-AV-037)
+Projeto AvalIA · 2026-10-14 · rodada LOCAL (sem publicação)
+================================================================================
+
+OBJETIVO DESTA RODADA
+--------------------------------------------------------------------------------
+Concluir a validação visual pendente (ACI-08) do fluxo de "resposta por imagem"
+da AV-S06B, que já fazia parte da execução autorizada. SEM avançar para publicação.
+Direção de produto (DEC-AV-037): a foto é a entrada inicial da resposta, sem texto
+digitado/vazio/fictício; a resposta nasce em "aguardando transcrição" e a correção
+fica bloqueada até haver transcrição confirmada pelo professor.
+
+
+1. AMBIENTE ISOLADO (descartável)
+--------------------------------------------------------------------------------
+- Banco PostgreSQL descartável próprio: av_s06b_rpi_visual_hermes (migrado até head
+  e7c3f1a8b2d4). NÃO usou avalia_dev nem avalia_apresentacao_demo_20261002.
+- Storage temporário: /tmp/av_s06b_rpi_visual_storage
+- Core (FastAPI) em 127.0.0.1:8196, ACADEMIC_MODULE_ENABLED=false,
+  AI_ENGINE_URL apontando para porta morta (health.ai_engine=false).
+  NENHUM Ollama/OCR iniciado (desnecessário para recebimento e bloqueio de correção).
+- Frontend (Vite) em 127.0.0.1:5273, VITE_API_URL apontando para o Core isolado.
+- Navegador real: Chromium via CDP (porta de automação 9337).
+- Seed mínimo: 2 professores fictícios; 2 avaliações publicadas do prof1
+  (Biologia com 2 questões, História com 1 questão).
+
+
+2. CENÁRIOS VALIDADOS NO NAVEGADOR REAL — 9 de 10 PASS
+--------------------------------------------------------------------------------
+[PASS] 1. Seleção manual de avaliação/questão/aluno (DEC-AV-021), com cascata:
+          escolher Biologia populou Questão 1 e 2; enunciado exibido.
+[PASS] 2. Envio de JPEG válido (resposta_bio.jpg, 5 KiB) -> 201; botão "Enviando
+          imagem…"; aviso de sucesso e card "Aguardando transcrição".
+[PASS] 3. Envio de PNG válido (resposta_hist.png, 1 KiB) -> 201 (Questão 2).
+[PASS] 4. Listagem e visualização por DOWNLOAD AUTENTICADO: botão "Visualizar"
+          baixa via blob autenticado (src começa com blob:), imagem renderiza com
+          naturalWidth=640 (dimensão real do arquivo enviado).
+[RESSALVA] 5. Estado "aguardando transcrição" após recarregar (ver seção 3).
+[PASS] 6. Ausência de ação de correção para a resposta por imagem: a tela de foto
+          não tem botão de correção/análise; contraste com a tela textual, que tem
+          "Solicitar análise da IA".
+[PASS] 7. Rejeição compreensível de arquivo inválido (falso.png: conteúdo não-imagem)
+          -> backend 422 -> "O arquivo enviado não é uma imagem JPEG ou PNG válida…".
+          Nenhuma resposta criada.
+[PASS] 8. Rejeição de arquivo > 10 MiB (grande.png, 13,9 MiB) -> barrado no cliente
+          antes do envio: "A imagem excede o limite de 10 MiB…".
+[PASS] 9. Troca de avaliação/questão SEM exibir imagem/estado da seleção anterior:
+          trocar Biologia->História resetou a questão, recarregou as questões,
+          limpou campo arquivo e aluno; trocar de questão também limpou o input.
+[PASS] 10. Fluxo textual ainda utilizável: tela "Inserir resposta" com textarea e
+          "Solicitar análise da IA"; link cruzado "Enviar resposta por foto".
+
+OBS.: Os bloqueios de backend (422 ANSWER_NOT_TRANSCRIBED) já estavam validados por
+HTTP em rodadas anteriores; foram reaproveitados, NÃO repetidos (conforme orientação
+de não repetir a suíte sem causa).
+
+
+3. RESSALVA (CENÁRIO 5) E DECISÃO DE RAFAEL
+--------------------------------------------------------------------------------
+FATO: o estado "aguardando transcrição" ESTÁ preservado no BACKEND. Verificação
+direta no banco após recarregar (F5): as respostas por imagem persistem com
+source=IMAGE, transcription_status=AGUARDANDO_TRANSCRICAO, text NULL; imagens no
+storage. A LIMITAÇÃO é de interface: a tela de Resposta por Foto não reexibe as
+respostas persistidas após F5 — a lista é rotulada "enviadas nesta sessão"
+(estado React volátil).
+
+CAUSA DE ESCOPO: não existe hoje endpoint GET para listar respostas por imagem
+persistidas de uma avaliação/questão (só há POST de criação e
+GET /v1/answers/{answer_id}/images, que exige conhecer o answer_id). Reexibir o
+estado após reload exigiria CRIAR um endpoint novo no backend (ampliação do
+backend homologado).
+
+DECISÃO (Rafael, consultado nesta rodada): registrar como LIMITAÇÃO DE UX CONHECIDA
+(débito), SEM alterar backend/código nesta rodada; a reexibição após reload fica
+como pendência para fatia futura. ACI-08 passou a "validado com ressalva".
+Como não houve correção de código, Claude Code e Antigravity NÃO foram acionados
+(não havia delta a revisar).
+
+
+4. CORREÇÕES
+--------------------------------------------------------------------------------
+Nenhuma. Não houve defeito que exigisse correção de código (por decisão de Rafael);
+apenas o débito de UX registrado.
+
+
+5. PRECISÃO DAS PENDÊNCIAS (conferida no backlog, não presumida)
+--------------------------------------------------------------------------------
+- Confirmação de transcrição: NÃO IMPLEMENTADA NESTA FATIA. A resposta por imagem
+  termina legitimamente em "aguardando transcrição".
+- Dependência de OCR: a EXTRAÇÃO AUTOMÁTICA de texto (AV-S07B, BL-AV-4B-06..09)
+  depende da decisão arquitetural de OCR (BL-AV-4B-02). PORÉM a atividade de
+  CONFERÊNCIA/CONFIRMAÇÃO (AV-S08B) NÃO está globalmente bloqueada pelo motor de
+  OCR: o backlog prevê BL-AV-4B-13 (transcrição manual quando a extração falhar —
+  mesmo princípio de RN-017: IA indisponível -> entrada manual), um caminho de
+  confirmação que não depende tecnicamente do OCR. O planejamento da conferência
+  pode avançar; apenas os itens que consomem a saída automática do OCR dependem de
+  AV-S07B.
+- Limitação do parsing multipart (distinção precisa): no POST /v1/answers/image,
+  por usar campos declarativos do FastAPI/Starlette, o corpo multipart é lido ANTES
+  da checagem de autorização. Isso é CONSUMO DE RECURSOS (buffer temporário do
+  Starlette, no disco do sistema) — NÃO é gravação no armazenamento persistente da
+  aplicação nem escrita no banco: nenhum byte entra no diretório privado de imagens
+  nem em answer_images antes da autorização. Débito arquitetural não-bloqueante
+  para hardening futuro. Esta rodada NÃO ampliou para hardening geral.
+- BL-AV-4B-05 (retenção/exclusão operacional): permanece PENDENTE (não concluído).
+
+
+6. ENCERRAMENTO E INTEGRIDADE
+--------------------------------------------------------------------------------
+- Desligados apenas os serviços desta rodada: Core (8196), Vite (5273), Chromium de
+  automação (9337).
+- Banco descartável av_s06b_rpi_visual_hermes DROPADO; storage temporário, assets de
+  teste e profile do Chrome REMOVIDOS. Portas 8196/5273/9337 livres.
+- Bancos protegidos INTACTOS antes e depois: avalia_dev (version_num=a9f4c2e71b06,
+  16 human_reviews) e avalia_apresentacao_demo_20261002 (a9f4c2e71b06).
+- Apenas os 2 arquivos VÁLIDOS foram gravados no storage; o inválido e o >10 MiB não
+  geraram arquivo nem registro.
+- Logs do servidor confirmaram status reais (201 válidos, 422 inválido) e log
+  sanitizado (apenas IDs/tamanho/tipo; sem bytes/caminho/nome original).
+
+
+7. GOVERNANÇA ATUALIZADA (arquivos)
+--------------------------------------------------------------------------------
+- Evidência visual:
+  docs/governance/evidence/AV-S06B/validacao_visual_resposta_por_imagem.md
+- Sprint AV-S06B §17: ACI-08 -> "validado com ressalva"; nova §17.5 (débito de UX +
+  precisão das pendências: transcrição não implementada, dependência de OCR
+  conferida, distinção do multipart, BL-AV-4B-05 pendente).
+  docs/governance/sprints/sprint_AV-S06B_recebimento_armazenamento_imagens.md
+- Snapshot EXEC-2026-10-14-04: Adendo 1 (validação visual).
+  docs/governance/snapshots/snapshot_EXEC-2026-10-14-04_encerramento_resposta_por_imagem.md
+- Dashboard: §11.1 e linha "Última execução registrada" atualizadas (19/70 preservado).
+  docs/governance/executive_technical_dashboard.md
+- latest_execution.md: status atualizado com a validação visual.
+- Diff final de código (INALTERADO nesta rodada visual):
+  docs/governance/evidence/AV-S06B/diff_codigo_resposta_por_imagem.patch
+  (473 linhas; 9 arquivos de código: 4 backend + 5 frontend; + migração + testes)
+
+
+8. ESTADO DO GIT E LIMITES RESPEITADOS
+--------------------------------------------------------------------------------
+- Branch: feat/av-s06b-resposta-por-imagem. Índice VAZIO (nada staged).
+- Código NÃO mudou nesta rodada visual (só governança/evidências foram atualizadas).
+- Nenhum artefato proibido no working tree (imagem/credencial/banco/storage/backup).
+- Sem stage/commit/push/merge. Sem tocar bancos protegidos. Sem P5, migração
+  operacional, deploy, baseline ou benchmark OCR.
+- Progresso homologado permanece 19/70; AV-S05B parcial; BL-AV-4B-05 pendente.
+
+
+RESULTADO FINAL
+--------------------------------------------------------------------------------
+Validação visual concluída: 9/10 cenários PASS + 1 ressalva (débito de UX
+registrado por decisão de Rafael). ACI-08 = "validado com ressalva". Nenhuma
+correção de código necessária. Pronto para decisão de publicação em rodada futura
+(com revisão do diff staged antes de qualquer commit).
+================================================================================

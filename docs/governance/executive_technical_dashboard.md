@@ -10,7 +10,7 @@ O AvalIA possui uma demonstração experimental herdada, organizada em Core API,
 
 | Referência | Estado | Link |
 |---|---|---|
-| Última execução registrada | EXEC-2026-10-14-02 — AV-S06B: recebimento/armazenamento de imagens (backend/API). Aprovação técnica local concluída: suíte 136 passed, AC-01 a AC-10 com evidência real (HTTP em PostgreSQL isolado + testes + inspeção), bug real do Pillow (`KeyError('MPO')`) corrigido pelo Hermes, revisão independente do Antigravity APROVADO. Somente backend/API (sem interface de upload; sem exclusão de imagens). Não publicado; branch local sem commit/push; decisões de produto, publicação e homologação pendentes. Bancos protegidos intactos. Progresso homologado permanece 19/70; AV-S05B parcial. (execuções anteriores — AV-S03B 2026-10-13/14, GOV-007 2026-10-02 — na cadeia do ponteiro) | [ponteiro](snapshots/latest_execution.md) |
+| Última execução registrada | EXEC-2026-10-14-04 — AV-S06B (complemento): resposta por imagem (backend + frontend, rodada local). `DEC-AV-037`: a foto é a entrada inicial da resposta sem texto fictício; correção bloqueada até transcrição confirmada. Aprovação técnica local: suíte 158 passed (136 + 22, zero regressão), ruff app limpo, build+eslint frontend limpos, validação em PostgreSQL isolado (migração/backfill/CheckConstraint/downgrade protegido) e HTTP real; revisão independente do Antigravity do desenho (APROVADO COM AJUSTES) e da implementação (APROVADO). Resposta por imagem termina em "aguardando transcrição" (sem OCR). Validação visual em navegador real concluída: 9/10 cenários PASS; 1 ressalva (reexibição após recarregar) registrada como débito de UX, sem alteração de código. Sem git nesta rodada. Bancos protegidos intactos. Progresso homologado permanece 19/70; AV-S05B parcial; BL-AV-4B-05 pendente. (anteriores: AV-S06B backend integrado em main b818961, AV-S03B, GOV-007 — na cadeia do ponteiro) | [ponteiro](snapshots/latest_execution.md) |
 | Configuração de orquestração de agentes (não funcional) | `GOV-007` — distribuição de trabalho entre Claude Code (executor principal), Antigravity (segundo executor/revisor cruzado) e Codex (auditorias pontuais); ver `DEC-AV-031`; documentação publicada em PR draft #12 (https://github.com/rafaelinfopiaui/avalia-platform/pull/12), sem merge | [documentação de evidência](evidence/GOV-007-distribuicao-clis/mecanismo_cobranca_hermes_claude_code.md) |
 | PR #2 (`docs/av-s02-encerramento-planos-operacionais`) | **fechado sem merge**; conteúdo necessário preservado em `main` via PR #4 | [snapshot de reconciliação](snapshots/snapshot_RECONCILIACAO-2026-09-29-02_desvio-processo-2026-09-24.md) |
 | PR #4 (`docs/av-s03-encerramento-integracao`) | **integrado em `main`** via merge commit `a5974b1`, CI pós-merge verde | https://github.com/rafaelinfopiaui/avalia-platform/pull/4 |
@@ -261,3 +261,40 @@ backend/API**. Resumo:
   [`snapshot_EXEC-2026-10-14-02_execucao_av-s06b.md`](snapshots/snapshot_EXEC-2026-10-14-02_execucao_av-s06b.md),
   `evidence/AV-S06B/` (prompt de execução, parecer independente do Antigravity,
   tabela de decisões, pacote recuperável com checksums).
+
+### 11.1 Complemento — Resposta por imagem (sub-fatia, DEC-AV-037, rodada local)
+
+- escopo: resolver a lacuna contratual identificada na homologação do backend —
+  a foto passa a ser a entrada inicial da resposta, sem texto digitado/vazio/fictício;
+  correção bloqueada até transcrição confirmada pelo professor;
+- modelo/contrato: `Answer.text` nullable + `source` (TEXT/IMAGE) +
+  `transcription_status` (AGUARDANDO_TRANSCRICAO/TRANSCRICAO_CONFIRMADA) +
+  CheckConstraint; migração com backfill determinístico (legadas -> TEXT/CONFIRMADA);
+  endpoint transacional `POST /v1/answers/image`; guard em `request_correction`
+  (422 `ANSWER_NOT_TRANSCRIBED`) + defesa em profundidade em `run_correction_job`;
+  reuso do backend de imagens homologado (sem ampliar sua homologação);
+- interface: tela de resposta por foto (seleção manual dos vínculos, upload
+  JPEG/PNG até 10 MiB, estados de carregando/sucesso/erro, listagem e visualização
+  por download autenticado, aviso de que a resposta aguarda transcrição e não foi
+  corrigida); fluxo textual existente preservado;
+- validação: suíte 158 passed (136 + 22, zero regressão); ruff app limpo;
+  build+eslint frontend limpos; PostgreSQL isolado (migração/backfill/
+  CheckConstraint/downgrade protegido) e HTTP real (upload 201, correção bloqueada
+  422 com 0 jobs, 401/403, textual 201/202, download bit-a-bit idêntico);
+  desenho revisado antes do código e implementação revisada de forma independente
+  pelo Antigravity (ambas aprovadas);
+- NÃO entregue nesta fatia: OCR/transcrição/confirmação (a resposta por imagem
+  termina legitimamente em "aguardando transcrição"); `BL-AV-4B-05` (retenção/
+  exclusão) permanece pendente;
+- validação visual (ACI-08) em navegador real: **9/10 cenários PASS**; 1 ressalva
+  (estado preservado no backend, mas a tela não reexibe após recarregar) registrada
+  como **débito de UX** por decisão de Rafael, sem alteração de código;
+- Git: rodada LOCAL — sem stage/commit/push/merge; branch
+  `feat/av-s06b-resposta-por-imagem`;
+- progresso homologado: permanece **19/70** (esta rodada não altera o numerador;
+  homologação pendente);
+- evidência: `DEC-AV-037` em [`decisions.md`](registers/decisions.md); sprint §17;
+  [`snapshot_EXEC-2026-10-14-03`](snapshots/snapshot_EXEC-2026-10-14-03_abertura_resposta_por_imagem.md)
+  e [`snapshot_EXEC-2026-10-14-04`](snapshots/snapshot_EXEC-2026-10-14-04_encerramento_resposta_por_imagem.md);
+  `evidence/AV-S06B/` (desenho, pareceres de revisão do desenho e da implementação,
+  prompt de execução).
