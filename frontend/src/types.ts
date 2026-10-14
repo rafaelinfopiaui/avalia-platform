@@ -71,7 +71,14 @@ export type TranscriptionStatus = 'AGUARDANDO_TRANSCRICAO' | 'TRANSCRICAO_CONFIR
 // text é null na resposta por imagem ainda sem transcrição (DEC-AV-037).
 export interface Answer { id: string; question_id: string; student_name?: string; student_name_fake?: string; text?: string | null; source?: AnswerSource; transcription_status?: TranscriptionStatus; created_at?: string }
 export interface AnswerImage { id: string; answer_id: string; original_filename: string; content_type: string; size_bytes: number; sha256_hash: string; uploaded_by_id: string; created_at: string }
-export interface AnswerWithImages extends Answer { images: AnswerImage[] }
+// Transcrição manual (AV-S08B): rascunho atual + versão para o lock otimista.
+export interface AnswerWithImages extends Answer {
+  images: AnswerImage[]
+  manual_transcription_draft?: string | null
+  transcription_version: number
+  transcription_confirmed_by_id?: string | null
+  transcription_confirmed_at?: string | null
+}
 // Alinhado ao schema real do Core (app/schemas.py CriterionScoreOut / AIExecutionOut / CorrectionJobOut)
 export interface CriterionSuggestion { criterion_id: string; criterion_name?: string; score: number; max_score: number; reason?: string; evidence?: string; confidence?: number; was_clamped?: boolean }
 export interface AIExecutionResult { id: string; engine_mode?: 'real' | 'simulated'; model?: string; confidence_method_version?: string; overall_confidence?: number; review_recommendation?: string; duration_ms?: number; flags?: string[]; criterion_scores: CriterionSuggestion[] }
@@ -87,5 +94,5 @@ export interface HumanReviewSummary {
   justification?: string | null;
   created_at: string;
 }
-export interface ApiErrorBody { code?: string; message?: string; correlation_id?: string; field_errors?: { field?: string; reason?: string }[] }
+export interface ApiErrorBody { code?: string; message?: string; correlation_id?: string; details?: Record<string, unknown>; field_errors?: { field?: string; reason?: string }[] }
 

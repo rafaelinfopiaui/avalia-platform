@@ -87,6 +87,9 @@ async function send(path: string, init: RequestInit = {}): Promise<Response> {
       correlation_id: typeof detailObj?.correlation_id === 'string'
         ? detailObj.correlation_id
         : (typeof raw.correlation_id === 'string' ? raw.correlation_id : undefined),
+      details: raw.details && typeof raw.details === 'object' && !Array.isArray(raw.details)
+        ? (raw.details as Record<string, unknown>)
+        : undefined,
       field_errors: Array.isArray(detailObj?.field_errors)
         ? (detailObj.field_errors as ApiErrorBody['field_errors'])
         : (Array.isArray(raw.field_errors) ? (raw.field_errors as ApiErrorBody['field_errors']) : undefined),
@@ -164,6 +167,19 @@ export const listImageAnswers = (assessmentId: string, questionId?: string) => {
   const query = questionId ? `?question_id=${encodeURIComponent(questionId)}` : ''
   return request<AnswerWithImages[]>(`/assessments/${encodeURIComponent(assessmentId)}/image-answers${query}`)
 }
+// Transcrição manual (AV-S08B, DEC-AV-040): expected_version é a versão que a
+// tela carregou; se outra sessão a avançou, o backend responde 409 com o estado
+// atual em details.current_answer. Confirmar é definitivo e não inicia correção.
+export const saveManualTranscriptionDraft = (answerId: string, text: string, expectedVersion: number) =>
+  request<AnswerWithImages>(`/answers/${encodeURIComponent(answerId)}/manual-transcription/draft`, {
+    method: 'PATCH',
+    body: JSON.stringify({ text, expected_version: expectedVersion }),
+  })
+export const confirmManualTranscription = (answerId: string, text: string, expectedVersion: number) =>
+  request<AnswerWithImages>(`/answers/${encodeURIComponent(answerId)}/manual-transcription/confirm`, {
+    method: 'POST',
+    body: JSON.stringify({ text, expected_version: expectedVersion }),
+  })
 // Download autenticado (Bearer): a imagem nunca é servida por URL pública.
 export async function downloadAnswerImage(imageId: string): Promise<Blob> {
   const response = await send(`/answer-images/${imageId}/download`)

@@ -157,10 +157,21 @@ class AnswerOut(BaseModel):
     text: Optional[str] = None
     source: AnswerSource
     transcription_status: TranscriptionStatus
+    # Transcrição manual (AV-S08B): rascunho e versão permitem retomar a edição
+    # após reload; autoria/data identificam a confirmação humana.
+    manual_transcription_draft: Optional[str] = None
+    transcription_version: int = 0
+    transcription_confirmed_by_id: Optional[str] = None
+    transcription_confirmed_at: Optional[datetime] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class ManualTranscriptionInput(BaseModel):
+    text: str
+    expected_version: int = Field(ge=0)
 
 
 class AnswerImageOut(BaseModel):

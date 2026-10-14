@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from decimal import Decimal
 
 import httpx
@@ -75,6 +76,7 @@ from app.schemas import (
     HumanReviewOut,
     HumanReviewSummaryOut,
     LoginRequest,
+    ManualTranscriptionInput,
     MeResponse,
     QuestionInput,
     QuestionOrderInput,
@@ -743,6 +745,183 @@ def list_image_answers(
         )
         for answer in answers
     ]
+
+
+# ---------------- Manual transcription (AV-S08B, DEC-AV-040) ----------------
+# Rascunho e confirmação da transcrição de uma resposta por imagem. São mutações
+# (exigem vínculo ativo, como request_correction) e NUNCA criam CorrectionJob nem
+# chamam request_correction: a confirmação só libera o guard ANSWER_NOT_TRANSCRIBED.
+_TRANSCRIPTION_IDEMPOTENT = "IDEMPOTENT"
+_TRANSCRIPTION_CONFLICT_MESSAGES = {
+    "TRANSCRIPTION_ALREADY_CONFIRMED": (
+        "A transcrição desta resposta já foi confirmada e não pode mais ser alterada."
+    ),
+    "TRANSCRIPTION_VERSION_CONFLICT": (
+        "A transcrição foi alterada em outra sessão; recarregue para ver a versão mais recente."
+    ),
+}
+
+
+def _answer_with_images(db: Session, answer: Answer) -> AnswerWithImagesOut:
+    images = (
+        db.query(AnswerImage)
+        .filter(AnswerImage.answer_id == answer.id)
+        .order_by(AnswerImage.created_at, AnswerImage.id)
+        .all()
+    )
+    return AnswerWithImagesOut(
+        **AnswerOut.model_validate(answer).model_dump(),
+        images=[AnswerImageOut.model_validate(image) for image in images],
+    )
+
+
+def _transcription_outcome(answer: Answer, payload: ManualTranscriptionInput, confirm: bool) -> str | None:
+    """None quando a mutação pode prosseguir; senão o desfecho sem mutação."""
+    if answer.transcription_status == TranscriptionStatus.TRANSCRICAO_CONFIRMADA:
+        # DP-2/DP-3: confirmação é definitiva; só o reenvio idêntico, com a
+        # versão já confirmada, é aceito (sem novo AuditEvent).
+        if confirm and payload.text == answer.text:
+            if payload.expected_version == answer.transcription_version:
+                return _TRANSCRIPTION_IDEMPOTENT
+            return "TRANSCRIPTION_VERSION_CONFLICT"
+        return "TRANSCRIPTION_ALREADY_CONFIRMED"
+    if payload.expected_version != answer.transcription_version:
+        return "TRANSCRIPTION_VERSION_CONFLICT"
+    return None
+
+
+def _transcription_outcome_response(db: Session, answer: Answer, outcome: str, correlation_id: str):
+    if outcome == _TRANSCRIPTION_IDEMPOTENT:
+        return _answer_with_images(db, answer)
+    # Devolve o estado atual para o cliente decidir (padrão de REVIEW_ALREADY_EXISTS).
+    return error_response(
+        409,
+        outcome,
+        _TRANSCRIPTION_CONFLICT_MESSAGES[outcome],
+        correlation_id,
+        details={"current_answer": _answer_with_images(db, answer).model_dump(mode="json")},
+    )
+
+
+def _save_manual_transcription(
+    answer_id: str,
+    payload: ManualTranscriptionInput,
+    request: Request,
+    db: Session,
+    user: User,
+    *,
+    confirm: bool,
+):
+    correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
+    answer = db.get(Answer, answer_id)
+    if answer is None:
+        raise HTTPException(status_code=404, detail="Resposta não encontrada.")
+    question = db.get(Question, answer.question_id)
+    if question is None:
+        raise HTTPException(status_code=404, detail="Questão não encontrada.")
+    assessment = _get_owned_assessment(db, question.assessment_id, user)
+    require_assessment_mutation(db, user, assessment)
+    if answer.source != AnswerSource.IMAGE:
+        return error_response(
+            422,
+            "ANSWER_NOT_IMAGE_SOURCE",
+            "A transcrição manual só se aplica a respostas enviadas por imagem.",
+            correlation_id,
+        )
+    if confirm and not payload.text.strip():
+        return error_response(
+            422, "ANSWER_TEXT_REQUIRED", "O texto da transcrição não pode ser vazio.", correlation_id
+        )
+    outcome = _transcription_outcome(answer, payload, confirm)
+    if outcome is not None:
+        return _transcription_outcome_response(db, answer, outcome, correlation_id)
+
+    # A versão lida acima é a esperada; o UPDATE condicional abaixo garante, na
+    # transação do banco, que ninguém a avançou desde então (lock otimista).
+    before = {
+        "manual_transcription_draft": answer.manual_transcription_draft,
+        "transcription_version": answer.transcription_version,
+    }
+    if confirm:
+        before.update(text=answer.text, transcription_status=answer.transcription_status.value)
+        action = "manual_transcription_confirmed"
+        values = {
+            "text": payload.text,
+            "transcription_status": TranscriptionStatus.TRANSCRICAO_CONFIRMADA,
+            "transcription_confirmed_by_id": user.id,
+            "transcription_confirmed_at": datetime.utcnow(),
+            "manual_transcription_draft": None,
+        }
+    else:
+        # Rascunho vazio é permitido: limpa o rascunho anterior.
+        action = "manual_transcription_draft_saved"
+        values = {"manual_transcription_draft": payload.text if payload.text.strip() else None}
+    result = db.execute(
+        update(Answer)
+        .where(
+            Answer.id == answer.id,
+            Answer.transcription_version == payload.expected_version,
+            Answer.transcription_status == TranscriptionStatus.AGUARDANDO_TRANSCRICAO,
+        )
+        .values(**values, transcription_version=Answer.transcription_version + 1)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount == 0:
+        # Outra sessão mutou a resposta entre a leitura e o UPDATE.
+        db.rollback()
+        db.refresh(answer)
+        outcome = _transcription_outcome(answer, payload, confirm) or "TRANSCRIPTION_VERSION_CONFLICT"
+        log_event("manual_transcription_conflict", correlation_id, answer_id=answer.id, outcome=outcome)
+        return _transcription_outcome_response(db, answer, outcome, correlation_id)
+
+    after = {
+        key: value.value if isinstance(value, TranscriptionStatus) else value
+        for key, value in values.items()
+        if key != "transcription_confirmed_at"
+    }
+    after["transcription_version"] = payload.expected_version + 1
+    db.add(
+        AuditEvent(
+            actor_id=user.id,
+            action=action,
+            resource_type="Answer",
+            resource_id=answer.id,
+            before_json=json.dumps(before),
+            after_json=json.dumps(after),
+        )
+    )
+    db.commit()
+    db.refresh(answer)
+    log_event(
+        action,
+        correlation_id,
+        answer_id=answer.id,
+        user_id=user.id,
+        transcription_version=answer.transcription_version,
+    )
+    return _answer_with_images(db, answer)
+
+
+@app.patch("/v1/answers/{answer_id}/manual-transcription/draft", response_model=AnswerWithImagesOut)
+def save_manual_transcription_draft(
+    answer_id: str,
+    payload: ManualTranscriptionInput,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
+    return _save_manual_transcription(answer_id, payload, request, db, user, confirm=False)
+
+
+@app.post("/v1/answers/{answer_id}/manual-transcription/confirm", response_model=AnswerWithImagesOut)
+def confirm_manual_transcription(
+    answer_id: str,
+    payload: ManualTranscriptionInput,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
+    return _save_manual_transcription(answer_id, payload, request, db, user, confirm=True)
 
 
 # ---------------- Corrections ----------------
