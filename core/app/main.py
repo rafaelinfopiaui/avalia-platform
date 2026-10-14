@@ -39,6 +39,9 @@ from app.routers.academic import (
 from app.routers.academic import (
     router as academic_router,
 )
+from app.routers.config import (
+    router as config_router,
+)
 from app.schemas import (
     AIExecutionOut,
     AnswerInput,
@@ -69,6 +72,7 @@ settings = get_settings()
 
 app = FastAPI(title="AvalIA Core API", version="0.1.0-demo")
 app.include_router(academic_router)
+app.include_router(config_router)
 
 app.add_middleware(
     CORSMiddleware,

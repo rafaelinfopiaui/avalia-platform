@@ -18,6 +18,7 @@ from app.models import (
     ProfessorRole,
     Question,
     Rubric,
+    RubricCriterion,
     Student,
     User,
 )
@@ -358,6 +359,64 @@ def test_legacy_assessment_remains_accessible_to_owner_and_admin(
     admin_response = client.get(f"/v1/assessments/{assessment.id}", headers=_headers(admin_token))
     assert admin_response.status_code == 200, admin_response.text
     assert admin_response.json()["id"] == assessment.id
+
+
+@pytest.mark.parametrize("academic_module_enabled", [False, True])
+def test_legacy_draft_without_class_stays_editable_and_publishable_under_flag(
+    client, db_session, professor_token, monkeypatch, academic_module_enabled
+):
+    """Contrato de `DEC-AV-023` para avaliação LEGADA (`class_group_id` nulo).
+
+    "Avaliações legadas nullable com acesso do proprietário/admin, e novas
+    avaliações exigem turma a partir da ativação do módulo acadêmico": a
+    exigência de turma incide na CRIAÇÃO (coberta por
+    `test_academic_module_flag_controls_creation_of_legacy_assessment_without_class`),
+    não na mutação de uma avaliação que já existe sem turma.
+
+    Este teste fixa esse limite para evitar regressão nas duas direções (passar
+    a exigir turma em `PATCH`/`publish`, ou deixar de exigir na criação) e é a
+    referência de contrato para a validação do editor de frontend, que estava
+    MAIS restritiva que o servidor (ACH-01).
+    """
+    monkeypatch.setattr(main_module.settings, "academic_module_enabled", academic_module_enabled)
+    professor = _user(db_session, "professor@example.com")
+    assessment = Assessment(title="Legacy draft", owner_id=professor.id)
+    db_session.add(assessment)
+    db_session.flush()
+    question = Question(
+        assessment_id=assessment.id,
+        statement="Questão legada",
+        reference_answer="Resposta esperada",
+        max_score=10,
+    )
+    db_session.add(question)
+    db_session.flush()
+    rubric = Rubric(question_id=question.id, version=1)
+    db_session.add(rubric)
+    db_session.flush()
+    db_session.add(
+        RubricCriterion(rubric_id=rubric.id, name="Critério", description="Descrição", max_score=10)
+    )
+    db_session.commit()
+    headers = _headers(professor_token)
+
+    edit = client.patch(
+        f"/v1/assessments/{assessment.id}",
+        headers=headers,
+        json={"title": "Legacy draft editado"},
+    )
+    assert edit.status_code == 200, edit.text
+    assert edit.json()["title"] == "Legacy draft editado"
+    # A edição não vincula nem exige turma: a avaliação segue legada.
+    assert edit.json()["class_group_id"] is None
+
+    publish = client.post(f"/v1/assessments/{assessment.id}/publish", headers=headers)
+    assert publish.status_code == 200, publish.text
+    assert publish.json()["status"] == "PUBLICADA"
+
+    reread = client.get(f"/v1/assessments/{assessment.id}", headers=headers)
+    assert reread.status_code == 200, reread.text
+    assert reread.json()["class_group_id"] is None
 
 
 def test_expired_professor_can_read_but_not_edit_or_republish_linked_assessment(
