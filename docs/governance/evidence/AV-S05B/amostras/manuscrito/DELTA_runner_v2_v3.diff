@@ -1,0 +1,325 @@
+--- bench_runner_v2.py
++++ bench_runner_v3.py
+@@ -1,8 +1,21 @@
+ #!/usr/bin/env python3
+-"""Runner de benchmark OCR v2 — eixo manuscrito, Amostra_1 (AV-S05B).
+-
+-v2 = v1 + OLLAMA_OPCOES["num_ctx"]=8192 (correção de transporte; ver abaixo).
+-Idêntico ao v1 em scoring, prompt, modelo, temperatura e manejo de imagem.
++"""Runner de benchmark OCR v3 — eixo manuscrito (AV-S05B).
++
++v2 = v1 + OLLAMA_OPCOES["num_ctx"]=8192 (correção de transporte).
++v3 = v2 + correções de SPEC_v3.md (NÃO congelado; revisão pendente):
++  C1  corpo do erro HTTP do Ollama capturado, truncado e sanitizado
++      (`sanitizar_corpo_erro`); URLError/timeout com mensagem sanitizada.
++  C2  `_carregar` envia as mesmas options de contexto que `_inferir`: a
++      reconfiguração de contexto cai em t_carga_s, não na 1ª t_inferencia_s.
++  C3  options POR CANDIDATO (`OLLAMA_OPCOES_POR_MODELO`); num_ctx=8192 só
++      para qwen2.5vl:3b; demais modelos usam o default do runtime.
++  C4  seed fixa declarada (`OLLAMA_SEED`) e options efetivas registradas por
++      candidato. Seed fixa + temperature=0 REDUZEM a variação, mas NÃO
++      garantem determinismo absoluto (versão do runtime, backend, hardware,
++      paralelismo).
++  C5  falha de contexto permanece falha_execucao: sem aumento automático de
++      num_ctx, sem resize/compressão de imagem, sem retry oculto.
++Idêntico ao v2 em scoring, prompt e manejo de imagem.
+ 
+ Implementa o contrato em
+ docs/governance/evidence/AV-S05B/amostras/manuscrito/RUNNER_SPEC_CONGELADA.md.
+@@ -49,8 +62,10 @@
+ import re
+ import subprocess
+ import sys
++import socket
+ import time
+ import unicodedata
++import urllib.error
+ import urllib.parse
+ import urllib.request
+ from typing import Any, Dict, List, Optional, Sequence, Tuple
+@@ -71,13 +86,32 @@
+ # congelada prevalece (divergência registrada no relatório de entrega).
+ EASYOCR_IDIOMAS = ["pt"]
+ OLLAMA_URL = "http://127.0.0.1:11434"
+-OLLAMA_OPCOES = {"temperature": 0, "num_ctx": 8192}  # RUNNER v2: correção de
+-# TRANSPORTE (2026-10-15). Causa comprovada do HTTP 400 na rodada 1: num_ctx padrão
+-# do Ollama (4096) estourado pelos tokens de VISÃO da imagem (n_prompt_tokens
+-# 4107-4156 nas 5 falhas vs 4073-4084 nas 3 ok; corpo real do erro:
+-# exceed_context_size_error). Eleva o teto de contexto para o prompt caber; NÃO
+-# altera imagem, prompt, modelo nem temperatura. Validado: as 5 falhas viram HTTP 200.
++# RUNNER v3 (C4): seed fixa declarada. Seed fixa + temperature=0 REDUZEM a variação
++# entre execuções, mas NÃO garantem determinismo absoluto (dependem de versão do
++# runtime, backend, hardware e paralelismo). Não afirmar reprodutibilidade bit-a-bit.
++OLLAMA_SEED = 42
++NOTA_DETERMINISMO = (
++    "seed fixa e temperature=0 reduzem a variação, mas não garantem determinismo "
++    "absoluto (dependem de versão do runtime, backend, hardware, paralelismo)"
++)
++# Default conservador aplicado a todo candidato Ollama: sem num_ctx (vale o default
++# do runtime Ollama).
++OLLAMA_OPCOES_PADRAO: Dict[str, Any] = {"temperature": 0, "seed": OLLAMA_SEED}
++# RUNNER v3 (C3): options POR CANDIDATO, sobrepostas ao default. Substitui o
++# OLLAMA_OPCOES global do v2, que fazia todo modelo herdar num_ctx=8192.
++# qwen2.5vl:3b — correção de TRANSPORTE do v2 (2026-10-15). Causa comprovada do
++# HTTP 400 na rodada 1: num_ctx padrão do Ollama (4096) estourado pelos tokens de
++# VISÃO da imagem (n_prompt_tokens 4107-4156 nas 5 falhas vs 4073-4084 nas 3 ok;
++# corpo real do erro: exceed_context_size_error). NÃO altera imagem, prompt,
++# modelo nem temperatura.
++OLLAMA_OPCOES_POR_MODELO: Dict[str, Dict[str, Any]] = {
++    "qwen2.5vl:3b": {"num_ctx": 8192},
++}
+ OLLAMA_TIMEOUT_S = 600
++# RUNNER v3 (C1): limites do corpo de erro HTTP. Lê-se no máximo
++# LIMITE_LEITURA_ERRO bytes; o corpo sanitizado é truncado a LIMITE_CORPO_ERRO chars.
++LIMITE_LEITURA_ERRO = 64 * 1024
++LIMITE_CORPO_ERRO = 2048
+ TESSERACT_TIMEOUT_S = 300
+ 
+ CANDIDATOS_PADRAO = [
+@@ -355,18 +389,171 @@
+                 "readtext": {"detail": 0}, "juncao_linhas": "espaco"}
+ 
+ 
++# --- Sanitização de erros do Ollama (RUNNER v3, C1) --------------------------
++#
++# O corpo de um erro HTTP do Ollama é diagnóstico (ex.: exceed_context_size_error
++# com n_prompt_tokens/n_ctx), mas pode ecoar a requisição. `sanitizar_corpo_erro`
++# mascara: imagens/base64 (campo `images`, data URIs, sequências base64-like
++# longas), conteúdo gerado (`response`/`context`), caminhos de arquivo e nomes de
++# arquivo de imagem, e credenciais (authorization, api-key, token, cookie, bearer).
++# Preserva os campos de diagnóstico (code, type, message, n_prompt_tokens, n_ctx,
++# error) — seus valores passam pelo mesmo mascaramento textual. O resultado é
++# truncado a LIMITE_CORPO_ERRO caracteres (marcador incluído no limite).
++
++_MASCARA_BASE64 = "[BASE64_OMITIDO]"
++_MASCARA_IMAGENS = "[IMAGENS_OMITIDAS]"
++_MASCARA_CONTEUDO = "[CONTEUDO_OMITIDO]"
++_MASCARA_CREDENCIAL = "[CREDENCIAL_OMITIDA]"
++_MASCARA_CAMINHO = "[CAMINHO_OMITIDO]"
++_MASCARA_ARQUIVO = "[ARQUIVO_OMITIDO]"
++_MARCA_TRUNCADO = "...[truncado]"
++
++CAMPOS_DIAGNOSTICO_OLLAMA = ("code", "type", "message", "n_prompt_tokens", "n_ctx", "error")
++_CHAVES_IMAGEM = {"images", "image"}
++_CHAVES_CONTEUDO = {"response", "context", "thinking"}
++_RE_CHAVE_CREDENCIAL = re.compile(
++    r"(?i)^(?:(?:proxy[-_])?authorization|(?:x[-_])?api[-_]?key|"
++    r"(?:access[-_]|refresh[-_]|auth[-_])?token|(?:set[-_])?cookie)$")
++
++_SEG_CAMINHO = r"[^\s\"'<>|,;:\\/]+"
++_RES_TEXTO = [
++    # data URI de imagem
++    (re.compile(r"(?i)data:[\w/+.-]+;base64,[A-Za-z0-9+/=]*"), _MASCARA_BASE64),
++    # fragmento `"images": [...]` em corpo não-JSON ou truncado (lista possivelmente aberta)
++    (re.compile(r"(?i)(\"?\bimages?\"?\s*[:=]\s*)\[[^\]]*\]?"), r"\1" + _MASCARA_IMAGENS),
++    # esquema de autenticação com credencial
++    (re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+"), r"\1 " + _MASCARA_CREDENCIAL),
++    # cabeçalho/par chave-valor de credencial (authorization, api-key, token, cookie)
++    (re.compile(r"(?i)(\b(?:proxy-)?authorization|\b(?:x-)?api[-_]?key|"
++                r"\b(?:access[-_]|refresh[-_]|auth[-_])?token|\b(?:set-)?cookie)\b"
++                r"(\"?'?\s*[:=]\s*)(\"[^\"]*\"?|'[^']*'?|[^\r\n,}&]*)"),
++     r"\1\2" + _MASCARA_CREDENCIAL),
++    # sequência base64-like longa (antes dos caminhos: base64 contém '/')
++    (re.compile(r"[A-Za-z0-9+/]{64,}={0,2}"), _MASCARA_BASE64),
++    # caminho absoluto/home com >= 2 segmentos; segmentos internos podem ter espaços
++    # (ex.: "Projeto Estágio"). Não casa caminho de URL (precedido de host/porta).
++    (re.compile(r"(?<![\w:/.])(?:~|[A-Za-z]:)?(?:[/\\]%s(?: %s)*(?=[/\\]))+[/\\]%s"
++                % (_SEG_CAMINHO, _SEG_CAMINHO, _SEG_CAMINHO)), _MASCARA_CAMINHO),
++    # nome de arquivo de imagem solto
++    (re.compile(r"(?i)\b[\w.-]+\.(?:png|jpe?g|heic|heif|tiff?|webp|bmp|gif)\b"), _MASCARA_ARQUIVO),
++]
++
++
++def _sanitizar_texto(texto: str) -> str:
++    for regex, substituto in _RES_TEXTO:
++        texto = regex.sub(substituto, texto)
++    return texto
++
++
++def _sanitizar_json(valor: Any) -> Any:
++    if isinstance(valor, dict):
++        saida = {}
++        for chave, v in valor.items():
++            nome = str(chave)
++            if nome.lower() in _CHAVES_IMAGEM:
++                saida[chave] = _MASCARA_IMAGENS
++            elif nome.lower() in _CHAVES_CONTEUDO:
++                saida[chave] = _MASCARA_CONTEUDO
++            elif nome not in CAMPOS_DIAGNOSTICO_OLLAMA and _RE_CHAVE_CREDENCIAL.match(nome):
++                saida[chave] = _MASCARA_CREDENCIAL
++            else:
++                saida[chave] = _sanitizar_json(v)
++        return saida
++    if isinstance(valor, list):
++        return [_sanitizar_json(v) for v in valor]
++    if isinstance(valor, str):
++        return _sanitizar_texto(valor)
++    return valor
++
++
++def _sanitizar_estrutura(corpo: Any) -> Tuple[Any, str]:
++    """(objeto JSON sanitizado ou None, texto sanitizado SEM truncar)."""
++    if isinstance(corpo, bytes):
++        corpo = corpo.decode("utf-8", "replace")
++    texto = "" if corpo is None else str(corpo)
++    try:
++        obj = json.loads(texto)
++    except ValueError:
++        return None, _sanitizar_texto(texto)
++    obj = _sanitizar_json(obj)
++    return obj, json.dumps(obj, ensure_ascii=False)
++
++
++def _truncar(texto: str, limite: int) -> str:
++    if len(texto) <= limite:
++        return texto
++    return texto[:max(0, limite - len(_MARCA_TRUNCADO))] + _MARCA_TRUNCADO
++
++
++def sanitizar_corpo_erro(corpo: Any, limite: int = LIMITE_CORPO_ERRO) -> str:
++    """Corpo de erro (str/bytes) -> texto sanitizado com no máximo `limite` chars."""
++    return _truncar(_sanitizar_estrutura(corpo)[1], limite)
++
++
++def _resumo_diagnostico(obj: Any) -> Optional[str]:
++    """Ex.: 'exceed_context_size_error n_prompt_tokens=4131 n_ctx=4096'.
++
++    Lê `type`, `n_prompt_tokens` e `n_ctx` do objeto (já sanitizado) ou de seu
++    campo `error`; se `error` for string simples, usa-a. None se nada útil.
++    """
++    if not isinstance(obj, dict):
++        return None
++    fontes = [obj] + ([obj["error"]] if isinstance(obj.get("error"), dict) else [])
++    partes: List[str] = []
++    for fonte in fontes:
++        if isinstance(fonte.get("type"), str):
++            partes.append(fonte["type"])
++        for campo in ("n_prompt_tokens", "n_ctx"):
++            if isinstance(fonte.get(campo), (int, float, str)):
++                partes.append("%s=%s" % (campo, fonte[campo]))
++    if not partes and isinstance(obj.get("error"), str):
++        partes.append(obj["error"])
++    return _truncar(" ".join(partes), 256) if partes else None
++
++
++def _mensagem_erro_http(exc: urllib.error.HTTPError) -> str:
++    try:
++        bruto = exc.read(LIMITE_LEITURA_ERRO) or b""
++        falha_leitura = None
++    except Exception as erro_leitura:  # noqa: BLE001 — corpo ilegível não mascara o código
++        bruto, falha_leitura = b"", type(erro_leitura).__name__
++    obj, sanitizado = _sanitizar_estrutura(bruto)
++    mensagem = "ollama HTTP %s" % exc.code
++    resumo = _resumo_diagnostico(obj)
++    if resumo:
++        mensagem += ": " + resumo
++    if falha_leitura:
++        return mensagem + " | corpo=<ilegível: %s>" % falha_leitura
++    return mensagem + " | corpo=" + (_truncar(sanitizado, LIMITE_CORPO_ERRO) or "<vazio>")
++
++
++def opcoes_ollama(modelo: str, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
++    """Options efetivas do candidato: padrão <- mapa por modelo <- `options` explícitas."""
++    efetivas = dict(OLLAMA_OPCOES_PADRAO)
++    efetivas.update(OLLAMA_OPCOES_POR_MODELO.get(modelo, {}))
++    if options:
++        efetivas.update(options)
++    return efetivas
++
++
+ class AdaptadorOllamaVLM(Adaptador):
+     """POST /api/generate no Ollama local (somente 127.0.0.1).
+ 
+     Carga: descarrega o modelo (keep_alive=0, não remove o modelo do disco) e o
+-    carrega de novo com uma requisição sem prompt; o tempo de parede dessa
+-    requisição é t_carga_s. Inferência: requisição com images=[b64], prompt
+-    fixo, stream=False, options={"temperature": 0}; tempo de parede.
++    carrega de novo com uma requisição sem prompt, com as MESMAS options da
++    inferência (num_ctx incluso), para que a (re)configuração de contexto ocorra
++    dentro de t_carga_s. Inferência: requisição com images=[b64], prompt fixo,
++    stream=False, options do candidato (`opcoes_ollama`); tempo de parede.
++
++    Uma única tentativa por amostra: erro (inclusive exceed_context_size_error)
++    vira falha_execucao com o erro sanitizado. Nunca reenvia com num_ctx maior,
++    nunca redimensiona/recomprime a imagem, nunca faz retry.
+     """
+ 
+     detecta_abstencao = True
+ 
+-    def __init__(self, modelo: str, url: str = OLLAMA_URL) -> None:
++    def __init__(self, modelo: str, url: str = OLLAMA_URL,
++                 options: Optional[Dict[str, Any]] = None) -> None:
+         super().__init__()
+         host = urllib.parse.urlparse(url).hostname
+         if host not in ("127.0.0.1", "localhost", "::1"):
+@@ -374,28 +561,42 @@
+         self.modelo = modelo
+         self.url = url.rstrip("/")
+         self.nome = "ollama:" + modelo
++        self.options = opcoes_ollama(modelo, options)
+         self.ultima_resposta_meta: Dict[str, Any] = {}
+ 
+     def _post(self, caminho: str, corpo: Dict[str, Any]) -> Dict[str, Any]:
+         req = urllib.request.Request(
+             self.url + caminho, data=json.dumps(corpo).encode("utf-8"),
+             headers={"Content-Type": "application/json"}, method="POST")
+-        with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT_S) as resp:
+-            dados = json.loads(resp.read().decode("utf-8"))
++        try:
++            with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT_S) as resp:
++                dados = json.loads(resp.read().decode("utf-8"))
++        except urllib.error.HTTPError as exc:
++            raise RuntimeError(_mensagem_erro_http(exc)) from None
++        except urllib.error.URLError as exc:
++            if isinstance(exc.reason, (socket.timeout, TimeoutError)):
++                raise RuntimeError("ollama timeout após %ss" % OLLAMA_TIMEOUT_S) from None
++            raise RuntimeError("ollama URLError: %s"
++                               % sanitizar_corpo_erro(str(exc.reason))) from None
++        except (socket.timeout, TimeoutError):
++            raise RuntimeError("ollama timeout após %ss" % OLLAMA_TIMEOUT_S) from None
+         if isinstance(dados, dict) and dados.get("error"):
+-            raise RuntimeError("ollama: %s" % dados["error"])
++            erro = dados["error"]
++            raise RuntimeError("ollama: %s" % sanitizar_corpo_erro(
++                erro if isinstance(erro, str) else json.dumps(erro, ensure_ascii=False)))
+         return dados
+ 
+     def _carregar(self) -> None:
+         self._post("/api/generate", {"model": self.modelo, "keep_alive": 0, "stream": False})
+-        self._post("/api/generate", {"model": self.modelo, "keep_alive": "30m", "stream": False})
++        self._post("/api/generate", {"model": self.modelo, "keep_alive": "30m", "stream": False,
++                                     "options": dict(self.options)})
+ 
+     def _inferir(self, imagem: str) -> str:
+         with open(imagem, "rb") as fh:
+             b64 = base64.b64encode(fh.read()).decode("ascii")
+         dados = self._post("/api/generate", {
+             "model": self.modelo, "prompt": PROMPT_VLM, "images": [b64],
+-            "stream": False, "options": OLLAMA_OPCOES, "keep_alive": "30m",
++            "stream": False, "options": dict(self.options), "keep_alive": "30m",
+         })
+         self.ultima_resposta_meta = {
+             k: dados.get(k) for k in
+@@ -407,7 +608,11 @@
+ 
+     def parametros(self) -> Dict[str, Any]:
+         return {"endpoint": self.url + "/api/generate", "modelo": self.modelo,
+-                "prompt": PROMPT_VLM, "stream": False, "options": OLLAMA_OPCOES}
++                "prompt": PROMPT_VLM, "stream": False, "options": dict(self.options),
++                "options_na_carga": dict(self.options),
++                "num_ctx_origem": ("candidato" if "num_ctx" in self.options
++                                   else "default do runtime Ollama (não enviado)"),
++                "nota_determinismo": NOTA_DETERMINISMO}
+ 
+ 
+ def criar_adaptador(nome: str) -> Adaptador:
+@@ -638,6 +843,9 @@
+         except Exception as exc:  # noqa: BLE001
+             amb["easyocr_version"] = "indisponível: %s" % exc
+     if any(n.startswith("ollama:") for n in nomes):
++        amb["ollama_opcoes_por_candidato"] = {
++            a.nome: dict(a.options) for a in adaptadores if isinstance(a, AdaptadorOllamaVLM)}
++        amb["ollama_nota_determinismo"] = NOTA_DETERMINISMO
+         amb["ollama_list"] = _versao_cmd(["ollama", "list"])
+         amb["ollama_version"] = _versao_cmd(["ollama", "--version"])
+     return amb

@@ -1,0 +1,83 @@
+--- bench_runner_v3_pre_fix.py
++++ bench_runner_v3_final.py
+@@ -399,6 +399,8 @@
+ # Preserva os campos de diagnóstico (code, type, message, n_prompt_tokens, n_ctx,
+ # error) — seus valores passam pelo mesmo mascaramento textual. O resultado é
+ # truncado a LIMITE_CORPO_ERRO caracteres (marcador incluído no limite).
++# Trecho de credencial que não pode ser delimitado com segurança é omitido como
++# [TRECHO_OMITIDO_NAO_SANITIZAVEL] em vez de passar.
+ 
+ _MASCARA_BASE64 = "[BASE64_OMITIDO]"
+ _MASCARA_IMAGENS = "[IMAGENS_OMITIDAS]"
+@@ -411,11 +413,38 @@
+ CAMPOS_DIAGNOSTICO_OLLAMA = ("code", "type", "message", "n_prompt_tokens", "n_ctx", "error")
+ _CHAVES_IMAGEM = {"images", "image"}
+ _CHAVES_CONTEUDO = {"response", "context", "thinking"}
++_MASCARA_NAO_SANITIZAVEL = "[TRECHO_OMITIDO_NAO_SANITIZAVEL]"
+ _RE_CHAVE_CREDENCIAL = re.compile(
+-    r"(?i)^(?:(?:proxy[-_])?authorization|(?:x[-_])?api[-_]?key|"
+-    r"(?:access[-_]|refresh[-_]|auth[-_])?token|(?:set[-_])?cookie)$")
++    r"(?i)^(?:(?:proxy[-_]?)?authorization|(?:x[-_]?)?api[-_]?key|"
++    r"(?:access[-_]?|refresh[-_]?|auth[-_]?)?token|(?:set[-_]?)?cookie)$")
+ 
+ _SEG_CAMINHO = r"[^\s\"'<>|,;:\\/]+"
++# Caminho relativo: segmentos sem espaço/pontuação; não começa no meio de outro
++# token, de URL (após '/' ou ':') nem de caminho já tratado.
++_SEG_RELATIVO = r"[\w.~@+%-]+"
++_RE_EXTENSAO = re.compile(r"\.[A-Za-z0-9]{1,5}$")
++_RE_MIME = re.compile(r"(?i)^(?:application|image|text|audio|video|multipart|font)/[\w.+-]+$")
++_RE_NUMERICO = re.compile(r"^[\d.]+$")
++
++
++def _mascarar_caminho_relativo(m: "re.Match[str]") -> str:
++    """Mascara caminho relativo com >= 2 segmentos. Preserva só os pares de 2
++    segmentos sem extensão que são diagnóstico legítimo: tipo MIME
++    (application/json) ou razão numérica (4131/4096)."""
++    trecho = m.group(0)
++    segmentos = re.split(r"[/\\]", trecho)
++    if len(segmentos) == 2 and not _RE_EXTENSAO.search(segmentos[-1]):
++        if _RE_MIME.match(trecho) or all(_RE_NUMERICO.match(s) for s in segmentos):
++            return trecho
++    return _MASCARA_CAMINHO
++
++
++# Nomes de credencial em texto livre: prefixos proxy/x/set/access/... com '-', '_'
++# ou colados. Lookbehind no lugar de '\b' para casar após '_' (proxy_authorization).
++_CHAVES_CREDENCIAL_TEXTO = (r"(?<![A-Za-z0-9])(?:(?:proxy[-_]?)?authorization|"
++                            r"(?:x[-_]?)?api[-_]?key|"
++                            r"(?:access[-_]?|refresh[-_]?|auth[-_]?)?token|"
++                            r"(?:set[-_]?)?cookie)\b")
+ _RES_TEXTO = [
+     # data URI de imagem
+     (re.compile(r"(?i)data:[\w/+.-]+;base64,[A-Za-z0-9+/=]*"), _MASCARA_BASE64),
+@@ -424,16 +453,28 @@
+     # esquema de autenticação com credencial
+     (re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+"), r"\1 " + _MASCARA_CREDENCIAL),
+     # cabeçalho/par chave-valor de credencial (authorization, api-key, token, cookie)
+-    (re.compile(r"(?i)(\b(?:proxy-)?authorization|\b(?:x-)?api[-_]?key|"
+-                r"\b(?:access[-_]|refresh[-_]|auth[-_])?token|\b(?:set-)?cookie)\b"
++    (re.compile(r"(?i)(" + _CHAVES_CREDENCIAL_TEXTO + r")"
+                 r"(\"?'?\s*[:=]\s*)(\"[^\"]*\"?|'[^']*'?|[^\r\n,}&]*)"),
+      r"\1\2" + _MASCARA_CREDENCIAL),
++    # nome de cabeçalho de credencial seguido de valor SEM separador ':'/'=' (ex.:
++    # "x_api_key sk-abc123"): estrutura ambígua, não dá para delimitar o valor com
++    # segurança -> o trecho é omitido e a omissão fica registrada. Só para valores
++    # com cara de segredo (>= 8 chars com dígito/símbolo); "token" fica de fora por
++    # ser palavra comum em mensagens de erro.
++    (re.compile(r"(?i)((?<![A-Za-z0-9])(?:(?:proxy[-_]?)?authorization|"
++                r"(?:x[-_]?)?api[-_]?key|(?:set[-_]?)?cookie)\b)"
++                r"[ \t]+(?!\[)(?=[^\s]*[\d_.+/=-])[^\s,;}]{8,}"),
++     r"\1 " + _MASCARA_NAO_SANITIZAVEL),
+     # sequência base64-like longa (antes dos caminhos: base64 contém '/')
+     (re.compile(r"[A-Za-z0-9+/]{64,}={0,2}"), _MASCARA_BASE64),
+     # caminho absoluto/home com >= 2 segmentos; segmentos internos podem ter espaços
+     # (ex.: "Projeto Estágio"). Não casa caminho de URL (precedido de host/porta).
+     (re.compile(r"(?<![\w:/.])(?:~|[A-Za-z]:)?(?:[/\\]%s(?: %s)*(?=[/\\]))+[/\\]%s"
+                 % (_SEG_CAMINHO, _SEG_CAMINHO, _SEG_CAMINHO)), _MASCARA_CAMINHO),
++    # caminho relativo com >= 2 segmentos (coleta/referencias/ref.txt); 1 segmento,
++    # URL e MIME/razão numérica de 2 segmentos não são mascarados
++    (re.compile(r"(?<![\w:/\\.~@+%%-])%s(?:[/\\]%s)+" % (_SEG_RELATIVO, _SEG_RELATIVO)),
++     _mascarar_caminho_relativo),
+     # nome de arquivo de imagem solto
+     (re.compile(r"(?i)\b[\w.-]+\.(?:png|jpe?g|heic|heif|tiff?|webp|bmp|gif)\b"), _MASCARA_ARQUIVO),
+ ]

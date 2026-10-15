@@ -1,0 +1,27 @@
+--- /tmp/av-s05b-revisao-antigravity/bench_runner_v1.py	2026-10-15 16:06:55
++++ /tmp/av-s05b-revisao-antigravity/bench_runner_v2.py	2026-10-15 16:06:55
+@@ -1,6 +1,9 @@
+ #!/usr/bin/env python3
+-"""Runner de benchmark OCR — eixo manuscrito, Amostra_1 (AV-S05B).
++"""Runner de benchmark OCR v2 — eixo manuscrito, Amostra_1 (AV-S05B).
+ 
++v2 = v1 + OLLAMA_OPCOES["num_ctx"]=8192 (correção de transporte; ver abaixo).
++Idêntico ao v1 em scoring, prompt, modelo, temperatura e manejo de imagem.
++
+ Implementa o contrato em
+ docs/governance/evidence/AV-S05B/amostras/manuscrito/RUNNER_SPEC_CONGELADA.md.
+ 
+@@ -68,7 +71,12 @@
+ # congelada prevalece (divergência registrada no relatório de entrega).
+ EASYOCR_IDIOMAS = ["pt"]
+ OLLAMA_URL = "http://127.0.0.1:11434"
+-OLLAMA_OPCOES = {"temperature": 0}
++OLLAMA_OPCOES = {"temperature": 0, "num_ctx": 8192}  # RUNNER v2: correção de
++# TRANSPORTE (2026-10-15). Causa comprovada do HTTP 400 na rodada 1: num_ctx padrão
++# do Ollama (4096) estourado pelos tokens de VISÃO da imagem (n_prompt_tokens
++# 4107-4156 nas 5 falhas vs 4073-4084 nas 3 ok; corpo real do erro:
++# exceed_context_size_error). Eleva o teto de contexto para o prompt caber; NÃO
++# altera imagem, prompt, modelo nem temperatura. Validado: as 5 falhas viram HTTP 200.
+ OLLAMA_TIMEOUT_S = 600
+ TESSERACT_TIMEOUT_S = 300
+ 

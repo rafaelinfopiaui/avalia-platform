@@ -1,0 +1,152 @@
+### Revisão Independente Limitada (Terceira Opinião) — Delta Runner v2 $\rightarrow$ v3 (AV-S05B)
+
+**Veredito Geral:** **APROVADO COM RESSALVAS NÃO-BLOQUEANTES**.  
+As cinco correções ($C1$ a $C5$) atendem fielmente aos requisitos de observabilidade, isolamento de opções e ao princípio inviolável de **proibição de recuperação silenciosa** fixados na `SPEC_v3`. Não foram identificados vícios bloqueantes.
+
+---
+
+### Análise Item a Item
+
+#### 1. C1 — Captura de Erro HTTP, Truncamento, Sanitização e Tratamento de URLError/Timeout
+- **Veredito:** **CONCORDO (COM RESSALVAS NÃO-BLOQUEANTES)**.
+- **Análise do Diff:**
+  - **Captura e Limite:** Em `_mensagem_erro_http(exc)`, o runner limita a leitura da resposta bruta em até 64 KB (`LIMITE_LEITURA_ERRO = 64 * 1024`) prevenindo esgotamento de memória por DoS/payload corrompido, e trunca a mensagem sanitizada a 2048 caracteres (`LIMITE_CORPO_ERRO = 2048`):
+    ```python
+    +def _mensagem_erro_http(exc: urllib.error.HTTPError) -> str:
+    +    try:
+    +        bruto = exc.read(LIMITE_LEITURA_ERRO) or b""
+    ...
+    +    return mensagem + " | corpo=" + (_truncar(sanitizado, LIMITE_CORPO_ERRO) or "<vazio>")
+    ```
+  - **Preservação Diagnóstica:** Os campos essenciais do Ollama (`code`, `type`, `message`, `n_prompt_tokens`, `n_ctx`, `error`) são preservados estruturalmente e extraídos para o cabeçalho diagnóstico via `_resumo_diagnostico(obj)`:
+    ```python
+    +CAMPOS_DIAGNOSTICO_OLLAMA = ("code", "type", "message", "n_prompt_tokens", "n_ctx", "error")
+    ...
+    +    for campo in ("n_prompt_tokens", "n_ctx"):
+    +        if isinstance(fonte.get(campo), (int, float, str)):
+    +            partes.append("%s=%s" % (campo, fonte[campo]))
+    ```
+  - **Tratamento de URLError e Timeout:** Em `_post`, as exceções `urllib.error.URLError` e `socket.timeout`/`TimeoutError` são capturadas, sanitizadas e relançadas como `RuntimeError`:
+    ```python
+    +        except urllib.error.URLError as exc:
+    +            if isinstance(exc.reason, (socket.timeout, TimeoutError)):
+    +                raise RuntimeError("ollama timeout após %ss" % OLLAMA_TIMEOUT_S) from None
+    +            raise RuntimeError("ollama URLError: %s"
+    +                               % sanitizar_corpo_erro(str(exc.reason))) from None
+    +        except (socket.timeout, TimeoutError):
+    +            raise RuntimeError("ollama timeout após %ss" % OLLAMA_TIMEOUT_S) from None
+    ```
+  - **Status e Semântica de Tempo:** Ao levantar `RuntimeError`, o método herdado `Adaptador.executar` captura a exceção, marca `status = "falha_execucao"`, atribui `texto = None` e registra o tempo de parede transcorrido na tentativa em `t_inferencia_s`.
+  - **Verificação de Furos na Sanitização:**
+    - *Base64:* Protegido em três camadas: mascaramento estrutural em JSON para chaves de imagem (`images`, `image`), regex de fragmento aberto `"images": [...]` para JSONs truncados/malformados, e regex para sequências longas `[A-Za-z0-9+/]{64,}={0,2}` e `data:`.
+    - *Credenciais:* Mascaramento em chaves JSON (`_RE_CHAVE_CREDENCIAL`) e em texto livre (`_RES_TEXTO`).
+    - *Ressalvas Menores (Furos de Borda Não-Bloqueantes):*
+      1. **Assimetria de delimitador em credenciais de texto livre:** Na regex de texto livre linha 428 (`_RES_TEXTO`), constam `(?:proxy-)?authorization` e `(?:x-)?api[-_]?key`, permitindo apenas hífen nos prefixos. Se um erro em texto puro (não-JSON) contiver `proxy_authorization:` ou `x_api_key:`, o caractere `_` (word character) anula a fronteira de palavra `\b`, impedindo o casamento dessa regex. (No parser JSON isso é coberto por `_RE_CHAVE_CREDENCIAL`, que aceita `[-_]`).
+      2. **Fragmentos Base64 avulsos < 64 caracteres:** Fragmentos residuais curtos (< 64 chars) fora de campos `"images"` ou prefixos `data:` não casam a regex de 64 caracteres. É um compromisso aceitável para não corromper hashes, palavras e UUIDs legítimos.
+
+---
+
+#### 2. C2 — Context Options na Carga e Inferência (Separação de Tempos)
+- **Veredito:** **CONCORDO**.
+- **Análise do Diff:**
+  - No v2, `_carregar()` disparava uma chamada com `{"keep_alive": "30m"}` sem `options`. Quando o modelo executava a primeira inferência com `num_ctx=8192`, o Ollama alocava/reconfigurava a memória de contexto durante a inferência, contaminando o primeiro `t_inferencia_s`.
+  - No v3, `_carregar()` passa a enviar explicitamente as mesmas opções do candidato:
+    ```python
+    @@ -390,4 +576,6 @@
+         def _carregar(self) -> None:
+             self._post("/api/generate", {"model": self.modelo, "keep_alive": 0, "stream": False})
+    -        self._post("/api/generate", {"model": self.modelo, "keep_alive": "30m", "stream": False})
+    +        self._post("/api/generate", {"model": self.modelo, "keep_alive": "30m", "stream": False,
+    +                                     "options": dict(self.options)})
+    ```
+  - Em `_inferir()`, a requisição consome `dict(self.options)` identicamente:
+    ```python
+    @@ -398,3 +586,3 @@
+             dados = self._post("/api/generate", {
+                 "model": self.modelo, "prompt": PROMPT_VLM, "images": [b64],
+    -            "stream": False, "options": OLLAMA_OPCOES, "keep_alive": "30m",
+    +            "stream": False, "options": dict(self.options), "keep_alive": "30m",
+             })
+    ```
+  - A separação entre `t_carga_s` e `t_inferencia_s` torna-se estruturalmente precisa: o custo de dimensionamento do contexto de 8192 tokens é pago integralmente durante o ciclo de carga. O teste `test_carga_envia_mesmas_options_que_inferencia` comprova que `endpoint.cargas[0]["options"] == a.options == endpoint.inferencias[0]["options"]`.
+
+---
+
+#### 3. C3 — Opções por Candidato e Isolamento do Moondream
+- **Veredito:** **CONCORDO**.
+- **Análise do Diff:**
+  - O dicionário global `OLLAMA_OPCOES = {"temperature": 0, "num_ctx": 8192}` foi removido.
+  - Implementou-se a hierarquia de resolução limpa em `opcoes_ollama`:
+    ```python
+    +OLLAMA_OPCOES_PADRAO: Dict[str, Any] = {"temperature": 0, "seed": OLLAMA_SEED}
+    +OLLAMA_OPCOES_POR_MODELO: Dict[str, Dict[str, Any]] = {
+    +    "qwen2.5vl:3b": {"num_ctx": 8192},
+    +}
+    ...
+    +def opcoes_ollama(modelo: str, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    +    efetivas = dict(OLLAMA_OPCOES_PADRAO)
+    +    efetivas.update(OLLAMA_OPCOES_POR_MODELO.get(modelo, {}))
+    +    if options:
+    +        efetivas.update(options)
+    +    return efetivas
+    ```
+  - O construtor `AdaptadorOllamaVLM` atribui `self.options = opcoes_ollama(modelo, options)`.
+  - Modelos como `moondream:v2` recebem apenas `{"temperature": 0, "seed": 42}`, sem chave `num_ctx`, delegando o contexto ao valor padrão nativo do runtime Ollama.
+  - O teste `test_options_por_candidato` valida que `"num_ctx" not in moon.options`, que `not hasattr(br, "OLLAMA_OPCOES")`, e o teste `test_moondream_nao_herda_num_ctx_na_requisicao` prova que nenhuma requisição enviada para o Moondream contém `num_ctx`.
+
+---
+
+#### 4. C4 — Registro de Seed Explícito e Limites de Determinismo
+- **Veredito:** **CONCORDO**.
+- **Análise do Diff:**
+  - Define `OLLAMA_SEED = 42` e `NOTA_DETERMINISMO`:
+    ```python
+    +OLLAMA_SEED = 42
+    +NOTA_DETERMINISMO = (
+    +    "seed fixa e temperature=0 reduzem a variação, mas não garantem determinismo "
+    +    "absoluto (dependem de versão do runtime, backend, hardware, paralelismo)"
+    +)
+    +OLLAMA_OPCOES_PADRAO: Dict[str, Any] = {"temperature": 0, "seed": OLLAMA_SEED}
+    ```
+  - O registro do ambiente e os metadados do adaptador expõem o aviso de não-reprodutibilidade estrita e as opções efetivas:
+    ```python
+    @@ -407,3 +608,7 @@
+         def parametros(self) -> Dict[str, Any]:
+             return {"endpoint": self.url + "/api/generate", "modelo": self.modelo,
+    -                "prompt": PROMPT_VLM, "stream": False, "options": OLLAMA_OPCOES}
+    +                "prompt": PROMPT_VLM, "stream": False, "options": dict(self.options),
+    +                "options_na_carga": dict(self.options),
+    +                "num_ctx_origem": ("candidato" if "num_ctx" in self.options
+    +                                   else "default do runtime Ollama (não enviado)"),
+    +                "nota_determinismo": NOTA_DETERMINISMO}
+    ...
+    +        amb["ollama_opcoes_por_candidato"] = {
+    +            a.nome: dict(a.options) for a in adaptadores if isinstance(a, AdaptadorOllamaVLM)}
+    +        amb["ollama_nota_determinismo"] = NOTA_DETERMINISMO
+    ```
+  - Cumpre o requisito sem prometer determinismo bit-a-bit irreal em inferência local heterogênea.
+
+---
+
+#### 5. C5 — Falha de Contexto como `falha_execucao` e Proibição de Recuperação Silenciosa
+- **Veredito:** **CONCORDO**.
+- **Análise do Código e dos Testes:**
+  - **Garantia no Código:** `AdaptadorOllamaVLM._post` dispara exatamente uma requisição via `urllib.request.urlopen`. Em caso de erro HTTP (ex.: 400 por estouro de contexto), levanta imediatamente `RuntimeError`. O código não contém blocos `while`, laços de retentativa (`retry`), lógica de mutação de `num_ctx`, nem manipulação de imagens (redimensionamento, recorte ou recompressão com PIL/cv2).
+  - **Comprovação pelos Testes Mockados:**
+    1. *Denominador e Saídas Nulas:* `test_contexto_excedido_e_falha_sem_recuperacao_silenciosa` valida que a amostra que falha (`S-01`) resulta em `status="falha_execucao"`, `texto_saida_original=None`, `cer=None`, `wer=None`, permanece contabilizada no denominador (`ag["eval_denominador"] == "1/2 ok, 1 falha_execucao"`) e mantém o erro diagnóstico registrado.
+    2. *Ausência de Retry:* O teste usa um mock com roteiro exato de itens. Se houvesse qualquer tentativa de reenvio, ocorreria `IndexError` no mock, o que é expressamente refutado por `assert "IndexError" not in falha["erro"]` e `assert len(endpoint.inferencias) == 2`.
+    3. *Constância de Parâmetros e Payload:* Comprovado por `assert {r["options"]["num_ctx"] for r in ...} == {8192}` e pela checagem de que a imagem enviada corresponde exatamente aos bytes brutos em base64 (`assert req["images"] == [base64.b64encode(BYTES_SINTETICOS + ...)]`).
+    4. *Inspeção Estática por AST:* O teste `test_codigo_ollama_sem_caminho_de_recuperacao` inspeciona a AST de `AdaptadorOllamaVLM` em tempo de teste, garantindo a existência de uma única chamada `urlopen(`, ausência de termos de retentativa (`while`, `for tentativa`, `retry`) e ausência total de bibliotecas de imagem (`PIL`, `cv2`, `resize`).
+
+---
+
+### Síntese dos Achados
+
+#### Achados Bloqueantes
+* **Nenhum.** O código e os testes cumprem integralmente a `SPEC_v3` e salvaguardam os princípios metodológicos do benchmark.
+
+#### Achados Não-Bloqueantes (Observações Técnicas para Evolução Futura)
+1. **Assimetria de delimitadores na regex de credenciais em texto puro (`_RES_TEXTO`):**  
+   Conforme detalhado no Item 1, a regex em linha 428 usa `(?:proxy-)?authorization` e `(?:x-)?api[-_]?key` com hífen estrito antes de `authorization` e `api`. Se um erro HTTP/URLError contiver texto não-estruturado com `proxy_authorization: ...` ou `x_api_key: ...`, a fronteira de palavra `\b` não é satisfeita. Recomenda-se unificar para `(?:proxy[-_])?` e `(?:x[-_])?` nas próximas revisões.
+2. **Caminhos relativos em erros locais não-imagem:**  
+   A regex de caminhos `_RES_TEXTO` exige início com separador absoluto (`/`, `\`, `~` ou `C:`). Se uma mensagem de erro contiver um caminho puramente relativo como `coleta/referencias/ref.txt` (sem extensão de imagem), o caminho textual pode passar sem a máscara `[CAMINHO_OMITIDO]`. (Em condições normais de execução, o runner utiliza caminhos absolutos via `tmp_path` ou paths de workspace, mitigando o risco).

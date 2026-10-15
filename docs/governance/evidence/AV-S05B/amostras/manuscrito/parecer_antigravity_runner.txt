@@ -1,0 +1,98 @@
+# PARECER TÉCNICO INDEPENDENTE DE REVISÃO DO RUNNER DE BENCHMARK OCR
+
+**Destinatário:** Rafael Oliveira / Hermes  
+**Revisor:** Antigravity (Revisão Independente — Modo Somente-Leitura)  
+**Objeto:** Runner de benchmark OCR (`bench_runner.py`), suíte de testes sintéticos (`test_bench_runner.py`) e especificação congelada (`RUNNER_SPEC_CONGELADA.md`)  
+**Data/Fuso:** 2026-10-15 (America/Sao_Paulo)  
+**Resultado Global:** **APROVADO**
+
+---
+
+## 1. Sumário Executivo
+
+Foi realizada a auditoria metodológica e algorítmica independente do código do runner de benchmark OCR para o eixo manuscrito (Amostra_1 / AV-S05B). A revisão operou em modo estritamente **somente-leitura**, sem acesso ou requisição a imagens reais ou transcrições de coleta, baseando-se exclusivamente na especificação congelada, na análise estática do código-fonte e na execução dos testes sintéticos e do dry-run em ambiente isolado.
+
+- **Execução dos testes sintéticos:** `19 passed in 0.02s` (100% de sucesso).
+- **Execução do dry-run:** Concluído com sucesso (código de saída 0), gerando JSONs estruturados e agregação com controle de desclassificação e denominadores explícitos.
+- **Conclusão:** O runner implementa fielmente todas as regras do protocolo congelado e da especificação técnica, sem erros de cálculo que invalidem as métricas de CER/WER ou a avaliação de desclassificação.
+
+---
+
+## 2. Verificação Metodológica Detalhada (Critérios 1 a 7)
+
+### 2.1. CER/WER e Normalização
+- **Levenshtein:** Implementação clássica com programação dinâmica em espaço $O(\min(M, N))$ ([`levenshtein`](file://<HOME>/Projeto%20Est%C3%A1gio/avalia-plataform/local-nao-versionado/ocr/Amostra_1/bench_runner.py#L106-L120)). Testada e validada em caracteres e palavras.
+- **Normalização estrita para scoring:** A função [`normalizar`](file://<HOME>/Projeto%20Est%C3%A1gio/avalia-plataform/local-nao-versionado/ocr/Amostra_1/bench_runner.py#L94-L104) aplica exclusivamente Unicode NFC, colapso de múltiplos whitespaces (incluindo quebras de linha e tabs) em espaço simples (`" "`) e remoção de espaços nas extremidades (trim).
+- **Preservação de atributos:** **NÃO** há lowercasing, **NÃO** há remoção de pontuação e **NÃO** há remoção de diacríticos/acentos. Erros de caixa, pontuação e acentuação são devidamente penalizados tanto no CER quanto no WER, conforme comprovado pelos testes `test_acento_faltando_conta_como_erro`, `test_pontuacao_faltando_conta_como_erro` e `test_caixa_conta_como_erro`.
+- **Integridade da saída:** A normalização é aplicada unicamente no ato do cálculo do score; o texto retornado pelo motor OCR é preservado verbatim no campo `texto_saida_original`.
+
+### 2.2. Referência Vazia e Critério de Invenção (MAN-EVAL-06)
+- **Proteção contra divisão por zero:** Em [`cer`](file://<HOME>/Projeto%20Est%C3%A1gio/avalia-plataform/local-nao-versionado/ocr/Amostra_1/bench_runner.py#L127-L133), [`wer`](file://<HOME>/Projeto%20Est%C3%A1gio/avalia-plataform/local-nao-versionado/ocr/Amostra_1/bench_runner.py#L135-L141) e [`avaliar_amostra`](file://<HOME>/Projeto%20Est%C3%A1gio/avalia-plataform/local-nao-versionado/ocr/Amostra_1/bench_runner.py#L143-L156), se `norm_ref` for vazia, `cer` e `wer` retornam explicitamente `None` (JSON `null`).
+- **Segregação do critério eliminatório:** A amostra com referência vazia é isolada em `eval_vazia` e avaliada na chave `criterio_invencao` ([`agregar`](file://<HOME>/Projeto%20Est%C3%A1gio/avalia-plataform/local-nao-versionado/ocr/Amostra_1/bench_runner.py#L546-L573)). Ela **NUNCA** entra na média de CER/WER de avaliação legível (`eval_media_cer`/`eval_media_wer`).
+- **Desclassificação:** Se `produziu_texto=True` sobre referência vazia, `invencao_em_vazio=True` e o candidato é classificado como `"desclassificado"`, com o motivo registrado textualmente.
+
+### 2.3. Estados Não Conflados e Denominador Explícito
+- **Três estados mutuamente exclusivos:**
+  1. `ok`: Inferência executada com sucesso (seja texto bom, ruim ou vazio).
+  2. `falha_execucao`: Erro de runtime, exceção na carga ou timeout. Registra a mensagem da exceção no campo `erro` e mantém `texto_saida_original=None`.
+  3. `abstencao`: Recusa explícita detectada em VLMs (ex.: "Ilegível", "Não consigo ler").
+- **Denominador inalterado:** Nenhuma amostra é expurgada silenciosamente. Em [`agregar`](file://<HOME>/Projeto%20Est%C3%A1gio/avalia-plataform/local-nao-versionado/ocr/Amostra_1/bench_runner.py#L548-L556), o campo `eval_denominador` expressa a partição completa (ex.: `"1/2 ok, 1 falha_execucao"` ou `"6/7 ok, 1 abstencao"`), e a lista `eval_por_amostra` expõe cada amostra individualmente com seu status e erro.
+
+### 2.4. Isolamento das Referências e Originais de Auditoria
+- **Proibição de entrada:** Em [`carregar_manifesto`](file://<HOME>/Projeto%20Est%C3%A1gio/avalia-plataform/local-nao-versionado/ocr/Amostra_1/bench_runner.py#L434-L437), qualquer tentativa de passar arquivo oriundo de `referencias`, `originais` ou `auditoria` como caminho de imagem gera `ValueError` impeditivo.
+- **Ordem temporal estrita:** Em [`executar_benchmark`](file://<HOME>/Projeto%20Est%C3%A1gio/avalia-plataform/local-nao-versionado/ocr/Amostra_1/bench_runner.py#L509-L511), a inferência é disparada primeiro (`adaptador.executar(amostra["imagem_png"])`), e a referência só é lida do disco após o retorno da inferência (`_ler_referencia(...)`), sendo entregue exclusivamente ao scorer. Os motores OCR nunca têm acesso à verdade de base nem ao original de auditoria.
+
+### 2.5. Latência e Tratamento de Download
+- **Carga vs. Inferência:** O tempo de carga (`t_carga_s`) é cronometrado estritamente na primeira invocação (`if not self._carregado`) e preservado à parte. O tempo de inferência (`t_inferencia_s`) mede apenas a chamada pós-carga ([`Adaptador.executar`](file://<HOME>/Projeto%20Est%C3%A1gio/avalia-plataform/local-nao-versionado/ocr/Amostra_1/bench_runner.py#L265-L285)).
+- **Downloads proibidos durante execução:** Em EasyOCR, `download_enabled=False` garante que a ausência prévia de pesos resulte em `falha_execucao` em vez de baixar dados durante o benchmark.
+- **Rótulo obrigatório:** O relatório agregado anota obrigatoriamente: `"rotulo_latencia": "hardware local; não representativo de produção"`.
+
+### 2.6. Agregação e Elegibilidade
+- **Amostras de Eval:** Média restrita às 7 amostras legíveis do eval (incluindo MAN-EVAL-07) com `status == "ok"` e referência não-vazia.
+- **MAN-01 (dev):** Isolado em `dev_sanidade`, fora de qualquer média de avaliação.
+- **MAN-EVAL-06 (vazia):** Isolado no teste eliminatório de invenção.
+- **Ausência de "vencedor":** O objeto agregado define explicitamente `"vencedor": None` com nota esclarecendo que nenhuma decisão é automatizada sem homologação humana.
+
+### 2.7. Determinismo, Parâmetros e Isolamento de Rede
+- **Determinismo dos VLMs:** Configurado `options={"temperature": 0}` para as chamadas via Ollama.
+- **Prompt Congelado:** Prompt único, literal e congelado registrado em [`PROMPT_VLM`](file://<HOME>/Projeto%20Est%C3%A1gio/avalia-plataform/local-nao-versionado/ocr/Amostra_1/bench_runner.py#L59-L64) e gravado nos metadados de ambiente (`ambiente_<timestamp>.json`).
+- **Restrição de Rede:** O adaptador [`AdaptadorOllamaVLM`](file://<HOME>/Projeto%20Est%C3%A1gio/avalia-plataform/local-nao-versionado/ocr/Amostra_1/bench_runner.py#L363-L365) valida que a URL aponte estritamente para `127.0.0.1`, `localhost` ou `::1`, recusando qualquer host remoto.
+
+---
+
+## 3. Achados por Arquivo, Linha e Severidade
+
+| Arquivo:Linha | Classificação / Severidade | Descrição do Achado | Impacto Metodológico |
+| :--- | :--- | :--- | :--- |
+| [`bench_runner.py:67-69`](file://<HOME>/Projeto%20Est%C3%A1gio/avalia-plataform/local-nao-versionado/ocr/Amostra_1/bench_runner.py#L67-L69) | **Informativo / Conformidade** | `EASYOCR_IDIOMAS = ["pt"]`. O comentário registra a divergência prévia com o pedido inicial (`['pt', 'en']`), confirmando que a especificação congelada §7 (`['pt']`) prevaleceu. | Nenhum. Conformidade com a especificação congelada mantida. |
+| [`bench_runner.py:181-184`](file://<HOME>/Projeto%20Est%C3%A1gio/avalia-plataform/local-nao-versionado/ocr/Amostra_1/bench_runner.py#L181-L184) | **Observação Metodológica** | `detectar_abstencao` possui limitação documentada para textos curtos legítimos que porventura coincidam com marcadores de recusa. O runner mitiga isso gravando o padrão no campo `abstencao_padrao` e mantendo a saída verbatim. | Baixo/Nulo. O corpus da Amostra_1 é em português e não coincide com frases de recusa padrão de modelos de visão. |
+| [`bench_runner.py:297-298`](file://<HOME>/Projeto%20Est%C3%A1gio/avalia-plataform/local-nao-versionado/ocr/Amostra_1/bench_runner.py#L297-L298) | **Informativo** | O adaptador do Tesseract CLI cria um subprocesso por inferência. A carga mede apenas a verificação de binário e idiomas instalados. | Nenhum. O comportamento reflete a natureza do CLI do Tesseract e está explicitado nos metadados. |
+| [`bench_runner.py:444-446`](file://<HOME>/Projeto%20Est%C3%A1gio/avalia-plataform/local-nao-versionado/ocr/Amostra_1/bench_runner.py#L444-L446) | **Boa Prática** | Uso de `encoding="utf-8-sig"` na leitura da referência, prevenindo que um eventual Byte Order Mark (`\ufeff`) seja erroneamente contabilizado como caractere de erro no CER. | Previne distorções artificiais de CER decorrentes de editores de texto. |
+| [`bench_runner.py:496-503`](file://<HOME>/Projeto%20Est%C3%A1gio/avalia-plataform/local-nao-versionado/ocr/Amostra_1/bench_runner.py#L496-L503) | **Boa Prática** | Proteção contra sobreescrita acidental de resultados brutos existentes, exigindo a flag explícita `--sobrescrever`. | Garante a rastreabilidade e imutabilidade dos dados brutos. |
+
+*Nota: Não foram identificados achados de severidade Crítica ou Grave que pudessem invalidar os cálculos ou a execução do benchmark.*
+
+---
+
+## 4. Parecer Conclusivo
+
+```text
+================================================================================
+                           PARECER DE REVISÃO
+================================================================================
+Objeto:     Runner de Benchmark OCR (Amostra_1 / AV-S05B)
+Arquivos:   RUNNER_SPEC_CONGELADA.md
+            local-nao-versionado/ocr/Amostra_1/bench_runner.py
+            local-nao-versionado/ocr/Amostra_1/test_bench_runner.py
+Status:     APROVADO
+Fundamento: Os algoritmos de Levenshtein (CER e WER) seguem a formulação canônica
+            com preservação de caixa, acentuação e pontuação; a amostra de
+            referência vazia possui tratamento segregado à prova de divisão por
+            zero com gatilho correto de desclassificação por invenção; os
+            estados de execução, abstenção e erro são estritamente distinguidos;
+            os denominadores das métricas agregadas são transparentes; a
+            referência nunca é exposta aos motores de OCR; e os parâmetros de
+            determinismo (temperatura 0, endpoint local 127.0.0.1, prompt fixo)
+            estão rigorosamente implementados e verificados por testes sintéticos.
+================================================================================
+```

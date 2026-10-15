@@ -10,7 +10,7 @@ O AvalIA possui uma demonstração experimental herdada, organizada em Core API,
 
 | Referência | Estado | Link |
 |---|---|---|
-| Última execução registrada | EXEC-2026-10-15-02 — `BL-AV-4B-05`, 1ª fatia (exclusão lógica reversível de imagens): migração aditiva `b8d3e5f7a2c4`, endpoints `DELETE`/`restore` com guard de estágio A e `SELECT ... FOR UPDATE` na linha de `answers` (serialização comum com a confirmação de transcrição), projeção mínima de excluídas, `AuditEvent` com metadados mínimos, script de diagnóstico somente-leitura, frontend. Decisões aplicadas D1/D2/D3 + R3 (exclusão e restauração só no estágio A; 409 após confirmação inclusive admin). **Implementado localmente e validado**: pytest 232 passed/10 skipped, 33 passed em PostgreSQL real (4 de concorrência real), migração upgrade+downgrade OK, frontend build+lint limpos, validação em navegador real, e revisão independente do Antigravity (Gemini 3.8 Flash High — família distinta de Opus/Claude Code): **APROVADO sem ressalvas**. **Sem ação Git** (branch local, sem stage/commit/push/merge). Numerador permanece **22/70**; `BL-AV-4B-05` permanece **parcial** (remoção física/retenção/metadados/backups e `DEC-AV-013` pendentes). Ver `evidence/BL-AV-4B-05/`. §12 para histórico (anterior: EXEC-2026-10-15-01 planejamento, EXEC-2026-10-14-12 demo IA real, RECONCILIACAO-2026-10-14-01) | [ponteiro](snapshots/latest_execution.md) |
+| Última execução registrada | EXEC-2026-10-15-04 — `AV-S05B` manuscrito: **diagnóstico dirigido do HTTP 400 do `qwen2.5vl:3b`** e correção de transporte (benchmark Amostra_1). Causa COMPROVADA: `num_ctx` padrão do Ollama (4096) estourado pelos **tokens de visão** da imagem — **não** limite de payload (refutado; corpo real = `exceed_context_size_error`; `n_prompt_tokens` separa os casos exatamente em 4096). Correção classificada por Rafael como transporte/serialização (`num_ctx`→8192, imagem/prompt/modelo/temperatura preservados); runner v2 congelado; Qwen reexecutado nas 9 amostras em rodada NOVA: **eval 7/7 ok**, CER médio **0,077**, WER **0,168** (rodada 1 preservada imutável). **Rodada LOCAL, sem Git**; `AV-S05B` permanece **parcial**, **AC-05 NÃO concluído**, revisão humana cronometrada pendente, numerador **22/70**, nenhuma solução promovida. Ver §13 e `evidence/AV-S05B/amostras/manuscrito/DIAGNOSTICO_HTTP400_qwen2.5vl_2026-10-15.md` | [ponteiro](snapshots/latest_execution.md) |
 | Configuração de orquestração de agentes (não funcional) | `GOV-007` — distribuição de trabalho entre Claude Code (executor principal), Antigravity (segundo executor/revisor cruzado) e Codex (auditorias pontuais); ver `DEC-AV-031`; documentação publicada em PR draft #12 (https://github.com/rafaelinfopiaui/avalia-platform/pull/12), sem merge | [documentação de evidência](evidence/GOV-007-distribuicao-clis/mecanismo_cobranca_hermes_claude_code.md) |
 | PR #2 (`docs/av-s02-encerramento-planos-operacionais`) | **fechado sem merge**; conteúdo necessário preservado em `main` via PR #4 | [snapshot de reconciliação](snapshots/snapshot_RECONCILIACAO-2026-09-29-02_desvio-processo-2026-09-24.md) |
 | PR #4 (`docs/av-s03-encerramento-integracao`) | **integrado em `main`** via merge commit `a5974b1`, CI pós-merge verde | https://github.com/rafaelinfopiaui/avalia-platform/pull/4 |
@@ -438,3 +438,65 @@ rascunho, ainda não homologada. Escopo: parte MANUAL (sem OCR) de
   [`snapshot_EXEC-2026-10-14-11`](snapshots/snapshot_EXEC-2026-10-14-11_homologacao_integracao_av-s08b.md)
   e [`snapshot_RECONCILIACAO-2026-10-14-01`](snapshots/snapshot_RECONCILIACAO-2026-10-14-01_numerador-por-criterio.md)
   (reconciliação completa do numerador).
+
+## 13. AV-S05B manuscrito — diagnóstico do HTTP 400 do qwen2.5vl:3b e correção de transporte (2026-10-15, rodada local)
+
+> **Nota datada de precisão (2026-10-15T16:10-03:00):** (1) `num_ctx` 4096→8192 é
+> **alteração da configuração de contexto de inferência**, não "transporte/serialização"
+> (a autorização de Rafael é preservada; não muda a natureza técnica do parâmetro);
+> (2) a rodada 2 é **exploratória sobre as mesmas amostras após ajuste informado pelas
+> falhas**, não avaliação independente/reprodução sem alteração; (3) a comparação é
+> **descritiva** (denominadores coincidem), com a configuração diferente do Qwen e o
+> ajuste posterior explicitados; **CER 0,077 não é "92,3% de acurácia"** — leitura correta
+> = "melhor resultado observado nesta coleção/configuração"; (4) a lacuna de
+> observabilidade do corpo do erro HTTP **continua aberta** no runner v2. O título "correção
+> de transporte" abaixo é mantido como registro histórico da primeira passagem.
+
+**Não altera o numerador de 22/70** — investigação experimental local; `AV-S05B`
+permanece **parcial**, nenhuma solução promovida. Rafael autorizou diagnóstico e
+correção **LOCAL** do caminho experimental, sem alterações no produto. Resumo:
+
+- **Rodada 1 preservada imutável:** benchmark OCR parcial da Amostra_1 (4 candidatos ×
+  9 amostras = 36 JSON brutos + agregado + ambiente), em `local-nao-versionado/`. Na
+  rodada 1 o `qwen2.5vl:3b` falhou com HTTP 400 em 5 das 7 amostras eval; o relatório
+  registrou, como hipótese não investigada, "limite de payload".
+- **Causa COMPROVADA (não é payload):** o `num_ctx` padrão do Ollama (4096) é estourado
+  pelos **tokens de visão** da imagem decodificada — não pelos bytes do arquivo. Provas:
+  (a) o tamanho do PNG não prediz a falha (MAN-03 7,2 MB passou; MAN-04 5,7 MB falhou;
+  MAN-EVAL-06 8,9 MB passou); (b) o corpo real do erro — que o runner v1 descartava — é
+  `exceed_context_size_error`; (c) `n_prompt_tokens` separa os casos exatamente na
+  fronteira 4096, sem exceção (ok 4073–4084; falha 4107–4156); (d) a rodada 1 já tinha a
+  assinatura (`prompt_eval_duration` ≈ 8,5 s nas falhas = imagem processada antes de
+  rejeitar). Registrado também um gap de observabilidade do runner v1 (não lia o corpo
+  do erro HTTP).
+- **Precisão dos resultados da rodada 1 (conferida, sem alterar o protocolo):** "7/7 ok"
+  = execução bem-sucedida (saída vazia conta como ok), não transcrição útil; "nenhuma
+  abstenção" correta porque saída vazia ≠ abstenção por definição do protocolo; as 2
+  amostras eval ok do Qwen na rodada 1 são **MAN-02 e MAN-03**; **MAN-01 é dev**, fora do
+  agregado eval; CER/WER do Qwen na rodada 1 (0,318/0,350) eram condicionados a 2 amostras
+  e não comparáveis.
+- **Correção (classificada por Rafael como transporte/serialização):** elevar
+  `options.num_ctx` 4096→8192, **preservando** imagem (mesmo base64), prompt, modelo e
+  temperatura. Validada: as 5 falhas viraram HTTP 200. Runner v2 congelado
+  (`rodada2_qwen_num_ctx/bench_runner_v2.py` + `.sha256`), única diferença funcional é
+  `num_ctx`; 19/19 testes sintéticos passam.
+- **Rodada 2 (Qwen, 9 amostras), gravada em rodada NOVA sem substituir a 1:** eval
+  **7/7 ok**, **CER médio 0,077**, **WER médio 0,168** (primeira medida comparável do
+  Qwen no eval completo); controle vazio MAN-EVAL-06 sem invenção; dev MAN-01 CER 0,030.
+  Resultado **parcial e exploratório**.
+- **Limites preservados (inalterados):** **AC-05 NÃO concluído** (MAN-EVAL-07 é legível,
+  sem estímulo ilegível comprovado); **revisão humana cronometrada pendente**; referências
+  conferidas pelo próprio autor; Amostra_2 fora desta rodada; nenhuma decisão arquitetural
+  (`BL-AV-4B-02`/ADR-009); `avalia_dev`/apresentação não tocados; nenhum código de produto.
+- **Autoria:** Hermes (orquestrador) — diagnóstico, reprodução sintética local, runner v2 e
+  reexecução. Nenhuma imagem, referência ou saída de coleta foi enviada a agente externo
+  (Claude Code/Antigravity/Codex não foram acionados nesta rodada).
+- **Git: nenhuma ação** — rodada LOCAL; brutos/runner/rodada 2 em `local-nao-versionado/`
+  (fora do Git por construção); evidência documental em
+  `docs/governance/evidence/AV-S05B/amostras/manuscrito/` (diretório **untracked**, nunca
+  commitado) — sem stage/commit/push/merge. Arquivos destinados a versionamento futuro ≠
+  commitados: nesta rodada **não houve publicação Git**.
+- evidência:
+  [`snapshot_EXEC-2026-10-15-04`](snapshots/snapshot_EXEC-2026-10-15-04_diagnostico_http400_qwen_av-s05b.md),
+  `evidence/AV-S05B/amostras/manuscrito/DIAGNOSTICO_HTTP400_qwen2.5vl_2026-10-15.md`
+  (diagnóstico completo com tabelas), `RESULTADOS_benchmark_parcial_Amostra_1.md` (rodada 1).
