@@ -98,6 +98,122 @@ jobs:
           source .venv/bin/activate
           env -u AI_ENGINE_URL -u DATABASE_URL -u JWT_SECRET pytest app/tests -q
 
+      # ------------------------------------------------------------------------
+      # Testes de CONCORRÊNCIA em PostgreSQL REAL (distintos da suíte SQLite acima).
+      #
+      # A suíte "Run core tests" roda em SQLite (por desenho — ver conftest.py).
+      # Os testes `test_pg_*` (@requires_postgres) exigem PostgreSQL real via
+      # AVALIA_TEST_POSTGRES_URL e, sem ela, ficam SKIPPED. Este step os executa
+      # explicitamente contra bancos descartáveis EXCLUSIVOS no serviço postgres
+      # da CI (nunca `avalia_dev`), com guard anti-skip-silencioso: a presença do
+      # serviço ou o nome do job NÃO são prova; a prova é 10 casos PG executados.
+      #
+      # Dois bancos descartáveis (um por arquivo), porque a fixture pg_engine de
+      # test_manual_transcription faz drop_all no teardown (destruiria o schema
+      # do outro arquivo) e a de test_answer_image_deletion exige o schema vindo
+      # de `alembic upgrade head` (assert alembic_version). Ambos os nomes contêm
+      # "test" (guard interno dos próprios testes contra bancos protegidos).
+      # Credenciais: as do serviço postgres da CI já declaradas acima; não são
+      # segredo de produção e nenhum segredo novo é adicionado.
+      # ------------------------------------------------------------------------
+      - name: Run PostgreSQL concurrency tests (real Postgres, not SQLite)
+        env:
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: avalia_user
+          PGPASSWORD: avalia_password
+        run: |
+          source .venv/bin/activate
+          set -euo pipefail
+
+          BASE="postgresql+psycopg2://avalia_user:avalia_password@localhost:5432"
+          DB_IMG="avalia_test_ci_img_${GITHUB_RUN_ID}"
+          DB_TXN="avalia_test_ci_txn_${GITHUB_RUN_ID}"
+
+          # Cria os bancos descartáveis exclusivos (idempotente). Usa o próprio
+          # psycopg2 (já instalado) conectando ao banco administrativo "postgres",
+          # para não depender do cliente psql no runner.
+          python - "$DB_IMG" "$DB_TXN" <<'PY'
+          import sys, psycopg2
+          from psycopg2 import sql
+          admin = "postgresql://avalia_user:avalia_password@localhost:5432/postgres"
+          conn = psycopg2.connect(admin); conn.autocommit = True
+          cur = conn.cursor()
+          for name in sys.argv[1:]:
+              assert "test" in name and name not in {"avalia_dev", "postgres"}, name
+              cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
+              cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+          cur.close(); conn.close()
+          print("bancos descartáveis criados:", *sys.argv[1:])
+          PY
+
+          # DB_IMG exige o schema de `alembic upgrade head` (assert de alembic_version).
+          DATABASE_URL="${BASE}/${DB_IMG}" alembic upgrade head
+
+          # Executa só os test_pg_* de cada arquivo, cada um no seu banco, emitindo
+          # JUnit XML para verificação objetiva de coletados/executados/skipped.
+          rm -f pg_img.xml pg_txn.xml  # evita XML legado em runner persistente/local (ACH-02)
+          set +e
+          AVALIA_TEST_POSTGRES_URL="${BASE}/${DB_IMG}" \
+            pytest app/tests/test_answer_image_deletion.py -k "test_pg_" \
+            -v -rsa -p no:cacheprovider --tb=short --junitxml=pg_img.xml
+          RC_IMG=$?
+          AVALIA_TEST_POSTGRES_URL="${BASE}/${DB_TXN}" \
+            pytest app/tests/test_manual_transcription.py -k "test_pg_" \
+            -v -rsa -p no:cacheprovider --tb=short --junitxml=pg_txn.xml
+          RC_TXN=$?
+          set -e
+
+          # Guard anti-skip-silencioso: exige exatamente 10 casos PG executados
+          # (5 + 5), 0 skipped, 0 falhas/erros. Qualquer desvio => exit 1.
+          python - pg_img.xml pg_txn.xml <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          EXPECTED = {"pg_img.xml": 5, "pg_txn.xml": 5}
+          tot = dict(tests=0, failures=0, errors=0, skipped=0)
+          for f in sys.argv[1:]:
+              root = ET.parse(f).getroot()
+              s = root if root.tag == "testsuite" else root.find("testsuite")
+              vals = {k: int(s.get(k, 0)) for k in ("tests", "failures", "errors", "skipped")}
+              for k in tot: tot[k] += vals[k]
+              print(f"{f}: {vals}")
+              if vals["tests"] != EXPECTED[f]:
+                  print(f"GUARD FALHOU: {f} coletou {vals['tests']} casos PG, esperado {EXPECTED[f]}.")
+                  sys.exit(1)
+          print("TOTAL PostgreSQL:", tot)
+          if tot["skipped"] != 0:
+              print("GUARD FALHOU: há testes PostgreSQL SKIPPED — a cobertura real não executou "
+                    "(AVALIA_TEST_POSTGRES_URL ausente ou seleção vazia?).")
+              sys.exit(1)
+          if tot["tests"] != 10:
+              print(f"GUARD FALHOU: esperados 10 casos PostgreSQL, executados {tot['tests']}.")
+              sys.exit(1)
+          if tot["failures"] or tot["errors"]:
+              print("GUARD FALHOU: há falhas/erros nos testes PostgreSQL.")
+              sys.exit(1)
+          print("OK: 10 casos de concorrência PostgreSQL executados e aprovados (0 skipped).")
+          PY
+
+          # Falha o step se o pytest em si retornou erro (redundante com o guard,
+          # mas explícito).
+          if [ "$RC_IMG" -ne 0 ] || [ "$RC_TXN" -ne 0 ]; then
+            echo "pytest retornou erro (RC_IMG=$RC_IMG RC_TXN=$RC_TXN)."
+            exit 1
+          fi
+
+          # Limpeza (o runner é efêmero, mas dropamos por higiene).
+          python - "$DB_IMG" "$DB_TXN" <<'PY'
+          import sys, psycopg2
+          from psycopg2 import sql
+          conn = psycopg2.connect("postgresql://avalia_user:avalia_password@localhost:5432/postgres")
+          conn.autocommit = True
+          cur = conn.cursor()
+          for name in sys.argv[1:]:
+              # Defesa em profundidade (ACH-01): mesma asserção de segurança do bloco de criação.
+              assert "test" in name and name not in {"avalia_dev", "postgres"}, name
+              cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
+          cur.close(); conn.close()
+          PY
+
   ai-engine:
     name: AI Engine (FastAPI)
     runs-on: ubuntu-latest
