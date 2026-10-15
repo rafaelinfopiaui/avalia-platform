@@ -59,6 +59,15 @@ branch: "docs/bl-av-4b-05-plano-retencao-exclusao-imagens"
 
 ## 3. Validação (execução real, pelo orquestrador — não só self-report)
 
+> **Precisão sobre a CI (correção):** a CI deste repositório roda os testes
+> em **SQLite** — o workflow faz `env -u DATABASE_URL ... pytest` e **não
+> define `AVALIA_TEST_POSTGRES_URL`**. Logo, os testes de concorrência
+> `test_pg_*` ficam **SKIPPED na CI** (run `38704909538`: `232 passed, 10
+> skipped`). A evidência de concorrência em PostgreSQL real é a **execução
+> LOCAL** abaixo, não a CI. Não se deduz execução Postgres pelo nome do job
+> nem pela presença do serviço de banco. (Mesma ressalva já registrada em
+> `DEC-AV-041`.)
+
 - **pytest geral (SQLite):** 232 passed, 10 skipped.
 - **`test_answer_image_deletion.py` com PostgreSQL real** (banco
   descartável `avalia_test_blav4b05_*`, criado e dropado): **33 passed**,
