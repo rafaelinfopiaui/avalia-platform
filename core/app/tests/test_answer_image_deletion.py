@@ -416,7 +416,9 @@ def test_deletion_uses_conditional_update_on_deleted_at():
 
 
 # ---------------- ACD-08: download de imagem excluída ----------------
-def test_download_of_deleted_image_is_refused(client, db_session, professor_token, admin_token, image_answer, storage_dir):
+def test_download_of_deleted_image_is_refused(
+    client, db_session, professor_token, admin_token, image_answer, storage_dir
+):
     image_id = image_answer["images"][0]["id"]
     assert _delete(client, professor_token, image_id).status_code == 200
     for token in (professor_token, admin_token):
@@ -734,7 +736,10 @@ def test_divergence_script_reports_clean_storage_with_exit_zero(test_engine, tmp
 
 def test_divergence_script_has_no_write_operations():
     tree = ast.parse(_SCRIPT.read_text(encoding="utf-8"))
-    forbidden_calls = {"unlink", "remove", "rmdir", "rmtree", "rename", "replace", "write_text", "write_bytes", "commit"}
+    forbidden_calls = {
+        "unlink", "remove", "rmdir", "rmtree", "rename", "replace",
+        "write_text", "write_bytes", "commit",
+    }
     attributes = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
     assert not attributes & forbidden_calls, attributes & forbidden_calls
     strings = " ".join(
