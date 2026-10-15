@@ -68,6 +68,45 @@ Credenciais: o step reusa `avalia_user`/`avalia_password` já declaradas
 no serviço postgres do próprio workflow (não são segredo de produção;
 nenhum segredo novo; nada de credencial de produção exposto).
 
+## 7. Execução remota — COMPROVADA (run real do GitHub Actions)
+
+> **Status da lacuna: TECNICAMENTE RESOLVIDA** (comprovada por run real),
+> ainda **aguardando homologação e integração** (sem merge nesta rodada).
+
+- **Run:** 38731695435 — https://github.com/rafaelinfopiaui/avalia-platform/actions/runs/38731695435
+- **HEAD publicado:** c4e71e025d9f8082de46723f63cc6748b7e3c25e (PR #21, rascunho, base main)
+- **Jobs:** Core API, AI Engine, Frontend — todos **success**.
+
+Resultados separados (log literal, não só status verde):
+
+- **Step SQLite "Run core tests":** `232 passed, 10 skipped` — os 10
+  skipped são os `test_pg_*`, skip **esperado** nesse step. (NÃO
+  confundir com o step PostgreSQL.)
+- **Step PostgreSQL "Run PostgreSQL concurrency tests":**
+  - `test_answer_image_deletion.py` (exclusão de imagens): **5 passed**
+    (`delete_last_image_vs_confirm`; `concurrent_deletes[2]`/`[8]`;
+    `restore_after_confirmation...409_even_for_admin`;
+    `restore_vs_confirm_never_changes_confirmed_image_set`) —
+    `5 passed, 28 deselected`.
+  - `test_manual_transcription.py` (transcrição): **5 passed**
+    (`concurrent_drafts[2]`/`[8]`; `concurrent_confirms[2]`/`[8]`;
+    `confirm_and_draft_never_reopen`) — `5 passed, 33 deselected`.
+  - JUnit: `pg_img.xml {tests:5, failures:0, errors:0, skipped:0}`;
+    `pg_txn.xml {tests:5, ...}`; `TOTAL {tests:10, failures:0, errors:0,
+    skipped:0}`.
+  - **Guard aprovado:** `OK: 10 casos de concorrência PostgreSQL
+    executados e aprovados (0 skipped).`
+  - **0 skipped no step PostgreSQL** (as ocorrências da palavra "SKIPPED"
+    no log são eco do código do próprio guard, não resultado de teste; o
+    resumo do pytest é `5 passed` em cada arquivo, 0 skipped).
+  - **Limpeza:** bancos descartáveis `avalia_test_ci_img_38731695435` e
+    `avalia_test_ci_txn_38731695435` criados e dropados; o step 8 concluiu
+    com **success** sob `set -e` (o bloco de DROP final executou sem erro);
+    runner efêmero descartado ao fim do job.
+
+Nenhum banco protegido tocado (a CI usa só seu serviço postgres efêmero).
+Guard não foi enfraquecido para obter verde — segue exigindo 10/0/0.
+
 ## 5. Revisão independente — CONCLUÍDA (APROVADO COM RESSALVAS, incorporadas)
 
 Nota de executor: o **Claude Code estava indisponível** (OAuth expirado,

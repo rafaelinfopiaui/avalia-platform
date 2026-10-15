@@ -5,7 +5,7 @@ data: "2026-10-15 (America/Sao_Paulo)"
 origem: "lacuna registrada em DEC-AV-041 e DEC-AV-043 (a CI roda SQLite; testes test_pg_* ficam SKIPPED)"
 base: "main cde87cc74f37dfca6136a1c8eeeb5489318045e2"
 branch: "ci/cobertura-postgres-concorrencia (checkout principal, sem worktree)"
-status: "PLANEJAMENTO + IMPLEMENTAÇÃO LOCAL — sem publicação nesta rodada"
+status: "RESOLVIDO TECNICAMENTE (comprovado na run 38731695435) — publicado em PR #21 rascunho, aguardando homologação e integração"
 ---
 
 # Escopo — cobertura dos testes de concorrência PostgreSQL na CI
