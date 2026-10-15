@@ -7,15 +7,18 @@ import {
   ApiError,
   confirmManualTranscription,
   createImageAnswer,
+  deleteAnswerImage,
   downloadAnswerImage,
   listAnswerImages,
   listAssessments,
+  listDeletedAnswerImages,
   listImageAnswers,
   requestCorrection,
+  restoreAnswerImage,
   saveManualTranscriptionDraft,
 } from '../services/api'
 import { writeWorkflow } from '../services/workflow'
-import type { AnswerImage, AnswerWithImages, Assessment } from '../types'
+import type { AnswerImage, AnswerWithImages, Assessment, DeletedAnswerImage } from '../types'
 
 // Resposta por imagem (AV-S06B, DEC-AV-037): a foto é a entrada inicial da
 // resposta, sem texto digitado. A resposta fica aguardando transcrição e NÃO é
@@ -26,6 +29,11 @@ import type { AnswerImage, AnswerWithImages, Assessment } from '../types'
 // a correção.
 // Após a confirmação, a análise da IA é solicitada por ação explícita, a partir
 // da MESMA resposta (POST /answers/{id}/corrections), usando o texto confirmado.
+// Exclusão lógica reversível (BL-AV-4B-05): enquanto a resposta aguarda
+// transcrição, o professor pode excluir uma imagem e restaurá-la depois; a
+// imagem excluída não pode ser visualizada. Após a confirmação as imagens ficam
+// travadas (o backend responde 409 inclusive para admin). Nada é apagado do
+// armazenamento.
 
 // Mesmo limite do backend: 10 MiB = 10_485_760 bytes (base binária).
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
@@ -34,6 +42,10 @@ const PENDING_TRANSCRIPTION_NOTICE =
   'Imagem recebida e armazenada. A resposta aguarda transcrição — ainda NÃO foi transcrita nem corrigida.'
 const CONFIRMATION_WARNING =
   'Atenção: a confirmação é definitiva nesta versão. Depois de confirmar, a transcrição não poderá mais ser editada. Confira a imagem e o texto lado a lado antes de continuar.'
+const IMAGES_LOCKED_NOTICE =
+  'A transcrição desta resposta já foi confirmada: as imagens não podem mais ser excluídas nem restauradas.'
+const NO_ACTIVE_IMAGE_NOTICE =
+  'Esta resposta não tem nenhuma imagem ativa. Restaure uma imagem excluída antes de confirmar a transcrição.'
 
 function isPublished(assessment: Assessment) {
   return assessment.status === 'PUBLICADA' || assessment.status === 'PUBLISHED'
@@ -51,6 +63,7 @@ function humanError(error: unknown, action: 'enviar' | 'carregar'): string {
     case 401: return 'Sua sessão expirou. Entre novamente e repita o envio.'
     case 403: return 'Você não tem permissão para registrar respostas nesta avaliação. Verifique se você é o responsável pela avaliação ou tem vínculo ativo com a turma.'
     case 404: return 'Avaliação, questão ou imagem não encontrada. Atualize a página e selecione novamente.'
+    case 410: return 'Esta imagem foi excluída e não pode ser visualizada. Restaure-a para visualizar novamente.'
     case 413: return 'A imagem excede o limite de 10 MiB. Reduza a resolução ou comprima a foto e envie novamente.'
     case 422: return `${error.body.message || 'Arquivo inválido.'} Envie uma foto JPEG ou PNG legível e confira os campos.`
     default: return action === 'enviar'
@@ -88,12 +101,30 @@ function transcriptionError(error: unknown, action: 'salvar' | 'confirmar'): str
     case 'TRANSCRIPTION_ALREADY_CONFIRMED': return 'Esta transcrição já foi confirmada (possivelmente em outra sessão) e não pode mais ser alterada.'
     case 'ANSWER_TEXT_REQUIRED': return 'Digite o texto da transcrição antes de confirmar.'
     case 'ANSWER_NOT_IMAGE_SOURCE': return 'Esta resposta não foi enviada por foto; não há transcrição manual a fazer.'
+    case 'ANSWER_HAS_NO_ACTIVE_IMAGE': return NO_ACTIVE_IMAGE_NOTICE
   }
   switch (error.status) {
     case 0: return error.message
     case 401: return 'Sua sessão expirou. Entre novamente para continuar a transcrição.'
     case 403: return 'Você não tem permissão para alterar respostas desta avaliação. Verifique se você é o responsável pela avaliação e tem vínculo ativo com a turma.'
     case 404: return 'Resposta não encontrada. Atualize a página e selecione novamente.'
+    default: return fallback
+  }
+}
+
+// Mensagens da exclusão/restauração de imagem (mutação: exigem vínculo ativo).
+function imageMutationError(error: unknown, action: 'excluir' | 'restaurar'): string {
+  const fallback = `Não foi possível ${action} a imagem. Tente novamente.`
+  if (!(error instanceof ApiError)) return fallback
+  switch (error.body.code) {
+    case 'ANSWER_IMAGES_LOCKED': return IMAGES_LOCKED_NOTICE
+    case 'ANSWER_IMAGE_FILE_MISSING': return 'O arquivo desta imagem não está mais disponível no armazenamento. A imagem continua excluída; informe o administrador.'
+  }
+  switch (error.status) {
+    case 0: return error.message
+    case 401: return 'Sua sessão expirou. Entre novamente e repita a ação.'
+    case 403: return 'Você não tem permissão para alterar as imagens desta resposta. Verifique se você é o responsável pela avaliação e tem vínculo ativo com a turma.'
+    case 404: return 'Imagem não encontrada. Atualize a lista e tente novamente.'
     default: return fallback
   }
 }
@@ -122,7 +153,13 @@ function conflictState(error: unknown): AnswerWithImages | null {
   return current && typeof current === 'object' ? (current as AnswerWithImages) : null
 }
 
-function ImageViewer({ image, autoLoad = false }: { image: AnswerImage; autoLoad?: boolean }) {
+function ImageViewer({ image, autoLoad = false, onDelete, deleting = false }: {
+  image: AnswerImage
+  autoLoad?: boolean
+  // Presente só enquanto a resposta aguarda transcrição (estágio A).
+  onDelete?: () => void
+  deleting?: boolean
+}) {
   const [url, setUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -150,11 +187,18 @@ function ImageViewer({ image, autoLoad = false }: { image: AnswerImage; autoLoad
         <span>
           <strong>{image.original_filename}</strong> · {image.content_type === 'image/png' ? 'PNG' : 'JPEG'} · {formatSize(image.size_bytes)} · enviada em {new Date(image.created_at).toLocaleString('pt-BR')}
         </span>
-        {!url && (
-          <button type="button" className="button button--secondary" onClick={load} disabled={loading}>
-            {loading ? 'Carregando…' : 'Visualizar'}
-          </button>
-        )}
+        <span style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          {!url && (
+            <button type="button" className="button button--secondary" onClick={load} disabled={loading || deleting}>
+              {loading ? 'Carregando…' : 'Visualizar'}
+            </button>
+          )}
+          {onDelete && (
+            <button type="button" className="button button--secondary" onClick={onDelete} disabled={deleting}>
+              {deleting ? 'Excluindo…' : 'Excluir imagem'}
+            </button>
+          )}
+        </span>
       </div>
       {loading && <Spinner label="Baixando imagem…" />}
       {error && <Alert>{error} <button type="button" className="link-button" onClick={load}>Tentar novamente</button></Alert>}
@@ -229,6 +273,7 @@ function ManualTranscription({ answer, images, onChange }: {
   const startReview = () => {
     setNotice('')
     if (!text.trim()) { setError('Digite o texto da transcrição antes de confirmar.'); return }
+    if (images.length === 0) { setError(NO_ACTIVE_IMAGE_NOTICE); return }
     setError('')
     setReviewing(true)
   }
@@ -282,9 +327,10 @@ function ManualTranscription({ answer, images, onChange }: {
           <button type="button" className="button button--secondary" onClick={saveDraft} disabled={Boolean(busy) || !dirty || Boolean(latest)}>
             {busy === 'salvar' ? 'Salvando rascunho…' : 'Salvar rascunho'}
           </button>
-          <button type="button" className="button button--primary" onClick={startReview} disabled={Boolean(busy) || Boolean(latest)}>
+          <button type="button" className="button button--primary" onClick={startReview} disabled={Boolean(busy) || Boolean(latest) || images.length === 0}>
             Confirmar transcrição…
           </button>
+          {images.length === 0 && <small>{NO_ACTIVE_IMAGE_NOTICE}</small>}
         </div>
       ) : (
         <div className="panel" style={{ marginTop: '0.75rem' }}>
@@ -303,7 +349,7 @@ function ManualTranscription({ answer, images, onChange }: {
             </div>
           </div>
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <button type="button" className="button button--primary" onClick={confirm} disabled={Boolean(busy)}>
+            <button type="button" className="button button--primary" onClick={confirm} disabled={Boolean(busy) || images.length === 0}>
               {busy === 'confirmar' ? 'Confirmando…' : 'Confirmar definitivamente'}
             </button>
             <button type="button" className="button button--secondary" onClick={() => setReviewing(false)} disabled={Boolean(busy)}>
@@ -354,23 +400,84 @@ function CorrectionRequest({ answer }: { answer: AnswerWithImages }) {
   )
 }
 
+const byCreation = (a: AnswerImage, b: AnswerImage) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id)
+
 function SentAnswer({ answer: initial, questionLabel }: { answer: AnswerWithImages; questionLabel: string }) {
+  const { user } = useAuth()
   const [answer, setAnswer] = useState(initial)
   const [images, setImages] = useState<AnswerImage[]>(initial.images)
+  // Projeção mínima das excluídas: sem nome original, hash nem visualização.
+  const [deleted, setDeleted] = useState<DeletedAnswerImage[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [mutating, setMutating] = useState('')
+  // O backend pode ter recusado por a resposta ter sido confirmada em outra sessão.
+  const [lockedByServer, setLockedByServer] = useState(false)
+  const editable = answer.transcription_status === 'AGUARDANDO_TRANSCRICAO' && !lockedByServer
 
   const refresh = async () => {
     setLoading(true)
     setError('')
     try {
-      setImages(await listAnswerImages(answer.id))
+      const [active, removed] = await Promise.all([listAnswerImages(answer.id), listDeletedAnswerImages(answer.id)])
+      setImages(active)
+      setDeleted(removed)
     } catch (e) {
       setError(humanError(e, 'carregar'))
     } finally {
       setLoading(false)
     }
   }
+  useEffect(() => {
+    let current = true
+    listDeletedAnswerImages(answer.id)
+      .then(items => { if (current) setDeleted(items) })
+      .catch(e => { if (current) setError(humanError(e, 'carregar')) })
+    return () => { current = false }
+  }, [answer.id])
+
+  const mutationFailed = (e: unknown, action: 'excluir' | 'restaurar') => {
+    setError(imageMutationError(e, action))
+    if (e instanceof ApiError && e.body.code === 'ANSWER_IMAGES_LOCKED') setLockedByServer(true)
+  }
+
+  const remove = async (image: AnswerImage) => {
+    if (mutating) return
+    if (!window.confirm('Excluir esta imagem da resposta? Ela deixará de ser exibida e não poderá ser usada na transcrição, mas poderá ser restaurada enquanto a transcrição não for confirmada.')) return
+    setMutating(image.id)
+    setError('')
+    setNotice('')
+    try {
+      const marked = await deleteAnswerImage(image.id)
+      setImages(previous => previous.filter(item => item.id !== image.id))
+      setDeleted(previous => [marked, ...previous.filter(item => item.id !== marked.id)])
+      setNotice('Imagem excluída. Ela pode ser restaurada enquanto a transcrição não for confirmada.')
+    } catch (e) {
+      mutationFailed(e, 'excluir')
+    } finally {
+      setMutating('')
+    }
+  }
+
+  const restore = async (item: DeletedAnswerImage) => {
+    if (mutating) return
+    setMutating(item.id)
+    setError('')
+    setNotice('')
+    try {
+      const restored = await restoreAnswerImage(item.id)
+      setDeleted(previous => previous.filter(entry => entry.id !== restored.id))
+      setImages(previous => [...previous.filter(entry => entry.id !== restored.id), restored].sort(byCreation))
+      setNotice('Imagem restaurada.')
+    } catch (e) {
+      mutationFailed(e, 'restaurar')
+    } finally {
+      setMutating('')
+    }
+  }
+
+  const deletedBy = (id: string) => (id === user?.id ? 'por você' : `pelo usuário ${id}`)
 
   return (
     <article className="panel" style={{ marginBottom: '1rem' }}>
@@ -378,15 +485,42 @@ function SentAnswer({ answer: initial, questionLabel }: { answer: AnswerWithImag
       <h3 style={{ marginTop: 0 }}>{answer.student_name_fake} — {questionLabel}</h3>
       <p><small>Resposta {answer.id}</small></p>
       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-        <strong>Imagens armazenadas ({images.length})</strong>
+        <strong>Imagens ativas ({images.length})</strong>
         <button type="button" className="link-button" onClick={refresh} disabled={loading}>
           {loading ? 'Atualizando…' : 'Atualizar lista'}
         </button>
       </div>
       {error && <Alert>{error}</Alert>}
+      {notice && <Alert type="success">{notice}</Alert>}
+      {!editable && (images.length > 0 || deleted.length > 0) && <Alert type="info">{IMAGES_LOCKED_NOTICE}</Alert>}
       <ul style={{ padding: 0, marginTop: '0.75rem' }}>
-        {images.map(image => <ImageViewer key={image.id} image={image} />)}
+        {images.map(image => (
+          <ImageViewer
+            key={image.id}
+            image={image}
+            onDelete={editable ? () => remove(image) : undefined}
+            deleting={mutating === image.id}
+          />
+        ))}
       </ul>
+      {deleted.length > 0 && (
+        <section style={{ marginTop: '0.75rem' }}>
+          <strong>Imagens excluídas ({deleted.length})</strong>
+          <p><small>Imagens excluídas não podem ser visualizadas nem usadas na transcrição. O arquivo não foi apagado do armazenamento.</small></p>
+          <ul style={{ padding: 0 }}>
+            {deleted.map(item => (
+              <li key={item.id} className="panel" style={{ listStyle: 'none', marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span>Imagem {item.id} · excluída {deletedBy(item.deleted_by_id)} em {new Date(item.deleted_at).toLocaleString('pt-BR')}</span>
+                {editable && (
+                  <button type="button" className="button button--secondary" onClick={() => restore(item)} disabled={Boolean(mutating)}>
+                    {mutating === item.id ? 'Restaurando…' : 'Restaurar'}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <ManualTranscription answer={answer} images={images} onChange={setAnswer} />
       {answer.transcription_status === 'TRANSCRICAO_CONFIRMADA' && <CorrectionRequest answer={answer} />}
     </article>

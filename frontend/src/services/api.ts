@@ -9,6 +9,7 @@ import type {
   Course,
   CourseDiscipline,
   Criterion,
+  DeletedAnswerImage,
   Discipline,
   Enrollment,
   EnrollmentStatus,
@@ -185,6 +186,15 @@ export async function downloadAnswerImage(imageId: string): Promise<Blob> {
   const response = await send(`/answer-images/${imageId}/download`)
   return response.blob()
 }
+// Exclusão lógica reversível (BL-AV-4B-05): só enquanto a resposta aguarda
+// transcrição; depois da confirmação o backend responde 409 ANSWER_IMAGES_LOCKED.
+// Nada é removido do armazenamento.
+export const deleteAnswerImage = (imageId: string) =>
+  request<DeletedAnswerImage>(`/answer-images/${encodeURIComponent(imageId)}`, { method: 'DELETE' })
+export const restoreAnswerImage = (imageId: string) =>
+  request<AnswerImage>(`/answer-images/${encodeURIComponent(imageId)}/restore`, { method: 'POST' })
+export const listDeletedAnswerImages = (answerId: string) =>
+  request<DeletedAnswerImage[]>(`/answers/${encodeURIComponent(answerId)}/images/deleted`)
 
 export interface CorrectionJobContext {
   job: CorrectionJob;
