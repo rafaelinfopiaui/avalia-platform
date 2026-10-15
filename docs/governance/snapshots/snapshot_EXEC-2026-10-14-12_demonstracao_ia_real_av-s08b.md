@@ -100,17 +100,70 @@ human_reviews:    id=fa3445df-61ba-4503-9406-3a9e8787fdc8,
 `answer_id` → `job_id` → `AIExecution` → `HumanReview` formam uma cadeia
 única e consistente — não há ambiguidade possível entre registros.
 
-**Prova principal** (não auxiliar): `AIExecution.engine_mode='real'` e
-`AIExecution.model='qwen2.5:7b-instruct-q4_K_M'` persistidos no banco, e
-log do AI Engine mostrando `configured_engine_mode: "real"` na entrada da
+## 4.1 Evidência direta e independente da chamada ao Ollama (correção/complemento, 2026-10-15)
+
+> Adendo de precisão, sem alterar o resultado já relatado. A evidência
+> abaixo é **independente** do log do AI Engine (é o log nativo do
+> próprio servidor Ollama, `/opt/homebrew/var/log/ollama.log`, fora do
+> controle da aplicação demonstrada) e corrige uma imprecisão de unidade
+> no relatório inicial.
+
+Localizada e correlacionada pela janela de horário exata da
+demonstração (21:55:03 a 21:55:16, horário local `-03:00`, equivalente a
+`00:55:03`–`00:55:16` UTC já citado na tabela da seção 3):
+
+```
+time=2026-10-14T21:55:03.850-03:00 level=INFO source=server.go:109
+  msg="using llama-server for model"
+  model=/Users/<usuario>/.ollama/models/blobs/sha256-2bada8a74506770...
+time=2026-10-14T21:55:06.120-03:00 level=INFO source=llama_server.go:1362
+  msg="llama-server started in 2.26 seconds"
+[GIN] 2026/10/14 - 21:55:16 | 200 | 12.309791875s | 127.0.0.1 | POST "/api/generate"
+```
+
+- Confirma uma chamada HTTP real `POST /api/generate` ao servidor Ollama
+  local, status `200`, **dentro da mesma janela de tempo** da análise
+  reportada pelo AI Engine (`correction_requested` às 21:55:03,
+  `correction_job_completed` às 21:55:16 — mesmos timestamps,±1s).
+- O digest do modelo carregado
+  (`sha256:2bada8a7450677000f678be90653b85d364de7db25eb5ea54136ada5f...`)
+  corresponde exatamente ao `layer` do tipo `application/vnd.ollama.image.model`
+  do manifest local de `qwen2.5:7b-instruct-q4_K_M` (confirmado por
+  inspeção do manifest em `~/.ollama/models/manifests/...`), eliminando
+  ambiguidade sobre qual modelo foi de fato carregado.
+- Duração da chamada real reportada pelo próprio Ollama:
+  **12.309791875 segundos** (`12.309791875s` no log nativo) — consistente
+  com os **12.341 segundos** (não "12.341 ms"; ver correção de unidade
+  abaixo) medidos pelo AI Engine para o ciclo completo da análise
+  (pequena diferença esperada por overhead de carregamento do
+  `llama-server`, serialização HTTP e processamento do AI Engine em
+  torno da chamada).
+- Esta é a **prova mais direta disponível** nesta rodada: evidência do
+  próprio motor de inferência, independente da aplicação demonstrada.
+
+**Prova principal** (não auxiliar): a chamada real e correlacionada ao
+Ollama (seção 4.1 acima) junto com `AIExecution.engine_mode='real'` e
+`AIExecution.model='qwen2.5:7b-instruct-q4_K_M'` persistidos no banco.
+Log do AI Engine mostrando `configured_engine_mode: "real"` na entrada da
 análise, sem nenhuma ocorrência de `SIMULATED_MODE` em todo o log da
-sessão (grep confirmado: zero ocorrências).
+sessão (grep confirmado: zero ocorrências), são evidências auxiliares
+que corroboram, mas não substituem isoladamente, a prova da chamada
+efetiva ao motor.
 
 **Evidências auxiliares** (corroboram, não substituem a prova acima):
-- Duração observada da chamada real ao Ollama: **12.341 ms**
-  (`duration_ms` registrado pelo próprio AI Engine, log estruturado,
-  evento `Análise concluída com sucesso`) — latência de inferência real,
-  não os poucos milissegundos determinísticos do modo simulado.
+- Duração observada do ciclo completo da análise pelo AI Engine:
+  **12.341 segundos** — CORREÇÃO DE UNIDADE (2026-10-15): o campo
+  `duration_ms: 12341` registrado pelo AI Engine está em
+  **milissegundos**; o relatório desta mesma demonstração, entregue
+  antes desta reconferência, descreveu erroneamente o valor como
+  "12.341 ms" (deveria ser 12341 ms = 12,341 s). Corrigido aqui; latência
+  de inferência real, não os poucos milissegundos determinísticos do
+  modo simulado.
+- `overall_confidence=0.98` é a confiança própria da heurística de
+  correção (campo interno do AI Engine, já existente antes desta
+  demonstração) — **não é e não deve ser lida como medida de acurácia
+  pedagógica**; esta demonstração não avalia qualidade pedagógica da
+  correção sugerida, apenas o caminho técnico com inferência real.
 - Pontuação sugerida não é o valor fixo de "metade do max_score" (regra
   determinística do modo simulado) — resultado da inferência real.
 
