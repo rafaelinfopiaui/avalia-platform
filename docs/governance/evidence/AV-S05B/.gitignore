@@ -2,3 +2,13 @@ venv/
 modelos/
 __pycache__/
 *.pyc
+
+# Material de coleta — nunca versionar (imagens, referências, transcrições, brutos)
+amostras/*.png
+amostras/eval/
+amostras/dev/
+amostras/referencias/
+amostras/manuscrito/*.png
+# Artefatos da rodada 1 que contêm frases reais da coleta (excluídos da publicação por decisão de Rafael 2026-10-15)
+amostras/manuscrito/INVENTARIO_Amostra_1.md
+amostras/manuscrito/RESULTADOS_benchmark_parcial_Amostra_1.md
