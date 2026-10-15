@@ -50,6 +50,7 @@ from app.routers.config import (
 from app.routers.images import (
     _MULTIPART_OVERHEAD,
     _STORAGE_ERROR,
+    _lock_answer_row,
     _normalize_declared_type,
     _sanitize_original_filename,
     _storage_dir,
@@ -730,9 +731,10 @@ def list_image_answers(
     answers = query.order_by(Answer.created_at, Answer.id).all()
     images_by_answer: dict[str, list[AnswerImage]] = {answer.id: [] for answer in answers}
     if answers:
+        # Só imagens ativas (BL-AV-4B-05, R1); excluídas têm rota própria.
         images = (
             db.query(AnswerImage)
-            .filter(AnswerImage.answer_id.in_(list(images_by_answer)))
+            .filter(AnswerImage.answer_id.in_(list(images_by_answer)), AnswerImage.deleted_at.is_(None))
             .order_by(AnswerImage.created_at, AnswerImage.id)
             .all()
         )
@@ -760,15 +762,22 @@ _TRANSCRIPTION_CONFLICT_MESSAGES = {
         "A transcrição foi alterada em outra sessão; recarregue para ver a versão mais recente."
     ),
 }
+_NO_ACTIVE_IMAGE = "ANSWER_HAS_NO_ACTIVE_IMAGE"
+_NO_ACTIVE_IMAGE_MESSAGE = (
+    "Esta resposta não tem nenhuma imagem ativa. Restaure ou envie uma imagem antes de "
+    "confirmar a transcrição."
+)
+
+
+def _active_images_query(db: Session, answer_id: str):
+    # Imagens excluídas logicamente (BL-AV-4B-05) ficam fora da transcrição (R1).
+    return db.query(AnswerImage).filter(
+        AnswerImage.answer_id == answer_id, AnswerImage.deleted_at.is_(None)
+    )
 
 
 def _answer_with_images(db: Session, answer: Answer) -> AnswerWithImagesOut:
-    images = (
-        db.query(AnswerImage)
-        .filter(AnswerImage.answer_id == answer.id)
-        .order_by(AnswerImage.created_at, AnswerImage.id)
-        .all()
-    )
+    images = _active_images_query(db, answer.id).order_by(AnswerImage.created_at, AnswerImage.id).all()
     return AnswerWithImagesOut(
         **AnswerOut.model_validate(answer).model_dump(),
         images=[AnswerImageOut.model_validate(image) for image in images],
@@ -835,6 +844,19 @@ def _save_manual_transcription(
     outcome = _transcription_outcome(answer, payload, confirm)
     if outcome is not None:
         return _transcription_outcome_response(db, answer, outcome, correlation_id)
+    if confirm:
+        # BL-AV-4B-05 (R2): trava a linha de answers — o mesmo lock da
+        # exclusão/restauração de imagem — e só então reavalia estado e imagem
+        # ativa, para que nenhuma checagem fique inválida antes do commit.
+        answer = _lock_answer_row(db, answer.id)
+        outcome = _transcription_outcome(answer, payload, confirm)
+        if outcome is not None:
+            return _transcription_outcome_response(db, answer, outcome, correlation_id)
+        if _active_images_query(db, answer.id).first() is None:
+            log_event("manual_transcription_without_active_image", correlation_id, answer_id=answer.id)
+            return error_response(
+                409, _NO_ACTIVE_IMAGE, _NO_ACTIVE_IMAGE_MESSAGE, correlation_id, details={"answer_id": answer.id}
+            )
 
     # A versão lida acima é a esperada; o UPDATE condicional abaixo garante, na
     # transação do banco, que ninguém a avançou desde então (lock otimista).
