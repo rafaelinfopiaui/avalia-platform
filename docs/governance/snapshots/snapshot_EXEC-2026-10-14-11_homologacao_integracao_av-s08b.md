@@ -73,12 +73,20 @@ Ressalvas preservadas, não encerradas por esta homologação:
 2. o rótulo "Solicitar nova análise da IA" no frontend é estado local de
    sessão (não persiste a reload) — informativo, não bloqueante.
 
-## 3. Integração (merge) — preenchido após o merge efetivo
+## 3. Integração (merge) — confirmado após o merge efetivo
 
 - HEAD homologado nesta rodada: `ea512099cb26e760712c239be5106b960f09ed3c`
-- SHA integrado (merge commit em `main`): __A_PREENCHER_APOS_MERGE__
-- CI pós-merge: __A_PREENCHER_APOS_MERGE__
-- Checkout principal: __A_PREENCHER_APOS_MERGE__
+- SHA integrado (merge commit em `main`): `efaa337c04070f59e01d217010f17a92b89258ca`
+  (confirmado via `gh pr view --json state,mergedAt,mergeCommit` —
+  `state=MERGED`, `mergedAt=2026-10-14T15:46:30Z` — e via `git fetch
+  origin main` independente: `origin/main` passou de `e8b0864` para
+  `efaa337`)
+- CI pós-merge: **3/3 checks `success`** no SHA `efaa337`
+  (Core API, AI Engine, Frontend — confirmado via
+  `gh api repos/.../commits/efaa337.../check-runs`)
+- Checkout principal: `git checkout main` + `git merge --ff-only
+  origin/main` — fast-forward puro `e8b0864..efaa337`, working tree
+  limpo, branch `feat/av-s08b-transcricao-manual` preservada intacta
 
 ## 4. Reconciliação objetiva do progresso (backlog)
 
