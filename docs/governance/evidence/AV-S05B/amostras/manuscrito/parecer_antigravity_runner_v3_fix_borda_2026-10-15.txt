@@ -1,0 +1,102 @@
+Aqui está a revisão técnica independente e limitada do delta apresentado.
+
+---
+
+### 1. Achado A: Credenciais em texto livre com prefixo underscore / sem separador
+**Veredito: CONCORDO COM RESSALVA (Não-bloqueante)**
+
+#### Análise detalhada com base no diff:
+* **Fechamento da brecha do `\b` com underscore e variantes:**
+  * O diff substituiu `\b` no início por `(?<![A-Za-z0-9])` em `_CHAVES_CREDENCIAL_TEXTO`:
+    ```python
+    _CHAVES_CREDENCIAL_TEXTO = (r"(?<![A-Za-z0-9])(?:(?:proxy[-_]?)?authorization|"
+                                r"(?:x[-_]?)?api[-_]?key|"
+                                r"(?:access[-_]?|refresh[-_]?|auth[-_]?)?token|"
+                                r"(?:set[-_]?)?cookie)\b")
+    ```
+    Como o underscore (`_`) é caractere de palavra (`\w`), o lookbehind negativo `(?<![A-Za-z0-9])` resolve cirurgicamente a falha do `\b` em casos como `proxy_authorization`, `x_api_key` e até chaves com prefixo upstream como `upstream_api_key`.
+  * As expressões `(?:proxy[-_]?)?`, `(?:x[-_]?)?`, etc., cobrem com precisão as três grafias: hífen (`proxy-authorization`), underscore (`proxy_authorization`) e colado (`proxyauthorization`).
+
+* **Preservação da chave e mascaramento do valor:**
+  * Na regra com separador `:` ou `=`:
+    ```python
+    (re.compile(r"(?i)(" + _CHAVES_CREDENCIAL_TEXTO + r")"
+                r"(\"?'?\s*[:=]\s*)(\"[^\"]*\"?|'[^']*'?|[^\r\n,}&]*)"),
+     r"\1\2" + _MASCARA_CREDENCIAL)
+    ```
+    `\1` (chave) e `\2` (separador e aspas) são mantidos intactos, mascarando unicamente o valor (`\3`).
+
+* **Tratamento sem delimitador (`[TRECHO_OMITIDO_NAO_SANITIZAVEL]`):**
+  * Na regra sem separador:
+    ```python
+    (re.compile(r"(?i)((?<![A-Za-z0-9])(?:(?:proxy[-_]?)?authorization|"
+                r"(?:x[-_]?)?api[-_]?key|(?:set[-_]?)?cookie)\b)"
+                r"[ \t]+(?!\[)(?=[^\s]*[\d_.+/=-])[^\s,;}]{8,}"),
+     r"\1 " + _MASCARA_NAO_SANITIZAVEL)
+    ```
+    Preserva a chave (`\1 `) e substitui o segredo ambíguo pelo marcador acordado.
+  * O lookahead `(?=[^\s]*[\d_.+/=-])` garante que palavras puramente alfabéticas em inglês/português (como `required` em `authorization required`, `missing`, `denied`, `expired`) **não** casem, preservando mensagens de erro comuns.
+  * O termo `token` foi expressamente removido das chaves desta regra sem delimitador, impedindo que textos como `token count 4096` ou `token limit` sofram omissão indevida.
+
+* **Ressalvas (Não-bloqueantes):**
+  * Credenciais sem separador que sejam puramente alfabéticas (sem dígitos ou caracteres especiais, ex.: `x_api_key secrettoken`) ou que possuam menos de 8 caracteres não serão capturadas por essa regra específica.
+  * Pela exclusão de `token` da regra sem separador, um formato atípico como `token sk-abc12345` (sem `:`, sem `=` e sem prefixo `Bearer`/`Basic`) não será omitido. Esse é um trade-off legítimo para proteger métricas de contagem de tokens.
+
+---
+
+### 2. Achado B: Caminhos relativos sem extensão de imagem
+**Veredito: CONCORDO COM RESSALVA (Atenção ao sub-mascaramento e sobre-mascaramento)**
+
+#### Análise detalhada com base no diff:
+* **Fechamento do achado principal:**
+  * O novo regex de caminhos relativos e a função auxiliar:
+    ```python
+    (re.compile(r"(?<![\w:/\\.~@+%%-])%s(?:[/\\]%s)+" % (_SEG_RELATIVO, _SEG_RELATIVO)),
+     _mascarar_caminho_relativo)
+    ```
+    Mascara com sucesso caminhos relativos multi-segmentos sem extensão de imagem (`coleta/referencias/ref.txt`, `amostras/MAN-04/nota.txt`, `coleta\referencias\ref.txt`, `coleta/fotos`).
+
+* **Preservação de diagnósticos, URLs e tokens de 1 segmento:**
+  * **Tokens de 1 segmento:** Preservados (`exceed_context_size_error`, `code`, `type`), pois a regex exige obrigatoriamente `(?:[/\\]%s)+` (mínimo de 2 segmentos).
+  * **URLs completas:** Preservadas. O lookbehind `(?<![\w:/\\.~@+%-])` barra o início de match após `:`, `/` ou barras duplas, e `_SEG_RELATIVO` não aceita `:`, impedindo o casamento dentro de `http://...`.
+  * **Tipos MIME e razões numéricas:** Preservados quando possuem 2 segmentos sem extensão (`application/json` via `_RE_MIME`, e `4131/4096` via razão numérica).
+
+* **Ressalvas:**
+  * **Sub-mascaramento (Brecha do `any` vs `all`):**
+    No código de `_mascarar_caminho_relativo`:
+    ```python
+    if len(segmentos) == 2 and not _RE_EXTENSAO.search(segmentos[-1]):
+        if _RE_MIME.match(trecho) or any(_RE_NUMERICO.match(s) for s in segmentos):
+            return trecho
+    ```
+    A docstring afirma: *"Preserva só os pares de 2 segmentos sem extensão que são diagnóstico legítimo: (...) razão numérica (4131/4096)"*.
+    Porém, a condição usou `any(_RE_NUMERICO...)` em vez de `all(...)`.
+    **Consequência:** Qualquer diretório relativo de 2 segmentos sem extensão cujo nome contenha um segmento puramente numérico (ex.: `coleta/01`, `amostras/10`, `lote/2024`, `temp/123`) **NÃO** será mascarado e vazará no log de erro! Como é uma razão numérica (`X/Y`), ambos os lados deveriam ser numéricos (`all`).
+  * **Sobre-mascaramento:**
+    Qualquer par de palavras comuns separadas por barra sem extensão (2 segmentos) que não seja numérico nem MIME será substituído por `[CAMINHO_OMITIDO]`. Exemplos reais em diagnósticos HTTP/Ollama:
+    * Opções booleanas/operacionais: `true/false`, `read/write`, `input/output`, `and/or`, `success/failure`.
+    * Modelos com namespace (HuggingFace / Ollama / vLLM): `library/llama3`, `meta-llama/Llama-3-8B`, `mistralai/Mistral-7B`.
+    * Códigos de erro hierárquicos: `auth/invalid-credential`, `storage/object-not-found`.
+
+---
+
+### 3. Efeitos Colaterais e Fluxo de Erro
+**Veredito: CONCORDO**
+
+* O fluxo de exceção do runner e a atribuição de status `falha_execucao` permanecem totalmente íntegros (o delta atua estritamente no pré-processamento/sanitização do corpo textual do erro).
+* A assinatura de `_mascarar_caminho_relativo(m: re.Match[str]) -> str` é compatível com o uso como callable em `re.sub`.
+* Não há risco de *ReDoS* (catastrophic backtracking): os delimitadores `[/\\]` e `\s` são disjuntos dos conjuntos de caracteres dos segmentos, e o lookbehind tem tamanho fixo de 1 caractere, mantendo plena compatibilidade com o motor de regex do Python.
+
+---
+
+### Conclusão e Apontamentos
+
+#### BLOQUEANTES:
+* **Nenhum bloqueante estrito de execução.** O código não quebra o runner, não lança exceções não tratadas e preserva os campos vitais de erro HTTP.
+
+#### NÃO-BLOQUEANTES (Recomendações pontuais de refinamento):
+1. **Corrigir `any` para `all` na verificação numérica de `_mascarar_caminho_relativo`:**
+   * *Problema:* `coleta/01` ou `amostras/42` escapam da máscara porque `01` e `42` satisfazem o `any(_RE_NUMERICO.match(s))`.
+   * *Correção sugerida:* Alterar para `all(_RE_NUMERICO.match(s) for s in segmentos)`. Assim, apenas razões como `4131/4096` serão poupadas, e pastas numeradas sem extensão serão mascaradas conforme o objetivo do Achado B.
+2. **Mitigar sobre-mascaramento de namespaces de modelos / pares booleanos (se relevante para o diagnóstico):**
+   * Avaliar se mensagens de erro do ambiente contêm nomes de modelos como `library/llama3` ou expressões como `true/false`. Caso ocorram e façam falta no diagnóstico, incluir uma pequena lista de exceção ou exigir que o caminho relativo tenha separador `.` no último segmento se contiver apenas 2 segmentos.

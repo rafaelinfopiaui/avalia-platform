@@ -1,0 +1,96 @@
+### Veredito da Revisão Técnica Independente
+
+---
+
+### 1. CLASSIFICAÇÃO: Alteração de contexto de inferência vs. "Transporte/Serialização"
+- **Veredito:** **CONCORDO** (com a classificação de "alteração de contexto de inferência") / **DISCORDO** da rotulação feita no código como "correção de transporte".
+- **Justificativa:**
+  - Em [`bench_runner_v2.py`](file:///tmp/av-s05b-revisao-antigravity/bench_runner_v2.py#L4) e [`bench_runner_v2.py`](file:///tmp/av-s05b-revisao-antigravity/bench_runner_v2.py#L74-L79), a alteração é explicitamente anotada como *"correção de TRANSPORTE"*.
+  - Tecnicamente, `num_ctx` no Ollama/llama.cpp dimensiona a janela de atenção e o buffer de KV cache na VRAM/RAM alocados para o modelo. Ele determina diretamente a capacidade computacional da rede de processar a sequência multimodal (patches do encoder visual da imagem + texto).
+  - Isso **não é** camada de transporte (não é ajuste de MTU, chunking HTTP, encoding Base64 ou buffer de socket). Trata-se de um hiperparâmetro operacional de inferência.
+  - A existência de autorização administrativa/gerencial para efetuar a mudança apenas legitima a intervenção operacional, mas **não altera a natureza ontológica e técnica do parâmetro**.
+
+---
+
+### 2. TRATAMENTO DE ERRO / OBSERVABILIDADE: Preservação do corpo HTTP
+- **Veredito:** **CONCORDO**. A lacuna de observabilidade continua **ABERTA** no `v2`.
+- **Justificativa:**
+  - Em [`bench_runner_v2.py`](file:///tmp/av-s05b-revisao-antigravity/bench_runner_v2.py#L379-L387) (`_post`), o método invoca `urllib.request.urlopen(req)`. Quando o Ollama responde HTTP 400 (`exceed_context_size_error`, conforme [`ERROS_SANITIZADOS.txt`](file:///tmp/av-s05b-revisao-antigravity/ERROS_SANITIZADOS.txt#L4-L7)), o `urllib` dispara um `urllib.error.HTTPError`.
+  - Como não há captura específica em `_post`, a exceção sobe diretamente para o bloco `except Exception as exc:` em [`bench_runner_v2.py`](file:///tmp/av-s05b-revisao-antigravity/bench_runner_v2.py#L281-L283) (`executar()`), que apenas registra `"inferencia: %s: %s" % (type(exc).__name__, exc)`.
+  - O resultado é a string opaca `"inferencia: HTTPError: HTTP Error 400: Bad Request"` ([`ERROS_SANITIZADOS.txt`](file:///tmp/av-s05b-revisao-antigravity/ERROS_SANITIZADOS.txt#L14)). O stream da resposta (`exc.read()`), onde reside o payload JSON detalhando o erro, **é sumariamente descartado**.
+  - No [`DELTA_v1_v2.diff`](file:///tmp/av-s05b-revisao-antigravity/DELTA_v1_v2.diff#L19-L25), nenhuma linha do tratamento de requisição/exceção foi alterada.
+- **Proposta de Correção Mínima:**
+  Capturar `urllib.error.HTTPError` dentro de `_post`, extrair o JSON sanitizado do erro sem vazar transcrições nem alterar a semântica de fluxo do runner:
+  ```python
+  import urllib.error
+
+  def _post(self, caminho: str, corpo: Dict[str, Any]) -> Dict[str, Any]:
+      req = urllib.request.Request(
+          self.url + caminho, data=json.dumps(corpo).encode("utf-8"),
+          headers={"Content-Type": "application/json"}, method="POST")
+      try:
+          with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT_S) as resp:
+              dados = json.loads(resp.read().decode("utf-8"))
+      except urllib.error.HTTPError as exc:
+          corpo_bytes = exc.read()
+          try:
+              err_json = json.loads(corpo_bytes.decode("utf-8", "replace"))
+              msg = err_json.get("error", err_json)
+          except Exception:
+              msg = corpo_bytes.decode("utf-8", "replace").strip()
+          raise RuntimeError("ollama HTTP %d: %s" % (exc.code, msg)) from exc
+
+      if isinstance(dados, dict) and dados.get("error"):
+          raise RuntimeError("ollama: %s" % dados["error"])
+      return dados
+  ```
+  *Nota: Preserva o status `STATUS_FALHA`, `texto=None` e o cálculo de tempo de inferência em `executar()`.*
+
+---
+
+### 3. METODOLOGIA: Classificação da Rodada 2 e Comparação entre Candidatos
+- **Veredito:** **CONCORDO**.
+- **Justificativa:**
+  - A Rodada 2 decorreu de *data snooping / post-hoc tuning*: os limites de contexto foram ajustados especificamente porque foram observadas falhas no próprio conjunto de avaliação (*eval set*, onde `n_prompt_tokens` variou entre 4107 e 4156 contra o teto 4096, conforme [`ERROS_SANITIZADOS.txt`](file:///tmp/av-s05b-revisao-antigravity/ERROS_SANITIZADOS.txt#L9-L11)).
+  - Portanto, a Rodada 2 **NÃO** pode ser apresentada como "avaliação independente" nem como "reprodução do protocolo sem alteração". Deve ser categorizada estritamente como **resultado exploratório após ajuste informado por erro (post-hoc analysis)**.
+  - A comparação com os demais candidatos (Tesseract, EasyOCR, Moondream) é aceitável em caráter puramente **descritivo** (pois os denominadores das amostras válidas coincidem após o ajuste), **desde que** fique explicitado em relatório que:
+    1. O candidato Qwen rodou sob uma especificação de contexto reconfigurada (`num_ctx=8192` vs 4096);
+    2. O ajuste foi reativo às falhas prévias observadas no mesmo conjunto de teste.
+
+---
+
+### 4. LEITURA DE MÉTRICA: CER 0,077 vs. "Acurácia de 92,3%"
+- **Veredito:** **CONCORDO**.
+- **Justificativa:**
+  - A fórmula de CER computada em [`bench_runner_v2.py`](file:///tmp/av-s05b-revisao-antigravity/bench_runner_v2.py#L127-L133) é `levenshtein(s, r) / max(1, len(r))`. Como a distância de Levenshtein inclui inserções além de substituições e deleções, o CER não é restrito ao intervalo $[0, 1]$ (pode ultrapassar 1,0, conforme testado em [`test_bench_runner.py`](file:///tmp/av-s05b-revisao-antigravity/test_bench_runner.py#L94-L96)).
+  - Converter ingenuamente $\text{Acurácia} = 1 - \text{CER}$ para afirmar "92,3% de acurácia" é tecnicamente inválido em métricas de edição.
+  - Além disso, os resultados referem-se a um conjunto amostral reduzido (Amostra_1, AV-S05B). A leitura honesta e defensável é **"melhor resultado observado nesta coleção e configuração específica"**, sendo metodologicamente indevido extrapolar essa conclusão para o desempenho genérico sobre manuscritos na língua portuguesa.
+
+---
+
+### 5. RISCOS E DEFEITOS NO DELTA / CONFIGURAÇÃO
+- **Veredito:** **RESSALVA** (Riscos técnicos identificados no código).
+- **Justificativa e Apontamentos:**
+  1. **Poluição do `t_inferencia_s` por recarga de contexto não isolada:**
+     - Em [`bench_runner_v2.py`](file:///tmp/av-s05b-revisao-antigravity/bench_runner_v2.py#L389-L392), `_carregar()` faz requests sem o dicionário `options: OLLAMA_OPCOES`. O Ollama inicializa o runner com o contexto padrão do modelo (ex.: 4096).
+     - Quando `_inferir()` é executado pela primeira vez ([`bench_runner_v2.py`](file:///tmp/av-s05b-revisao-antigravity/bench_runner_v2.py#L396-L399)), ele envia `options: OLLAMA_OPCOES` contendo `num_ctx: 8192`.
+     - Ao detectar alteração no tamanho do contexto, o Ollama descarrega e recarrega os buffers do modelo em VRAM *durante a medição da primeira inferência*. Esse tempo de recarga é contabilizado erroneamente dentro de `t_inferencia_s` da primeira amostra, violando a premissa de isolamento de `t_carga_s`.
+  2. **Aplicação global de `num_ctx=8192` para todos os candidatos Ollama:**
+     - `OLLAMA_OPCOES` ([`bench_runner_v2.py`](file:///tmp/av-s05b-revisao-antigravity/bench_runner_v2.py#L74)) é injetado indiferenciadamente para qualquer modelo Ollama informado via `--candidatos` ([`bench_runner_v2.py`](file:///tmp/av-s05b-revisao-antigravity/bench_runner_v2.py#L83-L88)), incluindo `ollama:moondream:v2`. O Moondream v2 opera originalmente com janela menor; impor 8192 tokens globalmente consome VRAM desnecessariamente e pode gerar comportamento de atenção imprevisto fora do suporte do modelo.
+  3. **Teto estático vs. Resolução da imagem:**
+     - O valor 8192 foi escolhido para acomodar os ~4156 tokens das amostras que falharam. Trata-se de uma blindagem pontual: caso surjam imagens em maior resolução, o encoder visual do Qwen voltará a exceder o teto, pois não há controle ou limite de resolução de imagem antes da codificação Base64.
+  4. **Determinismo:**
+     - Embora `temperature: 0` esteja fixado ([`bench_runner_v2.py`](file:///tmp/av-s05b-revisao-antigravity/bench_runner_v2.py#L74)), a semente (`seed`) não foi fixada no payload de `options`.
+
+---
+
+### Resumo dos Achados
+
+#### Achados BLOQUEANTES
+1. **Falsa Classificação como "Correção de Transporte":** Rotular alteração de `num_ctx` como "transporte" ([`bench_runner_v2.py`](file:///tmp/av-s05b-revisao-antigravity/bench_runner_v2.py#L4), [`bench_runner_v2.py`](file:///tmp/av-s05b-revisao-antigravity/bench_runner_v2.py#L74-L75)) em relatórios ou documentação de auditoria mascara uma alteração estrutural de inferência. É bloqueante apresentar a Rodada 2 como "execução idêntica do protocolo congelado" ou "avaliação independente".
+2. **Afirmação de Acurácia Derivada de CER:** Divulgar CER 0,077 como "92,3% de acurácia em manuscritos em português" é metodologicamente inválido e bloqueante para relatórios de conformidade. Deve constar como CER obtido na coleção restrita avaliada.
+
+#### Achados NÃO-BLOQUEANTES
+1. **Cegueira de Observabilidade HTTP:** A supressão do corpo de resposta do erro em `urllib.request.urlopen` ([`bench_runner_v2.py`](file:///tmp/av-s05b-revisao-antigravity/bench_runner_v2.py#L383-L387)) permaneceu sem correção no v2.
+2. **Contaminação da Latência de Inferência (`t_inferencia_s`):** `_carregar()` não repassa `OLLAMA_OPCOES`, transferindo o overhead de alocação de 8192 tokens para a primeira chamada de `_inferir()`.
+3. **Escopo Global do `num_ctx`:** Aplicação de 8192 tokens indistintamente a todos os modelos do Ollama, inclusive modelos não calibrados para essa extensão de contexto.

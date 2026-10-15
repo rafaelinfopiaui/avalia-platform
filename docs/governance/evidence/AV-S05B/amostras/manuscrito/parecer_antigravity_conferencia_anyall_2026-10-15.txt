@@ -1,0 +1,10 @@
+**Confirmação dos pontos:**
+
+1. **Uso de `all(...)`:** **Confirmado.** A linha 25 utiliza expressamente `all(_RE_NUMERICO.match(s) for s in segmentos)`.
+2. **Mascaramento com 1 segmento numérico:** **Confirmado.** Em `'coleta/01'`, `'amostras/42'` e `'lote/2024'`, um dos lados falha no `_RE_NUMERICO.match`, tornando o `all(...)` falso; como tampouco casam com `_RE_MIME`, o fluxo atinge `return _MASCARA_CAMINHO`.
+3. **Preservação de razão e MIME:** **Confirmado.** `'4131/4096'` satisfaz `all(...)` (ambos segmentos são numéricos) e `'application/json'` satisfaz `_RE_MIME.match(trecho)`, preservando o texto original em ambos os casos.
+4. **Ausência de regressão óbvia:** **Confirmado.** A restrição alinha perfeitamente a exceção à sua intenção real (razão matemática `num/num` ou tipo MIME), sem afetar caminhos com 3+ segmentos ou com extensão (que já caíam no mascaramento).
+
+---
+
+**Veredito:** **CONFERE.** A substituição de `any` por `all` resolve cirurgicamente o vazamento de caminhos com IDs/versões numéricas sem quebrar a preservação de diagnósticos legítimos.

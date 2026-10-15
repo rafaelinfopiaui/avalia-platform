@@ -1,0 +1,60 @@
+--- test_pre.py
++++ test_pos.py
+@@ -171,6 +171,57 @@
+     s = br.sanitizar_corpo_erro("POST http://127.0.0.1:11434/api/generate n_prompt_tokens=4131")
+     assert "127.0.0.1:11434/api/generate" in s
+     assert "n_prompt_tokens=4131" in s
++
++
++# Regressão (achado A): variantes com '_' ou prefixo colado escapavam do '\b'.
++@pytest.mark.parametrize("trecho,chave,segredo", [
++    ("proxy_authorization: secret123", "proxy_authorization", "secret123"),
++    ("x_api_key=supersecret", "x_api_key", "supersecret"),
++    ("Proxy_Authorization: Bearer abc", "Proxy_Authorization", "abc"),
++    ("proxyauthorization=segredoXYZ", "proxyauthorization", "segredoXYZ"),
++    ("xapikey: segredoXYZ", "xapikey", "segredoXYZ"),
++    ("set_cookie: sessao=segredoXYZ", "set_cookie", "segredoXYZ"),
++    ("upstream_api_key='segredoXYZ'", "api_key", "segredoXYZ"),
++    ("Proxy-Authorization: Basic segredoXYZ", "Proxy-Authorization", "segredoXYZ"),
++])
++def test_sanitizador_mascara_credenciais_com_underscore_ou_colado(trecho, chave, segredo):
++    s = br.sanitizar_corpo_erro("erro upstream; " + trecho + "\nfim")
++    assert segredo not in s, s
++    assert chave in s and "[CREDENCIAL_OMITIDA]" in s, s
++    assert s.endswith("\nfim")
++
++
++def test_sanitizador_omite_credencial_sem_separador():
++    s = br.sanitizar_corpo_erro("rejeitado: x_api_key sk-segredo123 invalida")
++    assert "segredo123" not in s
++    assert "x_api_key [TRECHO_OMITIDO_NAO_SANITIZAVEL] invalida" in s
++    # palavra comum após o nome não é tratada como segredo
++    assert br.sanitizar_corpo_erro("authorization required") == "authorization required"
++
++
++# Regressão (achado B): caminho relativo sem extensão de imagem passava sem máscara.
++@pytest.mark.parametrize("caminho", [
++    "coleta/referencias/ref.txt", "amostras/MAN-04/nota.txt",
++    "amostras/MAN-04/anotacao.txt", "coleta\\referencias\\ref.txt",
++    "coleta/fotos", "referencias/ref.txt",
++])
++def test_sanitizador_mascara_caminho_relativo(caminho):
++    s = br.sanitizar_corpo_erro("open " + caminho + ": no such file")
++    assert s == "open [CAMINHO_OMITIDO]: no such file", s
++
++
++def test_sanitizador_caminho_relativo_preserva_diagnostico():
++    texto = ("exceed_context_size_error n_prompt_tokens=4131 n_ctx=4096 razao 4131/4096 "
++             "Content-Type: application/json POST http://127.0.0.1:11434/api/generate")
++    assert br.sanitizar_corpo_erro(texto) == texto
++    corpo = {"error": dict(CORPO_CONTEXTO["error"],
++                           message="erro ao abrir amostras/MAN-04/nota.txt")}
++    obj = json.loads(br.sanitizar_corpo_erro(json.dumps(corpo)))
++    erro = obj["error"]
++    assert erro["message"] == "erro ao abrir [CAMINHO_OMITIDO]"
++    assert {k: erro[k] for k in ("code", "type", "n_prompt_tokens", "n_ctx")} == {
++        "code": 400, "type": "exceed_context_size_error",
++        "n_prompt_tokens": 4131, "n_ctx": 4096}
+ 
+ 
+ def test_sanitizador_mascara_transcricao_ecoada():
