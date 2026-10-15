@@ -10,7 +10,7 @@ O AvalIA possui uma demonstração experimental herdada, organizada em Core API,
 
 | Referência | Estado | Link |
 |---|---|---|
-| Última execução registrada | EXEC-2026-10-14-10 — AV-S08B: publicação da fatia MANUAL (transcrição manual e confirmação humana) em PR rascunho #18, sem merge. CI 3/3 checks pass (Core API, AI Engine, Frontend); SHA `92edce4013ba5688be4e4ff99fdf249a677636f3`. Progresso homologado permanece 19/70; AV-S05B parcial; BL-AV-4B-05 pendente; BL-AV-4B-10/11 permanecem parciais (falta a parte de OCR). Ver §12 abaixo para o detalhamento completo da sprint (anteriores: AV-S06B backend integrado em main b818961, DEBT-AV-014 integrado em e8b0864 via PR #17, AV-S03B, GOV-007 — na cadeia do ponteiro) | [ponteiro](snapshots/latest_execution.md) |
+| Última execução registrada | EXEC-2026-10-14-12 — demonstração do fluxo integrado com IA local REAL (ambiente descartável): foto → transcrição MANUAL → confirmação → solicitação explícita de análise → resultado real (Ollama, `qwen2.5:7b-instruct-q4_K_M`, `engine_mode=real`) → revisão humana. Correlação completa `answer_id`→`job_id`→`AIExecution`→`HumanReview` confirmada no banco; confirmação não disparou análise automaticamente (gap real de 15s até o clique explícito); origem permaneceu MANUAL; ambiente descartável (banco + storage + Chrome) removido ao final; bancos protegidos intactos. Não é OCR nem avaliação formal de qualidade pedagógica; não altera o numerador. Reconciliação do numerador (19→22) publicada na mesma rodada — ver `RECONCILIACAO-2026-10-14-01`/`DEC-AV-042`. Ver §12 para o detalhamento completo da sprint (anteriores: AV-S06B backend integrado em main b818961, DEBT-AV-014 integrado em e8b0864 via PR #17, AV-S03B, GOV-007 — na cadeia do ponteiro) | [ponteiro](snapshots/latest_execution.md) |
 | Configuração de orquestração de agentes (não funcional) | `GOV-007` — distribuição de trabalho entre Claude Code (executor principal), Antigravity (segundo executor/revisor cruzado) e Codex (auditorias pontuais); ver `DEC-AV-031`; documentação publicada em PR draft #12 (https://github.com/rafaelinfopiaui/avalia-platform/pull/12), sem merge | [documentação de evidência](evidence/GOV-007-distribuicao-clis/mecanismo_cobranca_hermes_claude_code.md) |
 | PR #2 (`docs/av-s02-encerramento-planos-operacionais`) | **fechado sem merge**; conteúdo necessário preservado em `main` via PR #4 | [snapshot de reconciliação](snapshots/snapshot_RECONCILIACAO-2026-09-29-02_desvio-processo-2026-09-24.md) |
 | PR #4 (`docs/av-s03-encerramento-integracao`) | **integrado em `main`** via merge commit `a5974b1`, CI pós-merge verde | https://github.com/rafaelinfopiaui/avalia-platform/pull/4 |
@@ -51,7 +51,7 @@ O AvalIA possui uma demonstração experimental herdada, organizada em Core API,
 
 **Trilha proposta "Operação de uma turma":** 8 etapas + 1 sub-etapa (4B), 3 marcos, lidos em 5 fases de execução desde GOV-004 (§11 da trilha), 19 sprints propostas (AV-S01 a AV-S13 e AV-S05B a AV-S10B). `AV-S01`, `AV-S02`, `AV-S03` e `AV-S04` foram homologadas e integradas a `main`; `AV-S05B` parcialmente executada (investigação experimental, texto impresso medido, manuscrito pendente); `AV-S05` permanece apenas planejada, sem nenhuma evidência de execução localizada nas fontes inspecionadas (ver GOV-006); as demais 14 sprints permanecem não autorizadas.
 
-Progresso funcional desta trilha: **19 de 70 itens homologados e integrados** — o denominador é o backlog canônico em [`backlog/backlog_tecnico_avalia.md`](backlog/backlog_tecnico_avalia.md). Numerador nominal (cada item conta uma vez, homologação + integração comprovadas, sem inferir uma da outra):
+Progresso funcional desta trilha: **22 de 70 itens homologados e integrados** — o denominador é o backlog canônico em [`backlog/backlog_tecnico_avalia.md`](backlog/backlog_tecnico_avalia.md). Numerador nominal (cada item conta uma vez, homologação + integração comprovadas, sem inferir uma da outra):
 
 | # | ID | Homologação | Integração | Observação |
 |---|---|---|---|---|
@@ -74,8 +74,13 @@ Progresso funcional desta trilha: **19 de 70 itens homologados e integrados** �
 | 17 | `BL-AV-3-02` | Código: `DEC-AV-029` (AC-03/04/05/06 cumpridos). Migração operacional: Rafael (2026-10-02) | PR #9 (`main`, merge `9ab6e43`); migração `a9f4c2e71b06` aplicada | Idem linha 16 |
 | 18 | `BL-AV-3-03` | Código: `DEC-AV-029` (AC-07/08 cumpridos). Migração operacional: Rafael (2026-10-02) | PR #9 (`main`, merge `9ab6e43`); migração `a9f4c2e71b06` aplicada | Idem linha 16 |
 | 19 | `BL-AV-3-04` | Código: `DEC-AV-029` (AC-09 cumprido — contrato OpenAPI atualizado, não depende de migração) | PR #9 (`main`, merge `9ab6e43`) | Idem linha 16, exceto que este item não depende de migração operacional — já estava tecnicamente completo desde a integração do PR #9 |
+| 20 | `BL-AV-4B-03` | `DEC-AV-036` (2026-10-14, backend/API) + reconciliação `DEC-AV-042`/`RECONCILIACAO-2026-10-14-01` (2026-10-14, interface ponta a ponta) | PR #15 (`main`, merge `b818961`) + PR #18 (`main`, merge `efaa337`, interface) | **Incluído no numerador nesta rodada** — a dependência que bloqueava (`DEC-AV-036`: interface ponta a ponta ausente) está satisfeita desde a integração do PR #18; critério canônico avaliado pelo texto literal, não pela sprint originalmente mapeada |
+| 21 | `BL-AV-4B-04` | `DEC-AV-036` (2026-10-14) + reconciliação `DEC-AV-042` (2026-10-14) | PR #15 (`main`, merge `b818961`) + PR #18 (`main`, merge `efaa337`) | Idem linha 20 |
+| 22 | `BL-AV-4B-14` | Vínculo: `DEC-AV-036`/`038` (AV-S06B). Bloqueio de correção: `DEC-AV-041` (AV-S08B). Reconciliação: `DEC-AV-042`/`RECONCILIACAO-2026-10-14-01` (2026-10-14) | PR #15/#16 (`main`, vínculo) + PR #18 (`main`, merge `efaa337`, bloqueio) | **Incluído no numerador nesta rodada** — critério canônico (vínculo + bloqueio de correção antes da confirmação) integralmente atendido pela combinação AV-S06B + AV-S08B, antecipando o mapeamento de sprint original (`AV-S09B`), sem alterar o critério nem contar duas vezes |
 
 **Nota sobre `BL-AV-3-01` a `04` (correção desta rodada, 2026-10-02):** a rodada anterior desta reconciliação (nota abaixo) excluiu esses 4 itens do numerador, tratando a aplicação operacional da migração `a9f4c2e71b06` como "fora de escopo da rodada de P4". Rafael corrigiu esse raciocínio: a entrega funcional de AV-S04 já estava homologada por `DEC-AV-029` e integrada via PR #9 (`main`, merge `9ab6e43`, confirmado `MERGED` por `gh pr view 9` nesta sessão, não presumido); "fora do escopo desta rodada" não é motivo para excluir uma entrega já homologada do progresso global, e a migração `a9f4c2e71b06` foi de fato aplicada operacionalmente como parte da mesma cadeia de P4 (ela depende de `c4a8b2d91e37`, aplicada na mesma transação de `alembic upgrade head`). Os 4 itens são incluídos agora.
+
+**Nota sobre `BL-AV-4B-03`/`04`/`14` (reconciliação 2026-10-14, `DEC-AV-042`/`RECONCILIACAO-2026-10-14-01`):** por instrução explícita de Rafael, a reavaliação foi feita pelo critério canônico, não pelo número da sprint. `BL-AV-4B-03`/`04` tinham a homologação de backend concedida (`DEC-AV-036`), mas ficavam fora do numerador por depender de uma interface ponta a ponta que não existia; essa interface passou a existir e a estar integrada com o PR #18 (AV-S08B). `BL-AV-4B-14` estava mapeado para a sprint `AV-S09B`, mas seu critério (vínculo + bloqueio de correção antes da confirmação) foi integralmente satisfeito antes disso, pela combinação de AV-S06B e AV-S08B — o mapeamento de sprint é planejamento, não critério de aceite. Nenhum dos três foi contado antes; nenhum critério foi alterado para viabilizar a inclusão. Em contraste, `BL-AV-4B-10`/`11`/`13`/`15` permanecem fora do numerador porque seus critérios literais (texto **extraído**, fallback após falha de **extração**, elo de **execução OCR**) dependem de capacidades (`BL-AV-4B-07`/`08`, OCR) que ainda não existem — isso não é uma questão de sprint, é ausência real do requisito.
 
 **Indicador separado de itens parciais (fora do numerador, sem ponderação percentual):**
 
@@ -83,12 +88,18 @@ Progresso funcional desta trilha: **19 de 70 itens homologados e integrados** �
 |---|---|
 | `BL-AV-4B-01` | levantamento documental concluído (texto impresso e manuscrito); não homologado como decisão arquitetural |
 | `BL-AV-4B-20` | benchmark parcialmente executado (texto impresso medido; manuscrito pendente, sem evidência de coleta localizada) |
+| `BL-AV-4B-10` | tela de conferência entregue como imagem + rascunho MANUAL (PR #18); critério fala em "texto extraído" — falta extração automática (OCR) |
+| `BL-AV-4B-11` | edição/confirmação manual entregue (PR #18); sem OCR não existe "bruto extraído" distinto do digitado |
+| `BL-AV-4B-13` | transcrição manual entregue, homologada e integrada (PR #18); acionamento como fallback após falha de extração NÃO comprovado — extração/OCR ainda não existe |
+| `BL-AV-4B-15` | imagem e transcrição confirmada→correção→revisão entregues; falta o elo de execução OCR |
 
 Nenhum outro percentual de conclusão é publicado. Maturidade técnica: **não medida**; não existe rubrica AvalIA aprovada.
 
 *(Nota de reconciliação, 2026-09-30, auditoria GOV-006, segunda rodada: a contagem apresentada na primeira rodada desta auditoria (15/70) continha um erro aritmético — o numerador anterior à AV-S03 já havia sido corrigido de 7 para 9 em 2026-09-28 (ver §2 da GOV-006 sobre a origem dessa divergência entre checkouts), não 10; 9 + 5 itens da AV-S03 = **14**, não 15. Corrigido nesta rodada com a lista nominal acima, excluindo explicitamente `BL-AV-1-10` do numerador por seu débito operacional aberto. Base usada: worktree `avalia-plataform-worktrees/av-s03-work`, `main` HEAD `a5974b1`.)*
 
 *(Nota de reconciliação, 2026-10-02: `BL-AV-1-10` movido do indicador de itens parciais para o numerador — 14→15 — após a execução real e validada de P4 contra `avalia_dev` (autorização explícita de Rafael, execução restrita ao banco local). O número "15/70" desta nota coincide numericamente com o "15/70" citado como erro aritmético na nota de 2026-09-30, mas tem causa e composição inteiramente diferentes — não é uma repetição do erro anterior, é um novo total correto após a resolução genuína de `BL-AV-1-10` nesta data. IDs explicitamente listados acima; nenhum numerador presumido.)*
+
+*(Nota de reconciliação, 2026-10-14, `DEC-AV-042`/`RECONCILIACAO-2026-10-14-01`: 19→22, após avaliar `BL-AV-4B-03`/`04`/`14` pelo critério canônico em vez de pela sprint originalmente mapeada — ver linhas 20-22 da tabela acima e a nota correspondente. `BL-AV-4B-10`/`11`/`13`/`15` movidos para este indicador de parciais, com a correção explícita de que `BL-AV-4B-13` havia sido descrito como "coberto integralmente" em `DEC-AV-041` e nos snapshots EXEC-2026-10-14-09/10/11 — texto corrigido aqui, sem reabrir a homologação/integração do PR #18. IDs explicitamente listados; nenhum numerador presumido.)*
 
 ## 5. Entregas desta execução
 
@@ -357,6 +368,16 @@ rascunho, ainda não homologada. Escopo: parte MANUAL (sem OCR) de
 `BL-AV-4B-13`/`14` (cobertos integralmente) e `BL-AV-4B-10`/`11`/`15`
 (cobertos parcialmente — falta a parte de OCR). Resumo:
 
+> **Correção de registro (2026-10-14, `DEC-AV-042`/`RECONCILIACAO-2026-10-14-01`):**
+> a frase acima ("`BL-AV-4B-13`/`14` cobertos integralmente") estava
+> imprecisa e é preservada aqui apenas como registro histórico do texto
+> publicado nesta rodada; ver §4 (numerador) e a nota de reconciliação da
+> tabela nominal acima para o estado corrigido: `BL-AV-4B-14` foi de fato
+> comprovado integralmente (pela combinação com AV-S06B) e passou ao
+> numerador; `BL-AV-4B-13` permanece PARCIAL — a transcrição manual está
+> entregue, homologada e integrada, mas o acionamento como fallback após
+> falha de extração não foi comprovado (a extração/OCR ainda não existe).
+
 - decisões de produto aprovadas em `DEC-AV-040`: rascunho único atual
   (DP-1), confirmação definitiva nesta fatia sem reabertura (DP-2),
   idempotência/conflito sem disparo automático de correção (DP-3), e
@@ -395,21 +416,25 @@ rascunho, ainda não homologada. Escopo: parte MANUAL (sem OCR) de
 - NÃO entregue nesta fatia: OCR, extração automática, reabertura
   pós-confirmação, múltiplos rascunhos concorrentes selecionáveis, qualquer
   ativação operacional;
-- Git: **publicado em PR rascunho, sem merge** — branch
-  `feat/av-s08b-transcricao-manual`, 4 commits organizados por finalidade
-  (backend, testes, frontend, governança), SHA
-  `92edce4013ba5688be4e4ff99fdf249a677636f3`, push confirmado por `git
-  fetch` independente, PR [#18](https://github.com/rafaelinfopiaui/avalia-platform/pull/18)
-  aberto contra `main` (`isDraft=true`, `mergeable=MERGEABLE`,
-  `mergeStateStatus=CLEAN`), **CI 3/3 checks pass** (run `38581948805`,
-  confirmado via API de check-runs, não apenas pela saída do comando);
-- progresso homologado: permanece **19/70** (esta publicação não altera o
-  numerador; homologação/merge pendente de decisão de Rafael);
+- Git: **publicado em PR rascunho, homologado e integrado** por merge
+  commit `efaa337c04070f59e01d217010f17a92b89258ca` (`DEC-AV-041`), branch
+  `feat/av-s08b-transcricao-manual` preservada, CI pós-merge 3/3 pass,
+  checkout principal atualizado para `main` por fast-forward
+  (histórico completo em `snapshot_EXEC-2026-10-14-11`);
+- progresso homologado: **22/70** após reconciliação por critério canônico
+  (`DEC-AV-042`/`RECONCILIACAO-2026-10-14-01`, 2026-10-14) — `BL-AV-4B-14`
+  (bloqueio de correção, entregue nesta fatia) entrou no numerador junto
+  com `BL-AV-4B-03`/`04` (AV-S06B, reavaliados na mesma rodada);
+  `BL-AV-4B-10`/`11`/`13`/`15` permanecem PARCIAIS, incluindo a correção
+  explícita de que `BL-AV-4B-13` NÃO está coberto integralmente (ver nota
+  acima);
 - evidência: `sprint_AV-S08B_transcricao_manual_confirmacao_humana.md`;
   `evidence/AV-S08B/` (plano técnico, 2 pareceres de revisão do plano,
   prompts de execução, 2 pareceres de revisão da implementação/delta);
   [`snapshot_EXEC-2026-10-14-07`](snapshots/snapshot_EXEC-2026-10-14-07_abertura_av-s08b.md),
   [`snapshot_EXEC-2026-10-14-08`](snapshots/snapshot_EXEC-2026-10-14-08_encerramento_av-s08b.md),
-  [`snapshot_EXEC-2026-10-14-09`](snapshots/snapshot_EXEC-2026-10-14-09_conclusao_escopo_av-s08b.md)
-  e [`snapshot_EXEC-2026-10-14-10`](snapshots/snapshot_EXEC-2026-10-14-10_publicacao_av-s08b.md)
-  (detalhamento completo da publicação).
+  [`snapshot_EXEC-2026-10-14-09`](snapshots/snapshot_EXEC-2026-10-14-09_conclusao_escopo_av-s08b.md),
+  [`snapshot_EXEC-2026-10-14-10`](snapshots/snapshot_EXEC-2026-10-14-10_publicacao_av-s08b.md),
+  [`snapshot_EXEC-2026-10-14-11`](snapshots/snapshot_EXEC-2026-10-14-11_homologacao_integracao_av-s08b.md)
+  e [`snapshot_RECONCILIACAO-2026-10-14-01`](snapshots/snapshot_RECONCILIACAO-2026-10-14-01_numerador-por-criterio.md)
+  (reconciliação completa do numerador).
