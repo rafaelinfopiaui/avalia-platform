@@ -316,6 +316,10 @@ class AnswerImage(Base):
     sha256_hash: Mapped[str] = mapped_column(String, nullable=False)
     uploaded_by_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Exclusão lógica reversível (BL-AV-4B-05, D1): o arquivo e o registro são
+    # mantidos; NULL = imagem ativa. Sem remoção física nesta fatia (D1/D3).
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_by_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True)
 
 
 class CorrectionJob(Base):

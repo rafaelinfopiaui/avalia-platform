@@ -19,7 +19,7 @@ import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
-from threading import Barrier
+from threading import Barrier, Lock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -34,6 +34,7 @@ from app.config import get_settings
 from app.db import Base
 from app.models import (
     Answer,
+    AnswerImage,
     AnswerSource,
     Assessment,
     AssessmentStatus,
@@ -111,6 +112,20 @@ def _image_answer(db_session, question_id: str, student: str = "Aluno fictício"
         transcription_status=TranscriptionStatus.AGUARDANDO_TRANSCRICAO,
     )
     db_session.add(answer)
+    db_session.flush()
+    # BL-AV-4B-05 (ACD-09): confirmar exige ao menos uma imagem ativa. Só o
+    # registro é necessário aqui; nenhum teste deste módulo baixa o arquivo.
+    db_session.add(
+        AnswerImage(
+            answer_id=answer.id,
+            storage_filename="ficticio.png",
+            original_filename="ficticio.png",
+            content_type="image/png",
+            size_bytes=1,
+            sha256_hash="0" * 64,
+            uploaded_by_id=db_session.get(Assessment, db_session.get(Question, question_id).assessment_id).owner_id,
+        )
+    )
     db_session.commit()
     return answer
 
@@ -748,18 +763,37 @@ def pg_setup(pg_client):
     return client, PgSessionLocal, login.json()["access_token"], answer_id
 
 
+def _is_answer_write(statement: str) -> bool:
+    sql = statement.strip().upper()
+    if sql.startswith("UPDATE ANSWERS"):
+        return True
+    # Lock pessimista da confirmação (BL-AV-4B-05, R2): SELECT ... FROM answers ... FOR UPDATE.
+    return sql.startswith("SELECT") and "FROM ANSWERS" in sql and sql.endswith("FOR UPDATE")
+
+
 def _synchronize_answer_updates(engine, parties: int) -> Barrier:
-    """Segura cada UPDATE de answers até todas as transações chegarem nele.
+    """Segura a primeira escrita de cada transação em answers até todas chegarem.
 
     Todas já leram a mesma versão e passaram na checagem prévia; a disputa é
-    decidida só pelo UPDATE condicional na transação do PostgreSQL.
+    decidida só na transação do PostgreSQL (lock da linha + UPDATE condicional).
+    A escrita pode ser o UPDATE (rascunho) ou o SELECT ... FOR UPDATE que a
+    confirmação faz antes do UPDATE; por isso só as `parties` primeiras escritas
+    esperam — as seguintes, já serializadas pelo lock, não podem esperar por
+    quem está bloqueado nele.
     """
     barrier = Barrier(parties)
+    remaining = [parties]
+    guard = Lock()
 
     @event.listens_for(engine, "before_cursor_execute")
     def _wait(conn, cursor, statement, parameters, context, executemany):
-        if statement.lstrip().upper().startswith("UPDATE ANSWERS"):
-            barrier.wait(timeout=15)
+        if not _is_answer_write(statement):
+            return
+        with guard:
+            if remaining[0] == 0:
+                return
+            remaining[0] -= 1
+        barrier.wait(timeout=15)
 
     return barrier
 

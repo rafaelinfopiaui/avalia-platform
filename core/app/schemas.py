@@ -189,7 +189,20 @@ class AnswerImageOut(BaseModel):
         from_attributes = True
 
 
+class DeletedAnswerImageOut(BaseModel):
+    # Projeção mínima de imagem excluída logicamente (BL-AV-4B-05, ACD-15/R4):
+    # sem original_filename/sha256_hash e sem download; só o necessário para
+    # identificar e restaurar.
+    id: str
+    deleted_at: datetime
+    deleted_by_id: str
+
+    class Config:
+        from_attributes = True
+
+
 class AnswerWithImagesOut(AnswerOut):
+    # Só imagens ativas (deleted_at IS NULL); excluídas têm rota própria.
     images: list[AnswerImageOut]
 
 
