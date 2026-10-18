@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Alert } from '../components/Alert'
 import { Spinner } from '../components/Spinner'
@@ -544,7 +544,32 @@ export function ImageAnswerPage() {
   const [listLoading, setListLoading] = useState(false)
   const [listLoadError, setListLoadError] = useState('')
   const listRequest = useRef(0)
-  const fileInput = useRef<HTMLInputElement>(null)
+  // Dois caminhos explícitos de entrada (câmera e galeria) para o MESMO `file`:
+  // em alguns Android o input sem `capture` abre só a galeria.
+  const cameraInput = useRef<HTMLInputElement>(null)
+  const galleryInput = useRef<HTMLInputElement>(null)
+
+  // Só define o arquivo; o envio continua exclusivamente pelo botão do formulário.
+  // Cancelar (lista vazia) mantém o arquivo anterior, sem erro. Limpar o valor
+  // permite capturar/escolher de novo, inclusive o mesmo arquivo.
+  const pickFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const picked = event.target.files?.[0]
+    event.target.value = ''
+    if (!picked) return
+    setFile(picked)
+    setError('')
+  }
+
+  // Ação local: descarta a seleção antes do envio, sem requisição ao backend.
+  // Limpa os dois inputs para permitir escolher de novo o mesmo arquivo e só
+  // apaga o erro se ele for o de ausência de arquivo.
+  const removeFile = () => {
+    const erroDoArquivoRemovido = validateFile(file)
+    setFile(null)
+    if (cameraInput.current) cameraInput.current.value = ''
+    if (galleryInput.current) galleryInput.current.value = ''
+    setError(previous => (previous === erroDoArquivoRemovido ? '' : previous))
+  }
 
   const load = () => {
     setLoading(true)
@@ -604,7 +629,8 @@ export function ImageAnswerPage() {
       setSent(previous => [answer, ...previous])
       setFile(null)
       setStudent('')
-      if (fileInput.current) fileInput.current.value = ''
+      if (cameraInput.current) cameraInput.current.value = ''
+      if (galleryInput.current) galleryInput.current.value = ''
     } catch (e) {
       setError(humanError(e, 'enviar'))
     } finally {
@@ -652,18 +678,44 @@ export function ImageAnswerPage() {
               Identificação fictícia do aluno
               <input value={student} onChange={e => setStudent(e.target.value)} disabled={busy || !question} required placeholder="Ex.: Aluno A" />
             </label>
-            <label>
-              Foto da resposta (JPEG ou PNG, até 10 MiB)
+            <div>
+              <span>Foto da resposta (JPEG ou PNG, até 10 MiB)</span>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+                <button type="button" className="button button--secondary" onClick={() => cameraInput.current?.click()} disabled={busy || !question}>
+                  Tirar foto
+                </button>
+                <button type="button" className="button button--secondary" onClick={() => galleryInput.current?.click()} disabled={busy || !question}>
+                  Escolher da galeria
+                </button>
+              </div>
+              {/* Inputs ocultos: sem `required` (o navegador não consegue focar um
+                  campo oculto); a ausência de arquivo é tratada por validateFile. */}
               <input
-                ref={fileInput}
+                ref={cameraInput}
                 type="file"
                 accept="image/jpeg,image/png"
-                onChange={e => { setFile(e.target.files?.[0] || null); setError('') }}
+                capture="environment"
+                onChange={pickFile}
                 disabled={busy || !question}
-                required
+                style={{ display: 'none' }}
               />
-            </label>
-            {file && <small>{file.name} · {formatSize(file.size)}</small>}
+              <input
+                ref={galleryInput}
+                type="file"
+                accept="image/jpeg,image/png"
+                onChange={pickFile}
+                disabled={busy || !question}
+                style={{ display: 'none' }}
+              />
+            </div>
+            {file && (
+              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <small>{file.name} · {formatSize(file.size)}</small>
+                <button type="button" className="button button--secondary" onClick={removeFile} disabled={busy}>
+                  Remover foto
+                </button>
+              </div>
+            )}
             <button className="button button--primary" disabled={busy || !question}>
               {busy ? 'Enviando imagem…' : 'Enviar foto da resposta'}
             </button>
