@@ -19,7 +19,14 @@ from app.logging_config import (
     setup_logging,
 )
 from app.ollama_client import OllamaClient
-from app.schemas import AnalyzeRequest, AnalyzeResponse, HealthResponse
+from app.schemas import (
+    AnalyzeRequest,
+    AnalyzeResponse,
+    ExtractRequest,
+    ExtractResponse,
+    HealthResponse,
+)
+from app.vision_client import VisionClient
 
 # Configura logs estruturados
 setup_logging(settings.log_level)
@@ -28,6 +35,7 @@ logger = logging.getLogger(__name__)
 # Instâncias globais de clientes
 ollama_client = OllamaClient()
 cascade = DecisionCascade(ollama_client=ollama_client)
+vision_client = VisionClient()
 
 
 @asynccontextmanager
@@ -113,14 +121,77 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     )
 
 
+# Campos cujo valor NUNCA pode ser ecoado em erro de validação nem em log
+# (AV-S07B, lacuna B): a imagem em base64 é dado do aluno e pode ser enorme.
+_SENSITIVE_INPUT_FIELDS = frozenset({"image_base64"})
+# Qualquer outra string de entrada acima deste tamanho vira placeholder
+# (ex.: texto integral do aluno em /v1/analyze, RNF-07).
+_MAX_ECHOED_INPUT_CHARS = 64
+
+
+def _omitted(value: object) -> str:
+    size = len(value) if isinstance(value, (str, bytes, bytearray)) else len(str(value))
+    return f"<omitido:{size} chars>"
+
+
+def _mask_input(value: object, key: object = None) -> object:
+    """Mascara recursivamente valores sensíveis (por nome) ou longos."""
+    if key in _SENSITIVE_INPUT_FIELDS:
+        return _omitted(value)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, dict):
+        return {k: _mask_input(v, k) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_mask_input(item) for item in value]
+    text = value if isinstance(value, str) else str(value)
+    return text if len(text) <= _MAX_ECHOED_INPUT_CHARS else _omitted(text)
+
+
+def _sanitize_validation_errors(errors: list) -> list:
+    """
+    Preserva loc/type/msg (úteis ao cliente) e mascara input/ctx: o `input`
+    do Pydantic pode trazer o base64 da imagem ou o corpo inteiro da requisição.
+    """
+    sanitized = []
+    for error in errors:
+        loc = list(error.get("loc", ()))
+        item = {"type": error.get("type"), "loc": loc, "msg": error.get("msg")}
+        sensitive = any(part in _SENSITIVE_INPUT_FIELDS for part in loc)
+        if "input" in error:
+            item["input"] = _omitted(error["input"]) if sensitive else _mask_input(error["input"])
+        ctx = error.get("ctx")
+        if isinstance(ctx, dict) and ctx:
+            if sensitive:
+                # Só limites numéricos (ex.: max_length); nada textual do campo sensível.
+                ctx = {k: v for k, v in ctx.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
+            else:
+                ctx = {k: _mask_input(v) for k, v in ctx.items()}
+            if ctx:
+                item["ctx"] = ctx
+        sanitized.append(item)
+    return sanitized
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Handler para erros de validação de payload."""
+    """Handler para erros de validação de payload (input/ctx sempre sanitizados)."""
+    details = _sanitize_validation_errors(exc.errors())
+    # Log só com localização/tipo do erro: nunca o valor recebido.
+    logger.warning(
+        "Erro de validação nos dados de entrada",
+        extra={
+            "path": request.url.path,
+            "error_count": len(details),
+            "error_locs": [".".join(str(part) for part in item["loc"]) for item in details],
+            "error_types": [item["type"] for item in details],
+        },
+    )
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
             "error": "Erro de validação nos dados de entrada",
-            "details": exc.errors(),
+            "details": details,
             "correlation_id": get_correlation_id(),
         },
         headers={"X-Correlation-ID": get_correlation_id()},
@@ -143,6 +214,40 @@ async def analyze_answer(payload: AnalyzeRequest) -> AnalyzeResponse:
     Atributos pessoais de estudantes são ignorados se fornecidos (RN-010).
     """
     return await cascade.execute(payload)
+
+
+@app.post(
+    "/v1/extract",
+    response_model=ExtractResponse,
+    summary="Extrair texto de imagem de resposta (experimental)",
+    description=(
+        "Transcreve literalmente o texto visível na imagem com o modelo de visão local. "
+        "Não corrige nem avalia. Saída é texto puro; vazio/falha nunca trazem texto fabricado."
+    ),
+)
+async def extract_text(payload: ExtractRequest) -> ExtractResponse:
+    """
+    Endpoint de extração OCR/visão (AV-S07B, DEC-AV-046).
+    A imagem é dado não confiável: o motor não recebe ferramentas nem segredos
+    e o texto devolvido nunca é interpretado como instrução.
+    """
+    if settings.ai_engine_mode == "simulated":
+        # Nunca fabrica transcrição: o modo simulado não tem extração.
+        return ExtractResponse(
+            text="",
+            model=settings.ai_vision_model_name,
+            status="falha",
+            duration_ms=0,
+            error_detail="Extração indisponível em modo simulado.",
+        )
+    result = await vision_client.extract(payload.image_base64)
+    return ExtractResponse(
+        text=result.text if result.status == "ok" else "",
+        model=result.model,
+        status=result.status,
+        duration_ms=result.duration_ms,
+        error_detail=result.error_detail,
+    )
 
 
 @app.get(

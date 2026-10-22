@@ -206,6 +206,54 @@ class AnswerWithImagesOut(AnswerOut):
     images: list[AnswerImageOut]
 
 
+class TranscriptionExtractionOut(BaseModel):
+    # Extração OCR/visão experimental (AV-S07B): o texto é dado não confiável,
+    # sempre exibido como texto puro e sujeito à conferência humana.
+    extraction_id: str
+    status: str  # ok | vazio | falha
+    extracted_text: str
+    draft_updated: bool
+    draft_origin: Optional[str] = None  # "OCR" quando o rascunho foi preenchido
+    answer_image_id: str
+    transcription_version: int
+    message: str
+
+
+class LatestTranscriptionExtractionOut(BaseModel):
+    # Última extração persistida (somente leitura). raw_text é o texto BRUTO do
+    # motor — distinto do rascunho editável e da transcrição confirmada.
+    extraction_id: str
+    status: str  # processando | ok | vazio | falha
+    created_at: datetime
+    model: str
+    image_id: str
+    has_raw_output: bool
+    raw_text: str
+    raw_text_truncated: bool
+    error_detail: Optional[str] = None
+
+
+class TranscriptionExtractionStateOut(BaseModel):
+    # Retomada após reload (AV-S07B, lacuna A). Três camadas distintas:
+    # (a) latest_extraction.raw_text = saída bruta do OCR;
+    # (b) rascunho humano (manual_transcription_draft) + draft_origin;
+    # (c) confirmada (text_state == "CONFIRMADA"; o texto é answer.text).
+    answer_id: str
+    transcription_status: str
+    transcription_version: int
+    text_state: str  # VAZIO | RASCUNHO | CONFIRMADA
+    # Origem derivada por PROVENIÊNCIA (versão), nunca por coincidência de texto:
+    # OCR = a versão atual do rascunho é a que uma extração produziu (não editada
+    # desde então); OCR_EDITADO = uma extração preencheu o rascunho e o humano
+    # editou depois (versão avançou); MANUAL = rascunho sem extração que o tenha
+    # preenchido na versão atual (texto igual a um raw_output histórico NÃO conta).
+    draft_origin: Optional[str] = None
+    draft_source_extraction_id: Optional[str] = None
+    # Saída bruta da extração que originou o rascunho (para a UI comparar).
+    draft_source_raw_text: Optional[str] = None
+    latest_extraction: Optional[LatestTranscriptionExtractionOut] = None
+
+
 # ---- Correction / job ----
 class CriterionScoreOut(BaseModel):
     criterion_id: str

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from decimal import ROUND_HALF_EVEN, Decimal
 
@@ -19,6 +20,8 @@ from app.models import (
     RubricCriterion,
     TranscriptionStatus,
 )
+from app.services import inference_gate as inference_gate_module
+from app.services.inference_gate import InferenceBusyError
 
 settings = get_settings()
 
@@ -87,10 +90,35 @@ async def run_correction_job(job_id: str, session_factory) -> None:
         )
 
         try:
-            async with httpx.AsyncClient(timeout=90.0) as client:
-                resp = await client.post(f"{settings.ai_engine_url}/v1/analyze", json=payload)
+            # Gate global de inferência (AV-S07B, lacuna C): espera a extração
+            # por visão em curso (se houver) até CORRECTION_WAIT_SECONDS; depois
+            # o job vai para FALHA com mensagem clara. Liberado sempre ao sair.
+            gate = inference_gate_module.inference_gate
+            async with gate.hold("análise textual", inference_gate_module.CORRECTION_WAIT_SECONDS):
+                async with httpx.AsyncClient(timeout=90.0) as client:
+                    resp = await client.post(f"{settings.ai_engine_url}/v1/analyze", json=payload)
             resp.raise_for_status()
             result = resp.json()
+        except InferenceBusyError as busy:
+            job.status = JobStatus.FALHA
+            job.error_message = (
+                "O motor de IA local permaneceu ocupado com outra inferência (ex.: extração de texto) "
+                f"por {busy.waited_seconds:.0f}s; a análise não foi iniciada. Tente novamente."
+            )
+            db.commit()
+            log_event(
+                "correction_job_failed_inference_busy", correlation_id, job_id=job_id,
+                busy_with=busy.busy_with, waited_seconds=busy.waited_seconds,
+            )
+            return
+        except asyncio.CancelledError:
+            # ALTA-8: cancelamento não pode deixar o job preso em estado não
+            # final. Marca FALHA (CANCELADO) e re-levanta o cancelamento.
+            job.status = JobStatus.FALHA
+            job.error_message = "Análise cancelada antes da conclusão."
+            db.commit()
+            log_event("correction_job_cancelled", correlation_id, job_id=job_id)
+            raise
         except Exception as exc:  # noqa: BLE001 - queremos capturar qualquer falha de rede/timeout
             job.status = JobStatus.FALHA
             job.error_message = (

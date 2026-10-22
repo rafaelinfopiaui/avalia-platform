@@ -9,6 +9,8 @@ import {
   createImageAnswer,
   deleteAnswerImage,
   downloadAnswerImage,
+  extractTranscription,
+  getTranscriptionExtractionState,
   listAnswerImages,
   listAssessments,
   listDeletedAnswerImages,
@@ -17,6 +19,7 @@ import {
   restoreAnswerImage,
   saveManualTranscriptionDraft,
 } from '../services/api'
+import type { LatestTranscriptionExtraction, TranscriptionExtraction } from '../services/api'
 import { writeWorkflow } from '../services/workflow'
 import type { AnswerImage, AnswerWithImages, Assessment, DeletedAnswerImage } from '../types'
 
@@ -27,6 +30,13 @@ import type { AnswerImage, AnswerWithImages, Assessment, DeletedAnswerImage } fr
 // Transcrição manual (AV-S08B, DEC-AV-040): o professor digita o texto, salva
 // rascunhos e confirma explicitamente; a confirmação é definitiva e não inicia
 // a correção.
+// Extração OCR/visão EXPERIMENTAL (AV-S07B): ação opcional que sugere um texto
+// a partir da imagem. O backend só preenche o rascunho se ele estiver vazio; o
+// texto extraído é dado não confiável, exibido sempre como texto puro, editável
+// e sujeito à conferência humana. A confirmação continua manual e explícita.
+// Retomada (lacuna A): ao montar, a tela LÊ a última extração e a origem do
+// rascunho (GET .../transcription/extractions). A recuperação só exibe/rotula:
+// nunca altera o texto em edição, o rascunho salvo nem a transcrição confirmada.
 // Após a confirmação, a análise da IA é solicitada por ação explícita, a partir
 // da MESMA resposta (POST /answers/{id}/corrections), usando o texto confirmado.
 // Exclusão lógica reversível (BL-AV-4B-05): enquanto a resposta aguarda
@@ -44,6 +54,9 @@ const CONFIRMATION_WARNING =
   'Atenção: a confirmação é definitiva nesta versão. Depois de confirmar, a transcrição não poderá mais ser editada. Confira a imagem e o texto lado a lado antes de continuar.'
 const IMAGES_LOCKED_NOTICE =
   'A transcrição desta resposta já foi confirmada: as imagens não podem mais ser excluídas nem restauradas.'
+const EXTRACTION_NOTICE =
+  'Extração experimental: o texto reconhecido pode conter erros. Confira com a imagem e corrija antes de confirmar.'
+const MANUAL_FALLBACK_HINT = 'Você pode digitar a transcrição manualmente.'
 const NO_ACTIVE_IMAGE_NOTICE =
   'Esta resposta não tem nenhuma imagem ativa. Restaure uma imagem excluída antes de confirmar a transcrição.'
 
@@ -102,6 +115,29 @@ function transcriptionError(error: unknown, action: 'salvar' | 'confirmar'): str
     case 'ANSWER_TEXT_REQUIRED': return 'Digite o texto da transcrição antes de confirmar.'
     case 'ANSWER_NOT_IMAGE_SOURCE': return 'Esta resposta não foi enviada por foto; não há transcrição manual a fazer.'
     case 'ANSWER_HAS_NO_ACTIVE_IMAGE': return NO_ACTIVE_IMAGE_NOTICE
+  }
+  switch (error.status) {
+    case 0: return error.message
+    case 401: return 'Sua sessão expirou. Entre novamente para continuar a transcrição.'
+    case 403: return 'Você não tem permissão para alterar respostas desta avaliação. Verifique se você é o responsável pela avaliação e tem vínculo ativo com a turma.'
+    case 404: return 'Resposta não encontrada. Atualize a página e selecione novamente.'
+    default: return fallback
+  }
+}
+
+// Mensagens de erro da extração experimental: nunca apresentadas como sucesso.
+function extractionError(error: unknown): string {
+  const fallback = 'A extração de texto falhou.'
+  if (!(error instanceof ApiError)) return fallback
+  switch (error.body.code) {
+    case 'EXTRACTION_IN_PROGRESS': return 'Já existe uma extração em andamento para esta resposta. Aguarde alguns instantes antes de tentar de novo.'
+    case 'ANSWER_HAS_NO_ACTIVE_IMAGE': return 'Esta resposta não tem nenhuma imagem ativa para extrair texto. Restaure ou envie uma imagem.'
+    case 'ANSWER_IMAGE_FILE_MISSING': return 'O arquivo da imagem ativa não está disponível no armazenamento; nenhuma extração foi feita. Informe o administrador.'
+    case 'MULTIPLE_ACTIVE_IMAGES_REQUIRE_EXPLICIT_SELECTION': return 'Há mais de uma imagem ativa nesta resposta; a seleção explícita de imagem ainda não é suportada nesta entrega. Use a transcrição manual ou deixe apenas uma imagem ativa.'
+    case 'ANSWER_IMAGE_NOT_ACTIVE': return 'A imagem indicada não pertence a esta resposta ou não está mais ativa; nenhuma extração foi feita. Atualize a página.'
+    case 'TRANSCRIPTION_ALREADY_CONFIRMED': return 'Esta transcrição já foi confirmada (possivelmente em outra sessão); não há mais extração a fazer. Atualize a página.'
+    case 'ANSWER_NOT_IMAGE_SOURCE': return 'Esta resposta não foi enviada por foto; a extração de texto não se aplica.'
+    case 'INFERENCE_BUSY': return 'O motor de IA local está ocupado com outra extração ou análise. Nenhuma extração foi iniciada; tente novamente em instantes.'
   }
   switch (error.status) {
     case 0: return error.message
@@ -224,8 +260,48 @@ function ManualTranscription({ answer, images, onChange }: {
   const [reviewing, setReviewing] = useState(false)
   // Estado mais recente devolvido por um conflito de versão, aplicado só a pedido.
   const [latest, setLatest] = useState<AnswerWithImages | null>(null)
+  // Extração experimental: resultado da última tentativa nesta tela.
+  const [extracting, setExtracting] = useState(false)
+  const [extraction, setExtraction] = useState<TranscriptionExtraction | null>(null)
+  const [extractionFailure, setExtractionFailure] = useState('')
+  // Texto extraído que NÃO foi aplicado (o rascunho já tinha conteúdo): só a pedido.
+  const [pendingExtracted, setPendingExtracted] = useState<string | null>(null)
+  // Origem do texto em edição: '' = rascunho salvo cuja origem ainda não foi
+  // recuperada; 'ocr' compara com ocrText; 'ocr_editado' = rascunho do OCR já
+  // editado por humano (informado pela API após reload).
+  const [origin, setOrigin] = useState<'' | 'manual' | 'ocr' | 'ocr_editado'>(answer.manual_transcription_draft ? '' : 'manual')
+  const [ocrText, setOcrText] = useState('')
+  const editor = useRef<HTMLTextAreaElement>(null)
+  // Última extração persistida (retomada após reload), só para exibição.
+  const [recovered, setRecovered] = useState<LatestTranscriptionExtraction | null>(null)
+  const [recoveryFailed, setRecoveryFailed] = useState(false)
+  // Uma ação local (extrair/usar texto/digitar) prevalece sobre a origem recuperada.
+  const localOrigin = useRef(false)
+  const confirmed = answer.transcription_status === 'TRANSCRICAO_CONFIRMADA'
 
-  if (answer.transcription_status === 'TRANSCRICAO_CONFIRMADA') {
+  useEffect(() => {
+    if (confirmed) return
+    let current = true
+    getTranscriptionExtractionState(answer.id)
+      .then(state => {
+        if (!current) return
+        setRecovered(state.latest_extraction)
+        // Só rótulo: o texto em edição e o rascunho salvo nunca são tocados aqui.
+        if (localOrigin.current || state.text_state !== 'RASCUNHO') return
+        if (state.draft_origin === 'OCR') {
+          setOrigin('ocr')
+          setOcrText(state.draft_source_raw_text ?? '')
+        } else if (state.draft_origin === 'OCR_EDITADO') {
+          setOrigin('ocr_editado')
+        } else if (state.draft_origin === 'MANUAL') {
+          setOrigin('manual')
+        }
+      })
+      .catch(() => { if (current) setRecoveryFailed(true) })
+    return () => { current = false }
+  }, [answer.id, confirmed])
+
+  if (confirmed) {
     const by = answer.transcription_confirmed_by_id
     const who = !by ? '' : by === user?.id ? ' por você' : ` pelo usuário ${by}`
     const when = answer.transcription_confirmed_at ? ` em ${new Date(answer.transcription_confirmed_at).toLocaleString('pt-BR')}` : ''
@@ -291,6 +367,84 @@ function ManualTranscription({ answer, images, onChange }: {
     }
   }
 
+  const extract = async () => {
+    if (busy || extracting) return
+    setExtracting(true)
+    setExtraction(null)
+    setRecovered(null)
+    setExtractionFailure('')
+    setPendingExtracted(null)
+    setError('')
+    setNotice('')
+    try {
+      const result = await extractTranscription(answer.id)
+      setExtraction(result)
+      if (result.status !== 'ok') return
+      if (result.draft_updated) {
+        // O backend gravou o texto no rascunho vazio e avançou a versão.
+        onChange({
+          ...answer,
+          manual_transcription_draft: result.extracted_text,
+          transcription_version: result.transcription_version ?? answer.transcription_version + 1,
+        })
+      }
+      if (result.draft_updated && !text.trim()) {
+        localOrigin.current = true
+        setText(result.extracted_text)
+        setOrigin('ocr')
+        setOcrText(result.extracted_text)
+      } else {
+        // Já havia texto (salvo ou digitado): nunca sobrescreve sem pedido explícito.
+        setPendingExtracted(result.extracted_text)
+      }
+    } catch (e) {
+      setExtractionFailure(extractionError(e))
+    } finally {
+      setExtracting(false)
+    }
+  }
+
+  const applyExtracted = () => {
+    if (pendingExtracted === null) return
+    localOrigin.current = true
+    setText(pendingExtracted)
+    setOrigin('ocr')
+    setOcrText(pendingExtracted)
+    setPendingExtracted(null)
+    setNotice('Texto extraído colocado na área de edição. Confira com a imagem e salve o rascunho ou confirme.')
+  }
+
+  const typeManually = () => {
+    setExtraction(null)
+    setExtractionFailure('')
+    setPendingExtracted(null)
+    if (!text.trim()) { localOrigin.current = true; setOrigin('manual') }
+    editor.current?.focus()
+  }
+
+  // Recuperado (via API) e editado é sempre "com edições manuais", nunca automático.
+  const originLabel = origin === 'ocr'
+    ? (text === ocrText ? 'OCR (experimental) — confira com a imagem' : 'OCR (experimental), com edições manuais')
+    : origin === 'ocr_editado' ? 'OCR (experimental), com edições manuais'
+      : origin === 'manual' ? 'Digitação manual'
+        : recoveryFailed ? 'Rascunho salvo anteriormente (não foi possível identificar a origem)' : 'Rascunho salvo anteriormente (identificando origem…)'
+
+  // Usar o texto bruto recuperado é sempre ação explícita do usuário.
+  const applyRecovered = () => {
+    if (!recovered) return
+    localOrigin.current = true
+    setText(recovered.raw_text)
+    setOrigin('ocr')
+    setOcrText(recovered.raw_text)
+    setNotice('Texto da última extração colocado na área de edição. Confira com a imagem e salve o rascunho ou confirme.')
+  }
+  const recoveredImage = recovered ? images.find(image => image.id === recovered.image_id) : undefined
+  // ALTA-3: NUNCA faz fallback para images[0]. Se a imagem registrada da
+  // extração não estiver entre as ativas, extractedImage fica undefined e a UI
+  // informa explicitamente que ela não está mais ativa (sem exibir outra foto).
+  const extractedImage = extraction ? images.find(image => image.id === extraction.answer_image_id) : undefined
+  const locked = Boolean(busy) || extracting
+
   const loadLatest = () => {
     if (!latest) return
     onChange(latest)
@@ -302,16 +456,128 @@ function ManualTranscription({ answer, images, onChange }: {
 
   return (
     <section style={{ marginTop: '1rem' }}>
+      {!reviewing && (
+        <div style={{ marginBottom: '0.75rem' }}>
+          <button type="button" className="button button--secondary" onClick={extract} disabled={locked || Boolean(latest) || images.length === 0}>
+            {extracting ? 'Extraindo texto…' : 'Extrair texto da imagem (experimental)'}
+          </button>
+          <small style={{ display: 'block', marginTop: '0.25rem' }}>{EXTRACTION_NOTICE}</small>
+          {extracting && <Spinner label="Extraindo texto da imagem (experimental)…" />}
+          {!extraction && recovered?.status === 'processando' && (
+            <Alert type="info">
+              Há uma extração iniciada em {new Date(recovered.created_at).toLocaleString('pt-BR')} ainda sem resultado. Atualize a página em instantes para ver o resultado.
+            </Alert>
+          )}
+          {!extraction && (recovered?.status === 'falha' || recovered?.status === 'vazio') && (
+            <Alert type="warning">
+              Última extração ({new Date(recovered.created_at).toLocaleString('pt-BR')}): {recovered.status === 'vazio' ? 'nenhum texto reconhecido na imagem.' : 'falhou; nenhum texto foi aproveitado.'} {MANUAL_FALLBACK_HINT}
+            </Alert>
+          )}
+          {!extraction && recovered?.status === 'ok' && (
+            <div className="panel" style={{ marginTop: '0.75rem' }}>
+              <h4 style={{ marginTop: 0 }}>Última extração (recuperada) — origem: OCR (experimental)</h4>
+              <small style={{ display: 'block' }}>
+                Extraída em {new Date(recovered.created_at).toLocaleString('pt-BR')}{recovered.model ? ` · modelo ${recovered.model}` : ''}. Texto bruto do OCR, separado do rascunho abaixo; não foi confirmado.
+              </small>
+              <div style={sideBySide}>
+                <div style={sideBySideItem}>
+                  <strong>Imagem usada na extração</strong>
+                  {recoveredImage ? (
+                    <ul style={{ padding: 0, marginTop: '0.5rem' }}>
+                      <ImageViewer key={recoveredImage.id} image={recoveredImage} />
+                    </ul>
+                  ) : <p><small>A imagem usada não está mais entre as imagens ativas.</small></p>}
+                </div>
+                <div style={sideBySideItem}>
+                  <strong>Texto extraído — origem: OCR (experimental)</strong>
+                  <div style={transcriptBox}>{recovered.raw_text}</div>
+                  {recovered.raw_text_truncated && <small>Texto extenso: exibido apenas o início.</small>}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+                {!recovered.raw_text_truncated && text !== recovered.raw_text && (
+                  <button type="button" className="button button--secondary" onClick={applyRecovered} disabled={locked}>
+                    Usar este texto (substitui o texto em edição)
+                  </button>
+                )}
+                <button type="button" className="link-button" onClick={() => setRecovered(null)} disabled={locked}>
+                  Ocultar última extração
+                </button>
+              </div>
+            </div>
+          )}
+          {extractionFailure && (
+            <Alert>
+              {extractionFailure} {MANUAL_FALLBACK_HINT}{' '}
+              <button type="button" className="link-button" onClick={typeManually}>Digitar manualmente</button>
+            </Alert>
+          )}
+          {extraction?.status === 'falha' && (
+            <Alert>
+              A extração de texto falhou (erro ou tempo esgotado). Nenhum texto foi aproveitado. {MANUAL_FALLBACK_HINT}{' '}
+              <button type="button" className="link-button" onClick={typeManually}>Digitar manualmente</button>
+            </Alert>
+          )}
+          {extraction?.status === 'vazio' && (
+            <Alert type="warning">
+              Nenhum texto reconhecido na imagem. {MANUAL_FALLBACK_HINT}{' '}
+              <button type="button" className="link-button" onClick={typeManually}>Digitar manualmente</button>
+            </Alert>
+          )}
+          {extraction?.status === 'ok' && (
+            <div className="panel" style={{ marginTop: '0.75rem' }}>
+              <h4 style={{ marginTop: 0 }}>Conferência da extração (experimental)</h4>
+              <Alert type={extraction.draft_updated && pendingExtracted === null ? 'info' : 'warning'}>
+                {extraction.draft_updated && pendingExtracted === null
+                  ? 'O texto extraído foi colocado no rascunho (origem: OCR experimental). Ele NÃO foi confirmado: confira com a imagem e edite abaixo antes de confirmar.'
+                  : 'O rascunho já tinha conteúdo e NÃO foi alterado. Compare o texto extraído com a imagem e decida se quer usá-lo.'}
+              </Alert>
+              <div style={sideBySide}>
+                <div style={sideBySideItem}>
+                  <strong>Imagem usada na extração</strong>
+                  {extractedImage ? (
+                    <ul style={{ padding: 0, marginTop: '0.5rem' }}>
+                      <ImageViewer key={extractedImage.id} image={extractedImage} autoLoad />
+                    </ul>
+                  ) : <p><small>A imagem usada não está mais entre as imagens ativas.</small></p>}
+                </div>
+                <div style={sideBySideItem}>
+                  <strong>Texto extraído — origem: OCR (experimental)</strong>
+                  <div style={transcriptBox}>{extraction.extracted_text}</div>
+                  {extraction.message && <small>{extraction.message}</small>}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+                {pendingExtracted !== null && (
+                  <>
+                    <button type="button" className="button button--secondary" onClick={applyExtracted} disabled={locked}>
+                      Usar este texto (substitui o texto em edição)
+                    </button>
+                    <button type="button" className="button button--secondary" onClick={() => setPendingExtracted(null)} disabled={locked}>
+                      Ignorar texto extraído
+                    </button>
+                  </>
+                )}
+                <button type="button" className="link-button" onClick={() => setExtraction(null)} disabled={locked}>
+                  Fechar conferência
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       <label className="form-stack">
         <strong>Transcrição manual</strong>
         <textarea
+          ref={editor}
           rows={8}
           value={text}
           onChange={e => { setText(e.target.value); setNotice('') }}
           placeholder="Digite o texto da resposta exatamente como está na foto"
-          disabled={Boolean(busy) || reviewing}
+          disabled={locked || reviewing}
         />
       </label>
+      <small style={{ display: 'block' }}>Origem do texto: <strong>{originLabel}</strong></small>
       <small>
         {dirty ? 'Há alterações não salvas.' : savedDraft ? 'Rascunho salvo.' : 'Nenhum rascunho salvo.'} O rascunho não confirma a transcrição nem libera a correção.
       </small>
@@ -324,10 +590,10 @@ function ManualTranscription({ answer, images, onChange }: {
       {notice && <Alert type="success">{notice}</Alert>}
       {!reviewing ? (
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
-          <button type="button" className="button button--secondary" onClick={saveDraft} disabled={Boolean(busy) || !dirty || Boolean(latest)}>
+          <button type="button" className="button button--secondary" onClick={saveDraft} disabled={locked || !dirty || Boolean(latest)}>
             {busy === 'salvar' ? 'Salvando rascunho…' : 'Salvar rascunho'}
           </button>
-          <button type="button" className="button button--primary" onClick={startReview} disabled={Boolean(busy) || Boolean(latest) || images.length === 0}>
+          <button type="button" className="button button--primary" onClick={startReview} disabled={locked || Boolean(latest) || images.length === 0}>
             Confirmar transcrição…
           </button>
           {images.length === 0 && <small>{NO_ACTIVE_IMAGE_NOTICE}</small>}
@@ -345,6 +611,7 @@ function ManualTranscription({ answer, images, onChange }: {
             </div>
             <div style={sideBySideItem}>
               <strong>Texto que será confirmado</strong>
+              <small style={{ display: 'block' }}>Origem: {originLabel}</small>
               <div style={transcriptBox}>{text}</div>
             </div>
           </div>

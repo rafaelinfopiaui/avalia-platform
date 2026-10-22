@@ -751,7 +751,7 @@ def test_divergence_script_has_no_write_operations():
 # ======================= Concorrência real em PostgreSQL =======================
 _PROTECTED_DATABASES = {"avalia_dev", "avalia_apresentacao_demo_20261002", "postgres"}
 _PG_URL = os.environ.get("AVALIA_TEST_POSTGRES_URL")
-_ALEMBIC_HEAD = "b8d3e5f7a2c4"
+_ALEMBIC_HEAD = "c3e7a9d1f5b2"
 
 requires_postgres = pytest.mark.skipif(
     not _PG_URL, reason="AVALIA_TEST_POSTGRES_URL não definido (concorrência real exige PostgreSQL isolado)"

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
 from datetime import datetime
 from decimal import Decimal
@@ -8,7 +10,7 @@ import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import update
+from sqlalchemy import or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -33,6 +35,7 @@ from app.models import (
     Role,
     Rubric,
     RubricCriterion,
+    TranscriptionExtraction,
     TranscriptionStatus,
     User,
     gen_uuid,
@@ -54,6 +57,7 @@ from app.routers.images import (
     _normalize_declared_type,
     _sanitize_original_filename,
     _storage_dir,
+    _stored_path,
     _too_large,
     _write_validated_file,
 )
@@ -76,6 +80,7 @@ from app.schemas import (
     HumanReviewInput,
     HumanReviewOut,
     HumanReviewSummaryOut,
+    LatestTranscriptionExtractionOut,
     LoginRequest,
     ManualTranscriptionInput,
     MeResponse,
@@ -85,9 +90,13 @@ from app.schemas import (
     RubricInput,
     RubricOut,
     TokenResponse,
+    TranscriptionExtractionOut,
+    TranscriptionExtractionStateOut,
 )
 from app.security import create_access_token, create_refresh_token, verify_password
+from app.services import inference_gate as inference_gate_module
 from app.services.correction import round_score, run_correction_job
+from app.services.inference_gate import INFERENCE_BUSY, InferenceBusyError
 
 settings = get_settings()
 
@@ -944,6 +953,555 @@ def confirm_manual_transcription(
     user: User = Depends(require_role("professor", "admin")),
 ):
     return _save_manual_transcription(answer_id, payload, request, db, user, confirm=True)
+
+
+# ---------------- Extração OCR/visão experimental (AV-S07B, DEC-AV-046) ----------------
+# Só a imagem ativa entra no motor — nunca enunciado, referência ou transcrição
+# esperada. A extração NUNCA confirma a transcrição nem cria CorrectionJob: no
+# máximo preenche o rascunho VAZIO, que segue para conferência humana (/confirm).
+_EXTRACTION_ENGINE = "ollama-vision"
+_EXTRACTION_PROCESSING = "processando"
+_EXTRACTION_FINAL_STATUSES = {"ok", "vazio", "falha"}
+# Timeout explícito da chamada ao AI Engine (acima do timeout do motor de visão).
+_EXTRACTION_TIMEOUT_SECONDS = 150.0
+# Registro "processando" mais antigo que isto é tratado como abandonado (ex.:
+# queda do processo) e deixa de bloquear um novo pedido EXPLÍCITO do usuário.
+_EXTRACTION_STALE_SECONDS = _EXTRACTION_TIMEOUT_SECONDS + 60
+_EXTRACTION_DRAFT_ORIGIN = "OCR"
+_EXTRACTION_MESSAGES = {
+    "draft_updated": (
+        "Texto extraído e colocado no rascunho (origem: OCR, experimental). Confira com a imagem "
+        "e corrija antes de confirmar; a transcrição NÃO foi confirmada."
+    ),
+    "draft_kept": (
+        "Texto extraído, mas o rascunho já tem conteúdo e não foi alterado. Compare o texto "
+        "extraído com o rascunho e decida o que manter."
+    ),
+    "answer_changed": (
+        "Texto extraído, mas a resposta foi alterada durante a extração; o rascunho não foi "
+        "modificado. Compare o texto extraído e decida o que manter."
+    ),
+    "vazio": "Nenhum texto foi identificado na imagem. Digite a transcrição manualmente.",
+    "falha": (
+        "Não foi possível extrair o texto da imagem. Digite a transcrição manualmente ou "
+        "solicite uma nova extração."
+    ),
+}
+
+
+def _extraction_failure(detail: str) -> dict:
+    return {"status": "falha", "text": "", "model": "", "duration_ms": 0, "error_detail": detail}
+
+
+async def _call_ai_engine_extract(image_base64: str, mime_type: str) -> dict:
+    """Uma única chamada ao AI Engine (sem retry oculto); falhas viram 'falha'."""
+    try:
+        async with httpx.AsyncClient(timeout=_EXTRACTION_TIMEOUT_SECONDS) as client:
+            resp = await client.post(
+                f"{settings.ai_engine_url}/v1/extract",
+                json={"image_base64": image_base64, "mime_type": mime_type},
+            )
+    except httpx.TimeoutException:
+        return _extraction_failure(f"Timeout de {_EXTRACTION_TIMEOUT_SECONDS:.0f}s aguardando o AI Engine.")
+    except httpx.HTTPError as exc:
+        return _extraction_failure(f"AI Engine indisponível ({type(exc).__name__}).")
+    if resp.status_code != 200:
+        return _extraction_failure(f"AI Engine retornou HTTP {resp.status_code}.")
+    try:
+        return resp.json()
+    except ValueError:
+        return _extraction_failure("Resposta do AI Engine em formato inesperado (não JSON).")
+
+
+def _normalize_extraction(data) -> tuple[str, str, str, int, str | None]:
+    """(status, texto, modelo, duração, erro). Nunca fabrica texto fora de 'ok'."""
+    if not isinstance(data, dict) or data.get("status") not in _EXTRACTION_FINAL_STATUSES:
+        return "falha", "", "", 0, "Resposta do AI Engine fora do contrato de extração."
+    status = data["status"]
+    raw_text = data.get("text")
+    text = raw_text if isinstance(raw_text, str) else ""
+    # MÉDIA-7: preserva o texto do motor SEM strip quando há CONTEÚDO. Fora de
+    # 'ok' nunca há texto. 'ok' só com espaços/quebras (sem conteúdo útil) é
+    # reclassificado como 'vazio' com text="" — não é transcrição a preservar,
+    # e nada é fabricado. Texto com conteúdo real é mantido fiel (sem strip).
+    if status != "ok":
+        text = ""
+    elif not text.strip():
+        status = "vazio"
+        text = ""
+    raw_model = data.get("model")
+    model = raw_model if isinstance(raw_model, str) else ""
+    try:
+        duration_ms = max(int(data.get("duration_ms") or 0), 0)
+    except (TypeError, ValueError):
+        duration_ms = 0
+    error_detail = data.get("error_detail") if isinstance(data.get("error_detail"), str) else None
+    return status, text, model, duration_ms, error_detail
+
+
+@app.post("/v1/answers/{answer_id}/transcription/extract", response_model=TranscriptionExtractionOut)
+async def extract_transcription(
+    answer_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
+    correlation_id = getattr(request.state, "correlation_id", new_correlation_id())
+    answer = db.get(Answer, answer_id)
+    if answer is None:
+        raise HTTPException(status_code=404, detail="Resposta não encontrada.")
+    question = db.get(Question, answer.question_id)
+    if question is None:
+        raise HTTPException(status_code=404, detail="Questão não encontrada.")
+    assessment = _get_owned_assessment(db, question.assessment_id, user)
+    require_assessment_mutation(db, user, assessment)
+    if answer.source != AnswerSource.IMAGE:
+        return error_response(
+            422,
+            "ANSWER_NOT_IMAGE_SOURCE",
+            "A extração de texto só se aplica a respostas enviadas por imagem.",
+            correlation_id,
+        )
+
+    # Seleção de imagem (BLOQUEANTE-1): nunca escolher silenciosamente entre
+    # várias. O cliente pode passar answer_image_id EXPLÍCITO no corpo; se não
+    # passar e houver >1 imagem ativa, a extração é recusada (ver _run_extraction).
+    requested_image_id: str | None = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            raw = body.get("answer_image_id")
+            if isinstance(raw, str) and raw.strip():
+                requested_image_id = raw.strip()
+    except Exception:
+        requested_image_id = None
+
+    # Gate global de inferência (lacuna C): visão e análise textual não rodam
+    # juntas no mesmo Ollama. Adquirido ANTES de criar o registro "processando",
+    # para que a rejeição (409 INFERENCE_BUSY) não deixe nada pendente; liberado
+    # sempre ao sair do bloco. Espera curta: ver app/services/inference_gate.py.
+    try:
+        gate = inference_gate_module.inference_gate
+        async with gate.hold("extração de texto (visão)", inference_gate_module.EXTRACTION_WAIT_SECONDS):
+            return await _run_extraction(
+                answer_id, answer, user, db, correlation_id, requested_image_id
+            )
+    except InferenceBusyError as busy:
+        db.rollback()
+        log_event(
+            "transcription_extraction_inference_busy",
+            correlation_id,
+            answer_id=answer_id,
+            busy_with=busy.busy_with,
+            waited_seconds=busy.waited_seconds,
+        )
+        return error_response(
+            409,
+            INFERENCE_BUSY,
+            "O motor de IA local está ocupado com outra inferência (extração ou análise). Nenhuma "
+            "extração foi iniciada; tente novamente em instantes.",
+            correlation_id,
+            details={"busy_with": busy.busy_with, "waited_seconds": busy.waited_seconds},
+        )
+
+
+async def _run_extraction(
+    answer_id: str,
+    answer: Answer,
+    user: User,
+    db: Session,
+    correlation_id: str,
+    requested_image_id: str | None = None,
+) -> TranscriptionExtractionOut | JSONResponse:
+    # Anti-duplo-clique: sob o lock da linha de answers (o mesmo da confirmação
+    # e da exclusão de imagem), um registro "processando" recente bloqueia novo pedido.
+    answer = _lock_answer_row(db, answer.id)
+    if answer.transcription_status == TranscriptionStatus.TRANSCRICAO_CONFIRMADA:
+        db.rollback()
+        return error_response(
+            409,
+            "TRANSCRIPTION_ALREADY_CONFIRMED",
+            _TRANSCRIPTION_CONFLICT_MESSAGES["TRANSCRIPTION_ALREADY_CONFIRMED"],
+            correlation_id,
+        )
+    now = datetime.utcnow()
+    pending = (
+        db.query(TranscriptionExtraction)
+        .filter(
+            TranscriptionExtraction.answer_id == answer.id,
+            TranscriptionExtraction.status == _EXTRACTION_PROCESSING,
+        )
+        .all()
+    )
+    for item in pending:
+        if item.created_at is None or (now - item.created_at).total_seconds() < _EXTRACTION_STALE_SECONDS:
+            db.rollback()
+            log_event("transcription_extraction_in_progress", correlation_id, answer_id=answer.id)
+            return error_response(
+                409,
+                "EXTRACTION_IN_PROGRESS",
+                "Já existe uma extração em andamento para esta resposta. Aguarde a conclusão.",
+                correlation_id,
+                details={"extraction_id": item.id},
+            )
+    for item in pending:
+        item.status = "falha"
+        item.error_detail = "Extração abandonada (sem conclusão dentro do prazo); encerrada como falha."
+
+    # Seleção EXPLÍCITA da imagem (BLOQUEANTE-1): nunca escolher silenciosamente
+    # entre várias. Com answer_image_id explícito, valida posse/atividade e usa-o.
+    # Sem explícito: só 1 imagem ativa => usa-a; >1 => recusa (seleção explícita
+    # ainda não suportada nesta entrega) e orienta o fallback manual.
+    active_images = (
+        _active_images_query(db, answer.id).order_by(AnswerImage.created_at.desc(), AnswerImage.id.desc()).all()
+    )
+    if not active_images:
+        db.rollback()
+        return error_response(
+            409,
+            _NO_ACTIVE_IMAGE,
+            "Esta resposta não tem nenhuma imagem ativa para extrair texto. Restaure ou envie uma imagem.",
+            correlation_id,
+            details={"answer_id": answer.id},
+        )
+    if requested_image_id is not None:
+        image = next((img for img in active_images if img.id == requested_image_id), None)
+        if image is None:
+            db.rollback()
+            return error_response(
+                409,
+                "ANSWER_IMAGE_NOT_ACTIVE",
+                "A imagem indicada não pertence a esta resposta ou não está ativa; nenhuma extração foi feita.",
+                correlation_id,
+                details={"answer_image_id": requested_image_id},
+            )
+    elif len(active_images) > 1:
+        db.rollback()
+        return error_response(
+            409,
+            "MULTIPLE_ACTIVE_IMAGES_REQUIRE_EXPLICIT_SELECTION",
+            "Há mais de uma imagem ativa nesta resposta; a seleção explícita de imagem ainda não é "
+            "suportada nesta entrega. Indique a imagem (answer_image_id) ou use a transcrição manual.",
+            correlation_id,
+            details={
+                "answer_id": answer.id,
+                "active_image_ids": [img.id for img in active_images],
+            },
+        )
+    else:
+        image = active_images[0]
+    image_path = _stored_path(image)
+    if image_path is None:
+        db.rollback()
+        log_event("answer_image_file_missing", correlation_id, image_id=image.id, operation="extract")
+        return error_response(
+            409,
+            "ANSWER_IMAGE_FILE_MISSING",
+            "O arquivo da imagem ativa não está disponível no armazenamento; nenhuma extração foi feita.",
+            correlation_id,
+            details={"answer_image_id": image.id},
+        )
+    selection = {
+        "chosen_image_id": image.id,
+        "criterion": (
+            "imagem indicada explicitamente pelo usuário"
+            if requested_image_id is not None
+            else "única imagem ativa"
+        ),
+        "active_image_count": len(active_images),
+        "explicit_selection": requested_image_id is not None,
+    }
+    config = {
+        "engine": _EXTRACTION_ENGINE,
+        "ai_engine_endpoint": "/v1/extract",
+        "timeout_seconds": _EXTRACTION_TIMEOUT_SECONDS,
+        "input": "somente a imagem (sem enunciado, referência ou transcrição esperada)",
+        "image_selection": selection,
+    }
+    extraction = TranscriptionExtraction(
+        answer_id=answer.id,
+        answer_image_id=image.id,
+        engine=_EXTRACTION_ENGINE,
+        model="",
+        config_json=json.dumps(config, ensure_ascii=False),
+        status=_EXTRACTION_PROCESSING,
+        raw_output="",
+        duration_ms=0,
+    )
+    db.add(extraction)
+    # Commit antes da chamada lenta: libera o lock da resposta e deixa o
+    # registro "processando" visível para bloquear cliques repetidos.
+    db.commit()
+    extraction_id = extraction.id
+    log_event(
+        "transcription_extraction_started",
+        correlation_id,
+        answer_id=answer_id,
+        extraction_id=extraction_id,
+        image_id=image.id,
+        active_image_count=len(active_images),
+    )
+
+    # Revalidação (ALTA-2): entre a seleção e o uso, outra sessão pode ter
+    # excluído a imagem. Reconfirma que ela ainda está ativa IMEDIATAMENTE antes
+    # de ler o arquivo e chamar o motor; se não, encerra como falha sem enviar
+    # nada ao motor.
+    still_active = (
+        _active_images_query(db, answer.id)
+        .filter(AnswerImage.id == image.id)
+        .first()
+    )
+    if still_active is None:
+        data = _extraction_failure("A imagem deixou de estar ativa antes da extração; nada foi enviado ao motor.")
+        error_code_no_longer_active = True
+    else:
+        error_code_no_longer_active = False
+        try:
+            image_base64 = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        except OSError:
+            data = _extraction_failure("Falha ao ler o arquivo da imagem no armazenamento.")
+        else:
+            try:
+                data = await _call_ai_engine_extract(image_base64, image.content_type)
+            except asyncio.CancelledError:
+                # ALTA-8: cancelamento durante a chamada externa não pode deixar
+                # o registro 'processando' órfão. Finaliza como 'falha' e re-levanta.
+                stale = db.get(TranscriptionExtraction, extraction_id)
+                if stale is not None and stale.status == _EXTRACTION_PROCESSING:
+                    stale.status = "falha"
+                    stale.error_detail = "CANCELADO"
+                    db.commit()
+                raise
+    status, text, model, duration_ms, error_detail = _normalize_extraction(data)
+    if error_code_no_longer_active:
+        error_detail = "IMAGE_NO_LONGER_ACTIVE"
+
+    extraction = db.get(TranscriptionExtraction, extraction_id)
+    assert extraction is not None  # recém-criado nesta mesma função
+    extraction.status = status
+    # raw_output fiel (MÉDIA-7): preserva a saída do motor SEM strip. O strip
+    # é aplicado só ao derivar o rascunho, mais abaixo.
+    extraction.raw_output = text
+    extraction.model = model
+    extraction.duration_ms = duration_ms
+    extraction.error_detail = error_detail
+
+    # Rascunho só é preenchido se estiver VAZIO, com o mesmo lock otimista do
+    # rascunho manual (+1 em transcription_version); nunca confirma.
+    answer = _lock_answer_row(db, answer_id)
+    draft_updated = False
+    message_key = status
+    # ALTA-2 (fecho do TOCTOU residual): sob o lock do answer, revalida que a
+    # imagem usada ainda está ativa ANTES de aplicar o resultado. Se foi excluída
+    # durante a inferência, o texto NÃO é aplicado ao rascunho (resultado órfão de
+    # imagem inativa não contamina a transcrição). A limitação de não manter lock
+    # DURANTE a inferência (chamada longa) é intencional; o resultado só é aceito
+    # se a imagem seguir ativa neste ponto.
+    image_still_active_now = (
+        _active_images_query(db, answer.id).filter(AnswerImage.id == image.id).first() is not None
+    )
+    if status == "ok" and not image_still_active_now:
+        status = "falha"
+        message_key = "falha"
+        # Contrato: fora de 'ok' não há texto. Zera também text/raw_output para
+        # não devolver nem persistir conteúdo sob status 'falha'.
+        text = ""
+        extraction.status = "falha"
+        extraction.raw_output = ""
+        extraction.error_detail = "IMAGE_NO_LONGER_ACTIVE"
+    elif status == "ok":
+        message_key = "draft_kept"
+        if answer.transcription_status != TranscriptionStatus.AGUARDANDO_TRANSCRICAO:
+            message_key = "answer_changed"
+        elif not (answer.manual_transcription_draft or "").strip():
+            version = answer.transcription_version
+            # O rascunho recebe o texto COM strip (limpo para edição humana); o
+            # raw_output da extração permanece fiel (MÉDIA-7).
+            draft_text = text.strip()
+            result = db.execute(
+                update(Answer)
+                .where(
+                    Answer.id == answer.id,
+                    Answer.transcription_version == version,
+                    Answer.transcription_status == TranscriptionStatus.AGUARDANDO_TRANSCRICAO,
+                    or_(Answer.manual_transcription_draft.is_(None), Answer.manual_transcription_draft == ""),
+                )
+                .values(manual_transcription_draft=draft_text, transcription_version=Answer.transcription_version + 1)
+                .execution_options(synchronize_session=False)
+            )
+            draft_updated = result.rowcount == 1
+            message_key = "draft_updated" if draft_updated else "answer_changed"
+            if draft_updated:
+                # Proveniência REAL (ALTA-4/5): registra a versão RESULTANTE que
+                # esta extração produziu. A origem do rascunho passa a ser
+                # derivada por VERSÃO, não por coincidência de texto.
+                extraction.resulting_transcription_version = version + 1
+                # Origem OCR do rascunho também fica na trilha de auditoria.
+                db.add(
+                    AuditEvent(
+                        actor_id=user.id,
+                        action="transcription_draft_filled_by_extraction",
+                        resource_type="Answer",
+                        resource_id=answer.id,
+                        before_json=json.dumps(
+                            {"manual_transcription_draft": None, "transcription_version": version}
+                        ),
+                        after_json=json.dumps(
+                            {
+                                "draft_origin": _EXTRACTION_DRAFT_ORIGIN,
+                                "extraction_id": extraction_id,
+                                "transcription_version": version + 1,
+                            }
+                        ),
+                    )
+                )
+    db.add(
+        AuditEvent(
+            actor_id=user.id,
+            action="transcription_extraction_finished",
+            resource_type="TranscriptionExtraction",
+            resource_id=extraction_id,
+            after_json=json.dumps(
+                {
+                    "answer_id": answer_id,
+                    "answer_image_id": image.id,
+                    "status": status,
+                    "model": model,
+                    "duration_ms": duration_ms,
+                    "text_length": len(text),
+                    "draft_updated": draft_updated,
+                }
+            ),
+        )
+    )
+    db.commit()
+    db.refresh(answer)
+    log_event(
+        "transcription_extraction_finished",
+        correlation_id,
+        answer_id=answer_id,
+        extraction_id=extraction_id,
+        status=status,
+        duration_ms=duration_ms,
+        text_length=len(text),
+        draft_updated=draft_updated,
+    )
+    message = _EXTRACTION_MESSAGES[message_key]
+    if requested_image_id is not None and len(active_images) > 1:
+        message += " Foi usada a imagem que você indicou explicitamente."
+    return TranscriptionExtractionOut(
+        extraction_id=extraction_id,
+        status=status,
+        extracted_text=text,
+        draft_updated=draft_updated,
+        draft_origin=_EXTRACTION_DRAFT_ORIGIN if draft_updated else None,
+        answer_image_id=image.id,
+        transcription_version=answer.transcription_version,
+        message=message,
+    )
+
+
+# Retomada da extração após reload (AV-S07B, lacuna A). SOMENTE LEITURA:
+# autorizada por propriedade (como list_image_answers), sem exigir vínculo
+# ativo, e nunca altera rascunho, versão nem transcrição confirmada.
+_EXTRACTION_RAW_TEXT_LIMIT = 20_000
+
+
+@app.get(
+    "/v1/answers/{answer_id}/transcription/extractions", response_model=TranscriptionExtractionStateOut
+)
+def get_transcription_extraction_state(
+    answer_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("professor", "admin")),
+):
+    answer = db.get(Answer, answer_id)
+    if answer is None:
+        raise HTTPException(status_code=404, detail="Resposta não encontrada.")
+    question = db.get(Question, answer.question_id)
+    if question is None:
+        raise HTTPException(status_code=404, detail="Questão não encontrada.")
+    _get_owned_assessment(db, question.assessment_id, user)
+
+    extractions = db.query(TranscriptionExtraction).filter(TranscriptionExtraction.answer_id == answer.id)
+    latest = extractions.order_by(
+        TranscriptionExtraction.created_at.desc(), TranscriptionExtraction.id.desc()
+    ).first()
+
+    draft = answer.manual_transcription_draft or ""
+    if answer.transcription_status == TranscriptionStatus.TRANSCRICAO_CONFIRMADA:
+        text_state = "CONFIRMADA"
+    elif draft.strip():
+        text_state = "RASCUNHO"
+    else:
+        text_state = "VAZIO"
+
+    draft_origin = None
+    source = None
+    if text_state == "RASCUNHO":
+        # Proveniência por VERSÃO (ALTA-4/5), nunca por coincidência de texto.
+        # Procura a extração que preencheu o rascunho em alguma versão.
+        current_version = answer.transcription_version
+        ocr_exact = (
+            extractions.filter(
+                TranscriptionExtraction.resulting_transcription_version == current_version
+            )
+            .order_by(TranscriptionExtraction.created_at.desc(), TranscriptionExtraction.id.desc())
+            .first()
+        )
+        last_filled = (
+            extractions.filter(TranscriptionExtraction.resulting_transcription_version.isnot(None))
+            .order_by(
+                TranscriptionExtraction.resulting_transcription_version.desc(),
+                TranscriptionExtraction.created_at.desc(),
+                TranscriptionExtraction.id.desc(),
+            )
+            .first()
+        )
+        if ocr_exact is not None:
+            # A versão atual do rascunho é EXATAMENTE a que a extração produziu e
+            # não foi editada desde então: origem OCR.
+            draft_origin = _EXTRACTION_DRAFT_ORIGIN
+            source = ocr_exact
+        elif (
+            last_filled is not None
+            and last_filled.resulting_transcription_version is not None
+            and current_version > last_filled.resulting_transcription_version
+        ):
+            # Uma extração preencheu o rascunho e o humano editou depois
+            # (a versão avançou além da preenchida por OCR): OCR_EDITADO.
+            draft_origin = f"{_EXTRACTION_DRAFT_ORIGIN}_EDITADO"
+            source = last_filled
+        else:
+            # Nenhuma extração preencheu a versão atual nem uma anterior
+            # relacionada: rascunho digitado manualmente. Coincidência de texto
+            # com um raw_output histórico NÃO conta como OCR.
+            draft_origin = "MANUAL"
+
+    latest_out = None
+    if latest is not None:
+        raw = latest.raw_output or ""
+        latest_out = LatestTranscriptionExtractionOut(
+            extraction_id=latest.id,
+            status=latest.status,
+            created_at=latest.created_at,
+            model=latest.model,
+            image_id=latest.answer_image_id,
+            has_raw_output=bool(raw),
+            raw_text=raw[:_EXTRACTION_RAW_TEXT_LIMIT],
+            raw_text_truncated=len(raw) > _EXTRACTION_RAW_TEXT_LIMIT,
+            error_detail=latest.error_detail,
+        )
+    return TranscriptionExtractionStateOut(
+        answer_id=answer.id,
+        transcription_status=answer.transcription_status.value,
+        transcription_version=answer.transcription_version,
+        text_state=text_state,
+        draft_origin=draft_origin,
+        draft_source_extraction_id=source.id if source is not None else None,
+        draft_source_raw_text=(source.raw_output or "")[:_EXTRACTION_RAW_TEXT_LIMIT] if source is not None else None,
+        latest_extraction=latest_out,
+    )
 
 
 # ---------------- Corrections ----------------

@@ -49,7 +49,7 @@ class JSONFormatter(logging.Formatter):
 
         # Inclui atributos extras passados no extra={}
         # Proteção RNF-07: bloqueia chaves que possam conter texto integral de aluno
-        forbidden_keys = {"answer_text", "student_answer", "raw_text", "untrusted_content"}
+        forbidden_keys = {"answer_text", "student_answer", "raw_text", "untrusted_content", "image_base64"}
         for key, value in record.__dict__.items():
             if key not in (
                 "args", "asctime", "created", "exc_info", "exc_text", "filename",
