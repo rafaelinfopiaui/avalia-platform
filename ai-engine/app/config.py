@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     schema_path: str = "../docs/contracts/ai-engine-output.schema.json"
     ollama_timeout_seconds: float = 60.0
+    # Extração OCR/visão experimental (AV-S07B, DEC-AV-046): modelo de visão
+    # SEPARADO do modelo textual de correção (ai_model_name não muda).
+    ai_vision_model_name: str = "qwen2.5vl:3b"
+    ai_vision_num_ctx: int = 8192
+    ai_vision_seed: int = 42
+    ai_vision_temperature: float = 0.0
+    ai_vision_timeout_seconds: float = 120.0
 
 
 settings = Settings()

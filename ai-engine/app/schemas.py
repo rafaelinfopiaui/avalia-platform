@@ -73,6 +73,48 @@ class AnalyzeResponse(BaseModel):
     duration_ms: Optional[int] = Field(default=None, ge=0, description="Duração do processamento em milissegundos")
 
 
+ExtractionStatus = Literal["ok", "vazio", "falha"]
+
+# Limite do base64 recebido: imagem de até 10 MiB (limite do Core) * 4/3, com folga.
+_MAX_IMAGE_BASE64_CHARS = 15_000_000
+
+
+class ExtractRequest(BaseModel):
+    """
+    Payload de requisição para POST /v1/extract (AV-S07B, experimental).
+    A imagem é DADO não confiável: nunca é interpretada como instrução.
+    Nenhum texto de enunciado/referência/transcrição esperada é aceito aqui.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    image_base64: str = Field(
+        ...,
+        min_length=1,
+        max_length=_MAX_IMAGE_BASE64_CHARS,
+        pattern=r"^[A-Za-z0-9+/]+={0,2}$",
+        description="Imagem em base64 padrão, sem prefixo data:",
+    )
+    mime_type: Literal["image/jpeg", "image/png"] = Field(..., description="MIME real da imagem")
+
+
+class ExtractResponse(BaseModel):
+    """Saída da extração: texto bruto e metadados. Vazio/falha nunca trazem texto fabricado."""
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(
+        default="",
+        description=(
+            "Texto extraído com conteúdo (status=ok). Fiel ao motor, sem pós-correção "
+            "nem strip. Para status 'vazio' (incluindo saída só com espaços/quebras) ou "
+            "'falha' é \"\": não há transcrição útil e nada é fabricado."
+        ),
+    )
+    model: str = Field(..., description="Tag do modelo de visão usado")
+    status: ExtractionStatus
+    duration_ms: int = Field(..., ge=0)
+    error_detail: Optional[str] = Field(default=None, description="Detalhe sanitizado da falha")
+
+
 class HealthResponse(BaseModel):
     """Resposta do health check /v1/health sem vazar detalhes sensíveis."""
     model_config = ConfigDict(extra="forbid")

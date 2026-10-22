@@ -166,3 +166,43 @@ depois da revalidação acima, e corrigidas na mesma rodada:
 Nenhuma dessas correções altera o veredito técnico já registrado acima
 (Tesseract/EasyOCR candidatos, moondream:v2 sem utilidade prática nesta
 configuração, nenhuma solução aprovada para uso).
+
+---
+
+## Adendo 2026-10-22 — Decisão restrita de produto: `qwen2.5vl:3b` como extrator EXPERIMENTAL (DEC-AV-046)
+
+> Este adendo registra uma **nova decisão de produto/experimento** (`DEC-AV-046`,
+> 2026-10-22) tomada por Rafael. Ele **não reescreve** nenhum resultado, protocolo
+> ou veredito acima, **não** promove `qwen2.5vl:3b` a solução de produção e **não**
+> constitui aprovação pelo protocolo `DEC-AV-017`/benchmark `BL-AV-4B-20`.
+
+**O que foi decidido.** Para viabilizar a **primeira entrega assistida por imagem**
+(extração automática → conferência/edição humana → confirmação explícita → análise
+pedagógica), Rafael autorizou integrar `qwen2.5vl:3b` (modelo de visão já presente no
+Ollama local) como **extrator experimental** do texto da imagem, reutilizando como
+ponto de partida os parâmetros observados na investigação AV-S05B: `num_ctx=8192`,
+`seed=42`, `temperature=0`, uma passagem (sem retry/resize/aumento de `num_ctx` ocultos).
+
+**O que esta decisão NÃO é (distinções obrigatórias, preservadas):**
+1. **Não é aprovação pelo protocolo `DEC-AV-017`** (que permanece *aprovada com ajustes,
+   2026-09-29*, com execução e eixo manuscrito **parciais**) nem reescrita/favorecimento
+   do benchmark comparativo `BL-AV-4B-20`. É decisão de produto/experimento à parte.
+2. **Não apaga a falha observada.** `qwen2.5vl:3b` foi o **melhor candidato** nas amostras
+   **legíveis** (CER 0,077 — **não** é "acurácia"; CER é taxa de erro por caractere), mas
+   **inventou texto no controle ilegível recortado** (violou o eliminatório AC-05 de
+   invenção em vazio/ilegível, **n=1**). Essa observação permanece válida e não é
+   minimizada por esta decisão.
+3. **Não promove solução de produção** nem resolve `BL-AV-4B-02` (decisão arquitetural).
+   O encerramento negativo de uma configuração (ver `encerramento_rodada_ocr_manuscrito`)
+   **não** se converte em aprovação do motor.
+4. **Conferência humana é obrigatória**, mas **não garante** a detecção de todo erro de
+   transcrição. A confirmação do professor continua explícita e definitiva.
+5. **Não reabre** coleta ou benchmark amplo como pré-condição automática desta
+   implementação.
+
+**Consequência de produto.** A extração nasce como **rascunho experimental** que exige
+conferência; o caminho **manual homologado permanece como fallback** quando a extração
+falhar, vier vazia ou não for utilizável. `AV-S05B` segue **PARCIAL**; o numerador
+canônico permanece **22/70**; nenhuma promoção de baseline, dados reais, piloto ou
+deploy é autorizada. Escopo: demonstração funcional com dados fictícios em ambiente
+local isolado.

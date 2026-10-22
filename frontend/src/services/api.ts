@@ -181,6 +181,48 @@ export const confirmManualTranscription = (answerId: string, text: string, expec
     method: 'POST',
     body: JSON.stringify({ text, expected_version: expectedVersion }),
   })
+// Extração OCR/visão EXPERIMENTAL (AV-S07B): o texto extraído é dado não
+// confiável e exige conferência humana. O backend só preenche o rascunho se ele
+// estiver vazio (draft_updated) e nunca confirma a transcrição. Erros 409:
+// EXTRACTION_IN_PROGRESS, ANSWER_HAS_NO_ACTIVE_IMAGE, TRANSCRIPTION_ALREADY_CONFIRMED.
+export type TranscriptionExtractionStatus = 'ok' | 'vazio' | 'falha'
+export interface TranscriptionExtraction {
+  extraction_id: string
+  status: TranscriptionExtractionStatus
+  extracted_text: string
+  draft_updated: boolean
+  draft_origin?: string | null
+  answer_image_id?: string
+  transcription_version?: number
+  message: string
+}
+export const extractTranscription = (answerId: string) =>
+  request<TranscriptionExtraction>(`/answers/${encodeURIComponent(answerId)}/transcription/extract`, { method: 'POST' })
+// Retomada após reload (somente leitura): saída bruta do OCR (raw_text),
+// origem do rascunho humano e estado confirmado vêm separados.
+export interface LatestTranscriptionExtraction {
+  extraction_id: string
+  status: TranscriptionExtractionStatus | 'processando'
+  created_at: string
+  model: string
+  image_id: string
+  has_raw_output: boolean
+  raw_text: string
+  raw_text_truncated: boolean
+  error_detail?: string | null
+}
+export interface TranscriptionExtractionState {
+  answer_id: string
+  transcription_status: string
+  transcription_version: number
+  text_state: 'VAZIO' | 'RASCUNHO' | 'CONFIRMADA'
+  draft_origin: 'OCR' | 'OCR_EDITADO' | 'MANUAL' | null
+  draft_source_extraction_id: string | null
+  draft_source_raw_text: string | null
+  latest_extraction: LatestTranscriptionExtraction | null
+}
+export const getTranscriptionExtractionState = (answerId: string) =>
+  request<TranscriptionExtractionState>(`/answers/${encodeURIComponent(answerId)}/transcription/extractions`)
 // Download autenticado (Bearer): a imagem nunca é servida por URL pública.
 export async function downloadAnswerImage(imageId: string): Promise<Blob> {
   const response = await send(`/answer-images/${imageId}/download`)

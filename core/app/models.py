@@ -322,6 +322,33 @@ class AnswerImage(Base):
     deleted_by_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True)
 
 
+class TranscriptionExtraction(Base):
+    # Extração OCR/visão experimental (AV-S07B, DEC-AV-046): preserva a saída
+    # bruta do motor e o vínculo com a imagem usada. Distinta do rascunho e da
+    # transcrição confirmada; nunca confirma nem dispara correção.
+    __tablename__ = "transcription_extractions"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    answer_id: Mapped[str] = mapped_column(
+        String, ForeignKey("answers.id"), nullable=False, index=True
+    )
+    answer_image_id: Mapped[str] = mapped_column(
+        String, ForeignKey("answer_images.id"), nullable=False
+    )
+    engine: Mapped[str] = mapped_column(String, nullable=False)  # ex.: ollama-vision
+    model: Mapped[str] = mapped_column(String, nullable=False, default="")
+    config_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    status: Mapped[str] = mapped_column(String, nullable=False)  # processando|ok|vazio|falha
+    raw_output: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Proveniência REAL: versão de transcription_version que ESTA extração
+    # produziu ao preencher o rascunho (NULL se não preencheu). A origem do
+    # rascunho (OCR/OCR_EDITADO/MANUAL) é derivada comparando esta versão com a
+    # versão ATUAL do answer — nunca por igualdade de texto.
+    resulting_transcription_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class CorrectionJob(Base):
     __tablename__ = "correction_jobs"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
